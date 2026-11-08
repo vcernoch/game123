@@ -52,16 +52,35 @@ export function isFree(state, q, r) {
   return isPassable(state, q, r) && !unitAt(state, q, r);
 }
 
-export function incomeOf(state, player) {
-  return state.cities
-    .filter((c) => c.owner === player)
-    .reduce((sum, c) => sum + (c.capital ? ECONOMY.capitalIncome : ECONOMY.cityIncome), 0);
+export const CITY_DEF_BONUS = 0.25;
+
+export function cityIncome(city) {
+  return city.capital ? ECONOMY.capitalIncome : ECONOMY.cityIncome;
 }
 
-// Dosažitelná pole: Map klíč -> cena pohybu. Přes vlastní jednotky lze projít, ale ne zastavit.
-export function reachable(state, unit) {
+export function incomeOf(state, player) {
+  return state.cities.filter((c) => c.owner === player).reduce((sum, c) => sum + cityIncome(c), 0);
+}
+
+// Souhrn pro tooltip města: příjem, bonus obrany posádky (terén + město) a léčení.
+export function cityInfo(state, city) {
+  const t = TERRAIN[tileAt(state, city.q, city.r).terrain];
+  const defMult = (1 + t.defBonus) * (1 + CITY_DEF_BONUS);
+  const garrison = unitAt(state, city.q, city.r) || null;
+  return {
+    income: cityIncome(city),
+    defensePct: Math.round((defMult - 1) * 100),
+    heal: ECONOMY.healInCity,
+    garrison: garrison && garrison.owner === city.owner ? garrison : null,
+  };
+}
+
+// Prohledá dosažitelná pole (Dijkstra). Vrací ceny i předchůdce, aby šla složit trasa.
+// Přes vlastní jednotky lze projít, ale ne zastavit.
+function searchMoves(state, unit) {
   const result = new Map();
-  if (unit.movesLeft <= 0) return result;
+  const parent = new Map();
+  if (unit.movesLeft <= 0) return { result, parent };
   const best = new Map([[key(unit.q, unit.r), 0]]);
   const frontier = [{ q: unit.q, r: unit.r, cost: 0 }];
   while (frontier.length) {
@@ -82,11 +101,40 @@ export function reachable(state, unit) {
       const k = key(n.q, n.r);
       if (best.has(k) && best.get(k) <= cost) continue;
       best.set(k, cost);
+      parent.set(k, key(cur.q, cur.r));
       frontier.push({ q: n.q, r: n.r, cost });
       if (!other) result.set(k, cost);
     }
   }
-  return result;
+  return { result, parent };
+}
+
+// Dosažitelná pole: Map klíč -> cena pohybu.
+export function reachable(state, unit) {
+  return searchMoves(state, unit).result;
+}
+
+// Nejlevnější trasa na cílové pole jako pole {q, r} od startu (včetně) po cíl.
+// Vrací null, pokud cíl není v tomto tahu dosažitelný.
+export function pathTo(state, unit, q, r) {
+  const { result, parent } = searchMoves(state, unit);
+  const target = key(q, r);
+  if (!result.has(target)) return null;
+  const path = [];
+  for (let k = target; k !== undefined; k = parent.get(k)) {
+    const [pq, pr] = k.split(',').map(Number);
+    path.unshift({ q: pq, r: pr });
+  }
+  return path;
+}
+
+// Další vlastní jednotka, která se ještě může hýbat nebo útočit (pro klávesu Tab).
+// Prochází podle id cyklicky za jednotkou afterId; vrací null, když žádná není.
+export function nextActiveUnit(state, player, afterId = null) {
+  const canAct = (u) => u.movesLeft > 0 || attackTargets(state, u).length > 0;
+  const mine = state.units.filter((u) => u.owner === player && canAct(u)).sort((a, b) => a.id - b.id);
+  if (!mine.length) return null;
+  return mine.find((u) => afterId === null || u.id > afterId) || mine[0];
 }
 
 export function attackTargets(state, unit) {
@@ -99,7 +147,7 @@ export function defenseValue(state, unit) {
   const t = tileAt(state, unit.q, unit.r);
   let d = UNIT_TYPES[unit.type].def * (1 + TERRAIN[t.terrain].defBonus);
   const city = cityAt(state, unit.q, unit.r);
-  if (city && city.owner === unit.owner) d *= 1.25;
+  if (city && city.owner === unit.owner) d *= 1 + CITY_DEF_BONUS;
   return d;
 }
 

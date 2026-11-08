@@ -33,7 +33,7 @@ function hexPath(ctx, cx, cy, size) {
   ctx.closePath();
 }
 
-// view = { selectedId, reachable: Map, targets: Set(unitId), hover: {q,r} }
+// view = { selectedId, reachable: Map, targets: Set(unitId), hover: {q,r}, path: [{q,r}] }
 export function render(ctx, state, view = {}) {
   const { w, h } = canvasSize(state);
   ctx.clearRect(0, 0, w, h);
@@ -63,6 +63,8 @@ export function render(ctx, state, view = {}) {
 
   for (const city of state.cities) drawCity(ctx, city);
 
+  if (view.path && view.path.length > 1) drawPath(ctx, view.path);
+
   for (const u of state.units) {
     const c = tileCenter(u.q, u.r);
     drawUnit(ctx, u, c.x, c.y, u.id === view.selectedId, state.current === u.owner);
@@ -76,6 +78,48 @@ export function render(ctx, state, view = {}) {
       ctx.setLineDash([]);
     }
   }
+}
+
+// Trasa pohybu: lomená čára přes středy polí se šipkou v cíli.
+function drawPath(ctx, path) {
+  const pts = path.map((p) => tileCenter(p.q, p.r));
+  const end = pts[pts.length - 1];
+  const prev = pts[pts.length - 2];
+  const ang = Math.atan2(end.y - prev.y, end.x - prev.x);
+  // čára končí kousek před středem, aby hrot šipky byl ostrý
+  const tip = { x: end.x - Math.cos(ang) * 4, y: end.y - Math.sin(ang) * 4 };
+  const base = { x: tip.x - Math.cos(ang) * 12, y: tip.y - Math.sin(ang) * 12 };
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  for (const [color, width] of [['rgba(0,0,0,0.45)', 7], ['#ffe27a', 4]]) {
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length - 1; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.lineTo(base.x, base.y);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.stroke();
+  }
+  ctx.beginPath();
+  ctx.moveTo(tip.x + Math.cos(ang) * 2, tip.y + Math.sin(ang) * 2);
+  ctx.lineTo(base.x + Math.cos(ang + Math.PI / 2) * 8, base.y + Math.sin(ang + Math.PI / 2) * 8);
+  ctx.lineTo(base.x + Math.cos(ang - Math.PI / 2) * 8, base.y + Math.sin(ang - Math.PI / 2) * 8);
+  ctx.closePath();
+  ctx.fillStyle = '#ffe27a';
+  ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+  ctx.lineWidth = 1.5;
+  ctx.fill();
+  ctx.stroke();
+  // tečky na mezilehlých polích
+  ctx.fillStyle = '#ffe27a';
+  for (let i = 1; i < pts.length - 1; i++) {
+    ctx.beginPath();
+    ctx.arc(pts[i].x, pts[i].y, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 function drawTerrainDetail(ctx, terrain, x, y) {
