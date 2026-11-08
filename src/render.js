@@ -33,7 +33,8 @@ function hexPath(ctx, cx, cy, size) {
   ctx.closePath();
 }
 
-// view = { selectedId, reachable: Map, targets: Set(unitId), hover: {q,r}, path: [{q,r}] }
+// view = { selectedId, reachable: Map, targets: Set(unitId), hover: {q,r}, path: [{q,r}],
+//          unitPos: Map(unitId -> {x,y}) pro animace, floaters: [{x,y,text,color,age}] }
 export function render(ctx, state, view = {}) {
   const { w, h } = canvasSize(state);
   ctx.clearRect(0, 0, w, h);
@@ -65,8 +66,11 @@ export function render(ctx, state, view = {}) {
 
   if (view.path && view.path.length > 1) drawPath(ctx, view.path);
 
-  for (const u of state.units) {
-    const c = tileCenter(u.q, u.r);
+  // animované jednotky kreslíme až nakonec, aby byly nad ostatními
+  const moving = view.unitPos || new Map();
+  const units = [...state.units].sort((a, b) => moving.has(a.id) - moving.has(b.id));
+  for (const u of units) {
+    const c = moving.get(u.id) || tileCenter(u.q, u.r);
     drawUnit(ctx, u, c.x, c.y, u.id === view.selectedId, state.current === u.owner);
     if (view.targets && view.targets.has(u.id)) {
       ctx.beginPath();
@@ -78,6 +82,24 @@ export function render(ctx, state, view = {}) {
       ctx.setLineDash([]);
     }
   }
+
+  for (const f of view.floaters || []) drawFloater(ctx, f);
+}
+
+// Plovoucí text (poškození, dobytí): stoupá a mizí, age je 0..1.
+function drawFloater(ctx, f) {
+  ctx.save();
+  ctx.globalAlpha = Math.max(0, 1 - f.age);
+  ctx.font = 'bold 16px system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const y = f.y - 14 - f.age * 22;
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = 'rgba(0,0,0,0.8)';
+  ctx.strokeText(f.text, f.x, y);
+  ctx.fillStyle = f.color;
+  ctx.fillText(f.text, f.x, y);
+  ctx.restore();
 }
 
 // Trasa pohybu: lomená čára přes středy polí se šipkou v cíli.

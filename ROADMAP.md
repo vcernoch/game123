@@ -11,7 +11,7 @@ Odškrtávej `[x]` po dokončení. Nové nápady přidávej na konec příslušn
 
 ## Fáze 1 – hratelnost
 - [x] Šipka/cesta ukazující trasu při najetí na cílové pole
-- [ ] Animace pohybu a útoku (krátké, aby AI tah byl čitelný)
+- [x] Animace pohybu a útoku (krátké, aby AI tah byl čitelný)
 - [ ] Mlha války: vidíš jen okolí svých jednotek a měst
 - [x] Tlačítko „další jednotka s pohybem“ (Tab)
 - [x] Zobrazení příjmu a obrany u města při najetí myší

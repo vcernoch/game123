@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   createGame, reachable, moveUnit, attack, buyUnit, endTurn, unitAt, isPassable,
   previewAttack, cloneState, pathTo, nextActiveUnit, tileAt, cityInfo, incomeOf, defenseValue,
+  drainEvents, applyEvent, migrateState, STATE_VERSION,
 } from '../src/game.js';
 import { runAITurn } from '../src/ai.js';
 import { pathExists } from '../src/map.js';
@@ -160,4 +161,55 @@ test('informace o městě souhlasí s příjmem a obranou', () => {
   assert.equal(Math.round((mult - 1) * 100), info.defensePct);
   const neutral = s.cities.find((c) => c.owner === null);
   assert.equal(cityInfo(s, neutral).garrison, null);
+});
+
+// shrnutí, které musí po přehrání událostí sedět
+const snapshot = (s) => ({
+  units: s.units.map((u) => [u.id, u.type, u.owner, u.q, u.r, u.hp]).sort((a, b) => a[0] - b[0]),
+  cities: s.cities.map((c) => [c.id, c.owner]),
+});
+
+test('přehrání událostí AI tahu dá stejný stav jako skutečný tah', () => {
+  for (const seed of [1, 4, 8, 15]) {
+    const s = createGame({ seed });
+    let checkedAttack = false;
+    for (let i = 0; i < 60 && s.winner === null; i++) {
+      drainEvents(s);
+      const before = cloneState(s);
+      runAITurn(s);
+      const evs = drainEvents(s);
+      for (const ev of evs) applyEvent(before, ev);
+      assert.deepEqual(snapshot(before), snapshot(s), `seed ${seed}, krok ${i}`);
+      if (evs.some((e) => e.type === 'attack')) checkedAttack = true;
+      assert.doesNotThrow(() => JSON.stringify(evs));
+      endTurn(s);
+    }
+    assert.ok(checkedAttack, `seed ${seed}: v simulaci žádný útok`);
+  }
+});
+
+test('pohyb zapisuje trasu do události a stav zůstává serializovatelný', () => {
+  const s = createGame({ seed: 7 });
+  assert.equal(s.version, STATE_VERSION);
+  assert.deepEqual(s.events, []);
+  const u = s.units.find((x) => x.owner === 0);
+  const [k] = reachable(s, u).keys();
+  const [q, r] = k.split(',').map(Number);
+  moveUnit(s, u.id, q, r);
+  const [ev] = drainEvents(s);
+  assert.equal(ev.type, 'move');
+  assert.deepEqual(ev.path[ev.path.length - 1], { q, r });
+  assert.deepEqual(s.events, []);
+  assert.deepEqual(JSON.parse(JSON.stringify(s)), s);
+});
+
+test('starý uložený stav (verze 1) se převede, neznámý se zahodí', () => {
+  const old = createGame({ seed: 2 });
+  old.version = 1;
+  delete old.events;
+  const m = migrateState(old);
+  assert.equal(m.version, STATE_VERSION);
+  assert.deepEqual(m.events, []);
+  assert.equal(migrateState({ version: 99 }), null);
+  assert.equal(migrateState(null), null);
 });

@@ -2,6 +2,14 @@
 
 Nejnovější záznam nahoře. Formát: datum – co se udělalo – stav testů – otázky pro Vladimíra.
 
+## 2026-11-08 – Animace pohybu a útoku
+- Akce v `game.js` zapisují události do `state.events` (pohyb s trasou, útok s poškozením, verbování, dobytí). `drainEvents()` je vybere, `applyEvent()` je umí přehrát na kopii stavu.
+- Nový `src/anim.js`: přehrává události nad kopií stavu z doby před akcí – jednotky jdou po trase krok za krokem, útočník udělá výpad, nad cíli vyskočí čísla poškození, u dobytí „Dobyto!“. Animuje se tah AI i akce hráče.
+- Klik do mapy nebo Esc animaci přeskočí; při `prefers-reduced-motion` se neanimuje vůbec.
+- Struktura stavu: `state.version` zvýšena na 2 (pole `events`). `migrateState()` převede uložené hry verze 1, takže rozehrané hry se neztratí.
+- Testy: +3 logické (přehrání událostí AI tahu dává přesně stejný stav jako skutečný tah na 4 seedech, událost pohybu nese trasu, migrace verze 1). Smoke test jede animace zrychleně, uloží snímek uprostřed tahu AI (`artifacts/screenshot-anim.png`) a ověří pohyb jednotky kliknutím.
+- Stav: `npm run check` zelený (13 logických testů + smoke).
+
 ## 2026-11-08 – Příjem a obrana města při najetí
 - `cityInfo()` a `cityIncome()` v `game.js`; bonus obrany města je konstanta `CITY_DEF_BONUS` (dřív natvrdo 1.25 v `defenseValue`).
 - Tooltip u města (vlastník, příjem, obrana posádky, posádka) + stejné údaje v bočním panelu při najetí i při výběru města.

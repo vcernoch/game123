@@ -24,6 +24,7 @@ try {
   await page.goto(url);
   await page.waitForFunction(() => window.__game);
   await page.evaluate(() => window.__game.newGame(12345));
+  await page.evaluate(() => window.__game.setAnimSpeed(0.25));
 
   // klik na hráčovu jednotku a na pole, kam může jít
   const box = await page.locator('#board').boundingBox();
@@ -83,6 +84,40 @@ try {
   const tipText = await page.evaluate(() => !document.getElementById('tooltip').hidden && document.getElementById('tooltip').textContent);
   if (!tipText || !tipText.includes('zl./kolo')) throw new Error(`tooltip města chybí: ${tipText}`);
   await page.screenshot({ path: 'artifacts/screenshot-city.png' });
+
+  // tah AI v plné rychlosti: zachytit snímek uprostřed animace
+  await page.evaluate(() => window.__game.setAnimSpeed(1));
+  const unitsBefore = await page.evaluate(() => window.__game.getState().units.length);
+  await page.evaluate(() => window.__game.endTurn());
+  await page.waitForFunction(() => window.__game.isBusy(), null, { timeout: 2000 });
+  await page.waitForTimeout(900);
+  await page.screenshot({ path: 'artifacts/screenshot-anim.png' });
+  await page.waitForFunction(() => !window.__game.isBusy(), null, { timeout: 15000 });
+  if (unitsBefore === 0) throw new Error('žádné jednotky');
+
+  // pohyb hráče: po animaci stojí jednotka na cíli
+  const moved = await page.evaluate(async () => {
+    const g = await import('./src/game.js');
+    const rnd = await import('./src/render.js');
+    const st = window.__game.getState();
+    if (st.winner !== null) return { skip: true };
+    window.__game.nextUnit();
+    const u = g.getUnit(st, window.__game.selectedId());
+    if (!u) return { skip: true };
+    const [k] = g.reachable(st, u).keys();
+    if (!k) return { skip: true };
+    const [q, r] = k.split(',').map(Number);
+    const c = rnd.tileCenter(q, r);
+    const rect = document.getElementById('board').getBoundingClientRect();
+    const s = rect.width / rnd.canvasSize(st).w;
+    return { id: u.id, q, r, x: rect.left + c.x * s, y: rect.top + c.y * s };
+  });
+  if (!moved.skip) {
+    await page.mouse.click(moved.x, moved.y);
+    await page.waitForFunction(() => !window.__game.isBusy(), null, { timeout: 5000 });
+    const at = await page.evaluate((id) => window.__game.getState().units.find((u) => u.id === id), moved.id);
+    if (!at || at.q !== moved.q || at.r !== moved.r) throw new Error('jednotka se nepřesunula kliknutím');
+  }
 
   // mobilní šířka – žádný vodorovný scroll
   await page.setViewportSize({ width: 390, height: 844 });
