@@ -4,9 +4,11 @@ import {
   createGame, reachable, moveUnit, attack, buyUnit, endTurn, unitAt, isPassable,
   previewAttack, cloneState, pathTo, nextActiveUnit, tileAt, cityInfo, incomeOf, defenseValue,
   drainEvents, applyEvent, migrateState, STATE_VERSION,
-  visibleTiles, exploredTiles, build, unitCost, rankOf, stepCost,
+  visibleTiles, exploredTiles, build, unitCost, rankOf, stepCost, getUnit,
 } from '../src/game.js';
-import { runAITurn, goalsFor, buildSomething, pickRecruit } from '../src/ai.js';
+import {
+  runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
+} from '../src/ai.js';
 import { decideTap } from '../src/input.js';
 import { readFileSync } from 'node:fs';
 import { GAME_VERSION, GAME_DATE } from '../src/version.js';
@@ -521,3 +523,62 @@ test('silnice spojují všechna města a zrychlují pohyb', () => {
   for (const t of Object.values(old.tiles)) delete t.road;
   assert.equal(migrateState(old).version, STATE_VERSION);
 });
+
+test('lepší AI: ohrožené prázdné město dostane posádku', () => {
+  const s = createGame({ seed: 3, fog: false, difficulty: 'hard' });
+  endTurn(s); // na tahu je AI a její jednotky mají body pohybu
+  const city = s.cities.find((c) => c.owner === 1 && c.capital);
+  const inCity = unitAt(s, city.q, city.r);
+  // vyklidit město: jednotku přesuneme na volné sousední pole
+  const out = neighbors(city.q, city.r).find((n) => isPassable(s, n.q, n.r) && !unitAt(s, n.q, n.r));
+  inCity.q = out.q; inCity.r = out.r;
+  // nepřítel dvě pole od města
+  const spot = Object.values(s.tiles).find((t) => distance(t, city) === 2 && isPassable(s, t.q, t.r) && !unitAt(s, t.q, t.r) && !s.cities.some((c) => c.q === t.q && c.r === t.r));
+  s.units.push({ id: 700, type: 'warrior', owner: 0, q: spot.q, r: spot.r, hp: 10, movesLeft: 0, hasAttacked: true, xp: 0 });
+  const g = assignGarrisons(s, 1);
+  assert.ok([...g.values()].some((c) => c.id === city.id), 'město má přidělenou posádku');
+  runAITurn(s);
+  const holder = unitAt(s, city.q, city.r);
+  assert.ok(holder && holder.owner === 1, 'po tahu AI v městě stojí její jednotka');
+});
+
+test('lepší AI: těžce zraněná jednotka ustoupí místo útoku', () => {
+  const { s, me, foe } = duel(5, 'warrior', 'warrior');
+  // AI je hráč 1 => otočíme role: foe patří AI a je skoro mrtvý
+  s.current = 1;
+  s.difficulty = 'hard';
+  foe.hp = 2;
+  foe.movesLeft = 2;
+  foe.hasAttacked = false;
+  me.hp = 10;
+  assert.ok(isWounded(foe));
+  const before = distance(foe, me);
+  runAITurn(s);
+  const after = getUnit(s, foe.id);
+  assert.ok(after, 'zraněná jednotka přežila tah');
+  assert.equal(me.hp, 10, 'nezaútočila sebevražedně');
+  assert.ok(distance(after, me) >= before, 'odstoupila');
+});
+
+test('lepší AI: dojde na výhodné pole a dorazí oslabeného nepřítele', () => {
+  const { s, me, foe } = duel(5, 'warrior', 'horseman');
+  s.current = 1;
+  s.difficulty = 'hard';
+  // AI jezdec (foe) stojí dál; náš válečník je oslabený – AI by měla dojet a zničit ho
+  me.hp = 2;
+  const far = Object.values(s.tiles).find((t) => distance(t, me) === 3 && isPassable(s, t.q, t.r) && reachableFrom(s, foe, t));
+  foe.q = far.q; foe.r = far.r;
+  foe.movesLeft = UNIT_TYPES.horseman.move;
+  foe.hasAttacked = false;
+  assert.ok(planStrike(s, foe));
+  assert.equal(getUnit(s, me.id), undefined, 'oslabený válečník zničen');
+});
+
+// pomocník: dá se na pole t dojet (bez ohledu na to, kdo zrovna táhne)
+function reachableFrom(s, unit, t) {
+  const saved = { q: unit.q, r: unit.r };
+  unit.q = t.q; unit.r = t.r;
+  const ok = isPassable(s, t.q, t.r) && !s.units.some((u) => u !== unit && u.q === t.q && u.r === t.r);
+  unit.q = saved.q; unit.r = saved.r;
+  return ok;
+}

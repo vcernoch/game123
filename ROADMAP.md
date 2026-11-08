@@ -23,7 +23,7 @@ Odškrtávej `[x]` po dokončení. Nové nápady přidávej na konec příslušn
 - [x] Zkušenosti jednotek a povýšení
 - [x] Nové jednotky: obléhací stroj, kopiník (bonus proti jezdcům)
 - [x] Silnice nebo řeky ovlivňující pohyb (silnice; řeky zatím ne – viz Nápady)
-- [ ] Lepší AI: obrana vlastních měst, soustředění sil, ústup zraněných
+- [x] Lepší AI: obrana vlastních měst, soustředění sil, ústup zraněných
 - [ ] Více frakcí s odlišnými bonusy
 
 ## Fáze 3 – obsah a lesk

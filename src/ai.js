@@ -17,18 +17,130 @@ export function aiKnowledge(state, me) {
 export function runAITurn(state) {
   const me = state.current;
   recruit(state, me);
-  const ids = state.units.filter((u) => u.owner === me).map((u) => u.id);
+  const know = aiKnowledge(state, me);
+  const garrisons = assignGarrisons(state, me, know);
+  // střelci a katapulty jdou první, ať boj na blízko dokončí oslabené cíle (soustředění palby)
+  const ids = state.units
+    .filter((u) => u.owner === me)
+    .sort((a, b) => UNIT_TYPES[b.type].range - UNIT_TYPES[a.type].range || a.id - b.id)
+    .map((u) => u.id);
   for (const id of ids) {
     if (state.winner !== null) return;
     const unit = getUnit(state, id);
     if (!unit) continue;
-    if (tryBestAttack(state, unit)) continue;
-    moveTowardsGoal(state, unit);
-    const after = getUnit(state, id);
-    if (after) tryBestAttack(state, after);
+    if (garrisons.has(id)) {
+      holdCity(state, unit, garrisons.get(id));
+    } else if (isWounded(unit) && enemiesNear(state, unit, know, 3).length) {
+      retreat(state, unit, know);
+    } else {
+      if (planStrike(state, unit, know)) continue;
+      if (tryBestAttack(state, unit)) continue;
+      moveTowardsGoal(state, unit);
+      const after = getUnit(state, id);
+      if (after) tryBestAttack(state, after);
+    }
   }
   recruit(state, me);
   buildSomething(state, me);
+}
+
+// Najde nejlepší kombinaci „dojdi na pole a zaútoč“. Pozice útočníka ovlivňuje protiúder
+// (terén) i dostřel, proto se útok zkusmo vyhodnotí z každého dosažitelného pole.
+export function planStrike(state, unit, know = aiKnowledge(state, unit.owner)) {
+  const range = UNIT_TYPES[unit.type].range;
+  const targets = state.units.filter((u) => u.owner !== unit.owner && know.sees(u.q, u.r));
+  if (!targets.length || unit.hasAttacked) return false;
+  const spots = [[key(unit.q, unit.r), 0], ...reachable(state, unit)];
+  const home = { q: unit.q, r: unit.r };
+  let best = null;
+  for (const [k] of spots) {
+    const [q, r] = k.split(',').map(Number);
+    const near = targets.filter((t) => distance(t, { q, r }) <= range);
+    if (!near.length) continue;
+    unit.q = q; unit.r = r; // zkusmo – hned se vrací zpět
+    for (const t of near) {
+      const s = scoreAttack(state, unit, t) + TERRAIN[tileAt(state, q, r).terrain].defBonus;
+      if (s > 0 && (!best || s > best.s)) best = { s, q, r, t };
+    }
+    unit.q = home.q; unit.r = home.r;
+  }
+  if (!best) return false;
+  if (best.q !== unit.q || best.r !== unit.r) moveUnit(state, unit.id, best.q, best.r);
+  const u = getUnit(state, unit.id);
+  return !!u && attack(state, u.id, best.t.id);
+}
+
+const WOUNDED = 0.25; // pod tímto podílem životů jednotka ustupuje
+const THREAT_RADIUS = 2; // nepřítel tak blízko města = město potřebuje posádku
+
+export const isWounded = (u) => u.hp / UNIT_TYPES[u.type].hp <= WOUNDED;
+
+function enemiesNear(state, unit, know, radius) {
+  return state.units.filter((u) => u.owner !== unit.owner && know.sees(u.q, u.r) && distance(u, unit) <= radius);
+}
+
+// Ohrožená vlastní města (viditelný nepřítel do THREAT_RADIUS polí) dostanou posádku:
+// buď tam už někdo stojí, nebo nejbližší jednotka, která to stihne v tomto tahu.
+// Vrací Map id jednotky -> město.
+export function assignGarrisons(state, me, know = aiKnowledge(state, me)) {
+  const result = new Map();
+  const taken = new Set();
+  for (const city of state.cities.filter((c) => c.owner === me)) {
+    const threat = state.units.some((u) => u.owner !== me && know.sees(u.q, u.r) && distance(u, city) <= THREAT_RADIUS);
+    if (!threat) continue;
+    const here = unitAt(state, city.q, city.r);
+    if (here && here.owner === me) {
+      result.set(here.id, city);
+      taken.add(here.id);
+      continue;
+    }
+    if (here) continue; // město drží nepřítel
+    let best = null;
+    let bestCost = Infinity;
+    for (const u of state.units) {
+      if (u.owner !== me || taken.has(u.id) || UNIT_TYPES[u.type].siege) continue;
+      const cost = reachable(state, u).get(key(city.q, city.r));
+      if (cost !== undefined && cost < bestCost) { bestCost = cost; best = u; }
+    }
+    if (best) {
+      result.set(best.id, city);
+      taken.add(best.id);
+    }
+  }
+  return result;
+}
+
+// Posádka: dojde do města a zůstane v něm; z města normálně útočí (měřeno: pasivní posádka hrála hůř).
+function holdCity(state, unit, city) {
+  if (unit.q !== city.q || unit.r !== city.r) moveUnit(state, unit.id, city.q, city.r);
+  const u = getUnit(state, unit.id);
+  if (u) tryBestAttack(state, u);
+}
+
+// Zraněná jednotka ustoupí do vlastního města, nebo co nejdál od nepřátel. Útočí jen na jistý zásah.
+function retreat(state, unit, know) {
+  const here = state.cities.find((c) => c.q === unit.q && c.r === unit.r && c.owner === unit.owner);
+  if (!here) {
+    const options = reachable(state, unit);
+    const enemies = enemiesNear(state, unit, know, 6);
+    let bestKey = null;
+    let bestScore = -Infinity;
+    for (const k of options.keys()) {
+      const [q, r] = k.split(',').map(Number);
+      const city = state.cities.find((c) => c.q === q && c.r === r);
+      if (city && city.owner !== unit.owner) continue; // neustupovat do cizího města
+      const minDist = Math.min(...enemies.map((e) => distance(e, { q, r })), 9);
+      let s = minDist + TERRAIN[tileAt(state, q, r).terrain].defBonus * 2;
+      if (city) s += 10; // vlastní město léčí a brání
+      if (s > bestScore) { bestScore = s; bestKey = k; }
+    }
+    if (bestKey) {
+      const [q, r] = bestKey.split(',').map(Number);
+      moveUnit(state, unit.id, q, r);
+    }
+  }
+  const u = getUnit(state, unit.id);
+  if (u) tryBestAttack(state, u, { safeOnly: true });
 }
 
 // Stavby z přebytku zlata: ohrožené město dostane hradby, jinak trh a kasárna (hlavní město napřed).
@@ -54,14 +166,22 @@ function scoreAttack(state, unit, target) {
   if (p.dies && !p.kills) return -Infinity;
   let s = p.damage * 2 - p.counter * 1.5 * difficultyOf(state, unit.owner).caution;
   if (p.kills) s += 10;
+  // soustředění: raději dorazit oslabený cíl a cennější jednotky
+  s += (1 - target.hp / UNIT_TYPES[target.type].hp) * 3;
+  s += UNIT_TYPES[target.type].cost / 10;
   return s;
 }
 
-function tryBestAttack(state, unit) {
+// safeOnly: jen útoky, které cíl zničí nebo nedostanou protiúder.
+function tryBestAttack(state, unit, { safeOnly = false } = {}) {
   const targets = attackTargets(state, unit);
   let best = null;
   let bestScore = 0;
   for (const t of targets) {
+    if (safeOnly) {
+      const p = previewAttack(state, unit, t);
+      if (!p.kills && p.counter > 0) continue;
+    }
     const s = scoreAttack(state, unit, t);
     if (s > bestScore) {
       bestScore = s;

@@ -2,6 +2,15 @@
 
 Nejnovější záznam nahoře. Formát: datum – co se udělalo – stav testů – otázky pro Vladimíra.
 
+## 2026-11-08 – Lepší AI
+- `planStrike()`: AI zkusí útok z každého dosažitelného pole a vybere nejlepší kombinaci „dojdi a zaútoč“ (terén ovlivňuje protiúder).
+- Soustředění: střelci a katapulty táhnou první, hodnocení útoku preferuje oslabené a dražší cíle, takže boj na blízko dorazí, co střelci nahlodali.
+- Obrana měst: `assignGarrisons()` – když je viditelný nepřítel do 2 polí od vlastního města, zůstane v něm jednotka, nebo tam dojde nejbližší, která to stihne. Posádka z města normálně útočí.
+- Ústup: jednotka pod 25 % životů s nepřítelem poblíž ustoupí do vlastního města nebo co nejdál od nepřátel a útočí jen na jistý zásah.
+- Měření (dočasný skript, není v repu): nová AI proti předchozí na 100 seedech × obě strany = **118 z 200 výher (59 %)**. Vyzkoušené a zamítnuté varianty: pasivní posádka (jen bezpečné útoky) – výrazně horší (21/60); hlídání ohrožení do 3 polí – horší; soudržnost armády (penalizace vystavených polí) – bez efektu; ústup od 40 % životů – mírně horší. Proto jsou zvolené prahy 2 pole a 25 %.
+- Testy: +3 logické (ohrožené prázdné město dostane posádku a po tahu ji má; těžce zraněná jednotka ustoupí a nezaútočí; jezdec dojede a dorazí oslabeného válečníka).
+- Stav: `npm run check` zelený (30 logických testů + smoke).
+
 ## 2026-11-08 – Silnice
 - Generátor mapy staví silnice: minimální kostra mezi všemi městy, každý úsek vede nejlevnější cestou terénem a slévá se s už hotovou silnicí (`buildRoads` v `map.js`). Mapa zůstává deterministická podle seedu.
 - `stepCost()` v `game.js`: krok ze silnice na silnici stojí `ROAD_COST` = 0,5 bodu pohybu (jinak terén cílového pole). Trasa, dosah i AI to používají automaticky.
