@@ -145,6 +145,11 @@ try {
   if (!hasMarket) throw new Error('trh se nepostavil');
   await page.screenshot({ path: 'artifacts/screenshot-city-panel.png' });
 
+  // přepínač zvuku
+  await page.click('#sound');
+  if ((await page.getAttribute('#sound', 'aria-pressed')) !== 'false') throw new Error('zvuk nejde vypnout');
+  await page.click('#sound');
+
   // dialog nové hry: těžká obtížnost bez mlhy
   await page.click('#new-game');
   await page.waitForSelector('#new-game-dialog[open]');

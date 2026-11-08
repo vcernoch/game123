@@ -7,6 +7,7 @@ import {
 } from './game.js';
 import { createAnimator } from './anim.js';
 import { decideTap } from './input.js';
+import { createSound, soundFor } from './sound.js';
 import { GAME_VERSION, GAME_DATE } from './version.js';
 import { runAITurn } from './ai.js';
 import { render, canvasSize, pickHex } from './render.js';
@@ -29,7 +30,14 @@ let hover = null;
 let aiRunning = false;
 let pending = null;        // dotyk: cíl čekající na potvrzení druhým klepnutím
 let lastPointer = 'mouse'; // typ posledního ukazatele (mouse / touch / pen)
-const anim = createAnimator(drawBoard, (st, q, r) => visibleTiles(st, 0).has(key(q, r)));
+const sound = createSound();
+sound.enabled = loadPrefs().sound !== false;
+const anim = createAnimator(
+  drawBoard,
+  (st, q, r) => visibleTiles(st, 0).has(key(q, r)),
+  (ev) => sound.play(soundFor(ev, 0)),
+);
+let lastWinner = state.winner;
 try {
   if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) anim.speed = 0;
 } catch { /* starý prohlížeč */ }
@@ -187,6 +195,12 @@ function updateHud() {
   $('log').innerHTML = state.log.slice(-8).reverse().map((l) => `<li><b>${l.turn}.</b> ${l.msg}</li>`).join('');
 
   const banner = $('banner');
+  // znělka konce hry: jednou, až doběhne animace posledního tahu
+  if (state.winner === null) lastWinner = null;
+  else if (lastWinner === null && !busy()) {
+    lastWinner = state.winner;
+    sound.play(state.winner === 0 ? 'victory' : 'defeat');
+  }
   if (state.winner !== null) {
     banner.hidden = false;
     banner.textContent = state.winner === 0 ? 'Vítězství! Dobyl jsi nepřátelskou pevnost.' : 'Porážka. AI dobyla tvoje města.';
@@ -357,9 +371,25 @@ $('new-game-dialog').addEventListener('close', () => {
     faction: form.elements.faction.value,
     size: form.elements.size.value,
   };
-  savePrefs(options);
+  savePrefs({ ...loadPrefs(), ...options });
   startNewGame(options);
 });
+
+// zvuk: odemknout AudioContext prvním gestem a přepínač v záhlaví
+window.addEventListener('pointerdown', () => sound.unlock(), { once: true });
+window.addEventListener('keydown', () => sound.unlock(), { once: true });
+function updateSoundButton() {
+  $('sound').textContent = sound.enabled ? '♪' : '♪̸';
+  $('sound').setAttribute('aria-pressed', String(sound.enabled));
+  $('sound').title = sound.enabled ? 'Zvuk zapnutý (klikni pro vypnutí)' : 'Zvuk vypnutý (klikni pro zapnutí)';
+}
+$('sound').addEventListener('click', () => {
+  sound.enabled = !sound.enabled;
+  savePrefs({ ...loadPrefs(), sound: sound.enabled });
+  updateSoundButton();
+  sound.play('click');
+});
+updateSoundButton();
 
 for (const type of ['pointerdown', 'pointermove']) {
   canvas.addEventListener(type, (ev) => { lastPointer = ev.pointerType || 'mouse'; });
@@ -379,12 +409,12 @@ $('next-unit').addEventListener('click', selectNextUnit);
 $('info').addEventListener('click', (ev) => {
   const bBtn = ev.target.closest('button[data-build]');
   if (bBtn && selectedCityId && !busy()) {
-    if (build(state, selectedCityId, bBtn.dataset.build)) { drainEvents(state); afterAction(); }
+    if (build(state, selectedCityId, bBtn.dataset.build)) { drainEvents(state); sound.play('build'); afterAction(); }
     return;
   }
   const btn = ev.target.closest('button[data-buy]');
   if (!btn || !selectedCityId) return;
-  if (!busy() && buyUnit(state, selectedCityId, btn.dataset.buy)) afterAction();
+  if (!busy() && buyUnit(state, selectedCityId, btn.dataset.buy)) { sound.play('recruit'); afterAction(); }
 });
 window.addEventListener('keydown', (ev) => {
   if ($('new-game-dialog').open) return; // klávesy patří dialogu

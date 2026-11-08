@@ -13,6 +13,7 @@ Hraje se proti AI na hexové mapě. Kód a texty ve hře jsou česky.
 - `src/ai.js` – AI protivník
 - `src/render.js` – kreslení na canvas
 - `src/input.js` – co znamená klik/klepnutí na pole (čistá funkce, dotyk s potvrzením)
+- `src/sound.js` – zvukové efekty syntetizované přes WebAudio (bez nahrávek)
 - `src/anim.js` – přehrávání herních událostí (`state.events`) jako animací
 - `src/version.js` – verze hry zobrazená v záhlaví (musí sedět s `package.json`)
 - `src/main.js` – ovládání, HUD, ukládání do localStorage, háček `window.__game` pro testy

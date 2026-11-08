@@ -14,7 +14,8 @@ const ease = (t) => (t < 0.5 ? 2 * t * t : 1 - 2 * (1 - t) * (1 - t));
 
 // redraw: překreslí jen plátno (HUD se během animace nepřepisuje, aby nemizela tlačítka).
 // isVisible(state, q, r): jestli hráč u obrazovky pole vidí – co je v mlze, se neanimuje.
-export function createAnimator(redraw, isVisible = () => true) {
+// onShow(ev): zavolá se pro každou viditelnou událost, když začne její animace (zvuky).
+export function createAnimator(redraw, isVisible = () => true, onShow = () => {}) {
   const a = {
     display: null,        // stav, který se právě kreslí (null = skutečný stav)
     unitPos: new Map(),   // id jednotky -> {x, y} během pohybu
@@ -111,7 +112,10 @@ export function createAnimator(redraw, isVisible = () => true) {
       const shown = eventVisible(a.display, ev);
       // nová jednotka a dobytí se nejdřív ukážou, pak se chvíli čeká
       if (ev.type === 'spawn' || ev.type === 'capture') applyEvent(a.display, ev);
-      if (shown) await animate(ev);
+      if (shown) {
+        onShow(ev);
+        await animate(ev);
+      }
       if (ev.type !== 'spawn' && ev.type !== 'capture') applyEvent(a.display, ev);
       a.unitPos.clear();
     }

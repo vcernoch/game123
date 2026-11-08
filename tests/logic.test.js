@@ -11,6 +11,7 @@ import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
 } from '../src/ai.js';
 import { decideTap } from '../src/input.js';
+import { soundFor, createLimiter, createSound, SOUND_NAMES } from '../src/sound.js';
 import { readFileSync } from 'node:fs';
 import { GAME_VERSION, GAME_DATE } from '../src/version.js';
 import { pathExists } from '../src/map.js';
@@ -661,4 +662,32 @@ test('velikosti mapy: všechny se vygenerují propojené a hra na nich doběhne'
     assert.ok(g.winner !== null || g.turn > 150, `${size}: hra se zasekla`);
   }
   assert.equal(createGame({ seed: 1, size: 'nesmysl' }).cols, 14);
+});
+
+test('zvuky: každá událost má zvuk a omezovač brání kakofonii', () => {
+  assert.equal(soundFor({ type: 'move' }), 'step');
+  assert.equal(soundFor({ type: 'attack', killed: true }), 'kill');
+  assert.equal(soundFor({ type: 'attack' }), 'hit');
+  assert.equal(soundFor({ type: 'attack', promoted: true }), 'promote');
+  assert.equal(soundFor({ type: 'capture', owner: 0 }, 0), 'capture');
+  assert.equal(soundFor({ type: 'capture', owner: 1 }, 0), 'lose');
+  assert.equal(soundFor({ type: 'nic' }), null);
+  // všechny události, které hra vyrobí, mají existující zvuk
+  const s = createGame({ seed: 4, fog: false });
+  for (let i = 0; i < 40 && s.winner === null; i++) {
+    runAITurn(s);
+    for (const ev of drainEvents(s)) {
+      const name = soundFor(ev);
+      assert.ok(name && SOUND_NAMES.includes(name), `událost ${ev.type} bez zvuku`);
+    }
+    endTurn(s);
+  }
+  const limit = createLimiter(100);
+  assert.ok(limit('hit', 0));
+  assert.ok(!limit('hit', 50), 'stejný zvuk hned znovu ne');
+  assert.ok(limit('step', 50), 'jiný zvuk ano');
+  assert.ok(limit('hit', 150));
+  // v Node není AudioContext – přehrání nesmí spadnout
+  const snd = createSound();
+  assert.doesNotThrow(() => snd.play('hit'));
 });

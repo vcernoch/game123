@@ -2,6 +2,14 @@
 
 Nejnovější záznam nahoře. Formát: datum – co se udělalo – stav testů – otázky pro Vladimíra.
 
+## 2026-11-08 – Zvukové efekty
+- Nový `src/sound.js`: všechny zvuky se syntetizují (oscilátory + filtrovaný šum), žádné nahrávky ani externí soubory. Zvuky: krok, zásah, zničení, povýšení, dobytí/ztráta města, stavba, verbování, klik, znělka vítězství a porážky.
+- `soundFor(event)` mapuje herní události na zvuky; animátor má nový callback `onShow`, takže zní jen to, co hráč skutečně vidí (ne tahy AI v mlze). Omezovač pustí stejný zvuk nejvýš jednou za 90 ms (přeskočená animace nespustí kakofonii).
+- `AudioContext` vzniká až při prvním gestu (pravidla prohlížečů); modul jde importovat i v Node.
+- Přepínač ♪ vedle názvu hry; volba se pamatuje v localStorage.
+- Testy: +1 logický (mapování událostí, každá událost z reálné hry má existující zvuk, omezovač, přehrání bez AudioContextu nespadne). Smoke test přepne zvuk tam a zpět.
+- Stav: `npm run check` zelený (34 logických testů + smoke).
+
 ## 2026-11-08 – Hlavní menu a velikost mapy
 - `MAP_SIZES` v `rules.js`: Malá 10×8 (4 města), Střední 14×10 (6), Velká 20×14 (10). `createGame({ size })`.
 - Při první návštěvě (bez uložené hry) se dialog nové hry otevře sám jako hlavní menu (bez varování o ztrátě hry). Volby velikosti se generují z `rules.js` a pamatují se.

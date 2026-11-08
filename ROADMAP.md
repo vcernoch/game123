@@ -29,7 +29,7 @@ Odškrtávej `[x]` po dokončení. Nové nápady přidávej na konec příslušn
 ## Fáze 3 – obsah a lesk
 - [x] Hlavní menu, volba velikosti mapy
 - [ ] Více AI soupeřů (kód teď počítá se dvěma hráči – větší přestavba, vč. vítězství a diplomacie)
-- [ ] Zvukové efekty generované přes WebAudio
+- [x] Zvukové efekty generované přes WebAudio
 - [ ] Statistiky na konci hry (graf síly v čase)
 - [ ] Kampaň nebo scénáře s cíli
 
