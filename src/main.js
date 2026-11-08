@@ -5,6 +5,7 @@ import {
   cloneState, drainEvents, migrateState, visibleTiles, exploredTiles,
 } from './game.js';
 import { createAnimator } from './anim.js';
+import { GAME_VERSION, GAME_DATE } from './version.js';
 import { runAITurn } from './ai.js';
 import { render, canvasSize, pickHex } from './render.js';
 import { key } from './hex.js';
@@ -305,9 +306,13 @@ window.__game = {
   nextUnit: selectNextUnit,
   selectedId: () => selectedId,
   isBusy: busy,
+  version: GAME_VERSION,
   setAnimSpeed: (x) => { anim.speed = x; },
   newGame: (seed) => { state = createGame({ seed }); resize(); draw(); },
 };
+
+$('version').textContent = `v${GAME_VERSION}`;
+$('version').title = `Verze ${GAME_VERSION} z ${GAME_DATE}`;
 
 resize();
 draw();

@@ -7,6 +7,8 @@ import {
   visibleTiles, exploredTiles,
 } from '../src/game.js';
 import { runAITurn } from '../src/ai.js';
+import { readFileSync } from 'node:fs';
+import { GAME_VERSION, GAME_DATE } from '../src/version.js';
 import { pathExists } from '../src/map.js';
 import { distance, key } from '../src/hex.js';
 import { UNIT_TYPES, TERRAIN } from '../src/rules.js';
@@ -249,4 +251,11 @@ test('mlha války: vidíš okolí svých jednotek a měst, prozkoumané se pamat
   assert.equal(visibleTiles(open, 0).size, Object.keys(open.tiles).length);
   s.winner = 0;
   assert.equal(visibleTiles(s, 0).size, Object.keys(s.tiles).length);
+});
+
+test('verze hry souhlasí s package.json a má platný formát', () => {
+  const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  assert.equal(GAME_VERSION, pkg.version);
+  assert.match(GAME_VERSION, /^\d+\.\d+\.\d+$/);
+  assert.match(GAME_DATE, /^\d{4}-\d{2}-\d{2}$/);
 });

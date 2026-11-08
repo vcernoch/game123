@@ -22,6 +22,7 @@ header {
   border-bottom: 1px solid #000;
 }
 h1 { margin: 0; font-size: 20px; color: var(--accent); letter-spacing: 0.5px; }
+h1 small { font-size: 12px; font-weight: 500; color: var(--muted); letter-spacing: 0; margin-left: 4px; }
 .stats { display: flex; gap: 18px; }
 .stats small { color: #8fd48f; }
 .actions { margin-left: auto; display: flex; gap: 8px; }

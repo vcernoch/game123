@@ -13,6 +13,7 @@ Hraje se proti AI na hexové mapě. Kód a texty ve hře jsou česky.
 - `src/ai.js` – AI protivník
 - `src/render.js` – kreslení na canvas
 - `src/anim.js` – přehrávání herních událostí (`state.events`) jako animací
+- `src/version.js` – verze hry zobrazená v záhlaví (musí sedět s `package.json`)
 - `src/main.js` – ovládání, HUD, ukládání do localStorage, háček `window.__game` pro testy
 - `tests/logic.test.js` – testy logiky (`npm test`)
 - `tests/smoke.mjs` – headless Chrome test + screenshoty do `artifacts/` (`npm run smoke`)
@@ -29,7 +30,8 @@ Když tě spustí naplánovaná úloha, postupuj takto:
 5. Implementuj ho. Logiku drž v `src/game.js` / `src/rules.js` (bez DOM) a přidej k ní test.
 6. `npm run check` musí projít. Prohlédni si `artifacts/screenshot.png` a `artifacts/screenshot-mobile.png`
    (nástrojem Read), jestli UI vypadá dobře.
-7. Odškrtni úkol v `ROADMAP.md`, přidej záznam do `LOG.md`, commitni a pushni do `dev`.
+7. Zvyš verzi v `package.json` a `src/version.js` (nové funkce = druhé číslo, opravy = třetí; jednou za běh)
+   a uveď ji v záznamu v `LOG.md`. Odškrtni úkol v `ROADMAP.md`, přidej záznam do `LOG.md`, commitni a pushni do `dev`.
 8. Pokud zbývá čas a kontext, můžeš vzít další úkol (max 3 za běh). Kvalita před kvantitou.
 9. Na konci pošli uživateli krátkou zprávu (česky, 2–4 věty): co přibylo, a pokud něco potřebuješ
    od něj (rozhodnutí, sloučení do `main`), napiš to jasně na začátek.

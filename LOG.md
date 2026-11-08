@@ -2,6 +2,12 @@
 
 Nejnovější záznam nahoře. Formát: datum – co se udělalo – stav testů – otázky pro Vladimíra.
 
+## 2026-11-08 – Ukazatel verze (v0.3.0)
+- Na přání Vladimíra: v záhlaví vedle názvu je verze hry (`v0.3.0`, po najetí myší i datum).
+- Verze je v `src/version.js` a musí souhlasit s `package.json` – hlídá to nový test, smoke test kontroluje, že se v záhlaví opravdu zobrazí.
+- Číslování zpětně: 0.1 základ, 0.2 trasa/Tab/info o městě, 0.3 animace a mlha války. `CLAUDE.md` nově říká zvýšit verzi v každém běhu.
+- Stav: `npm run check` zelený (15 logických testů + smoke).
+
 ## 2026-11-08 – Mlha války
 - `visibleTiles()`, `updateExplored()`, `exploredTiles()` v `game.js`. Dohled jednotek je v `rules.js` (`sight`: válečník a lučištník 2, jezdec 3), města 2, kopce +1 (`VISION`).
 - Prozkoumaná pole se pamatují v `state.explored` (pole klíčů na hráče, JSON). `createGame({ fog })` umí mlhu vypnout, po konci hry se odkryje celá mapa.
