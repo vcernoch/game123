@@ -1,0 +1,81 @@
+:root {
+  --bg: #1d2128;
+  --panel: #282d36;
+  --text: #e9e6df;
+  --muted: #9aa0aa;
+  --accent: #e0b44a;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 24px;
+  padding: 10px 16px;
+  background: var(--panel);
+  border-bottom: 1px solid #000;
+}
+h1 { margin: 0; font-size: 20px; color: var(--accent); letter-spacing: 0.5px; }
+.stats { display: flex; gap: 18px; }
+.stats small { color: #8fd48f; }
+.actions { margin-left: auto; display: flex; gap: 8px; }
+button {
+  font: inherit;
+  padding: 7px 14px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #1d2128;
+  font-weight: 600;
+  cursor: pointer;
+}
+button.secondary { background: #3c434f; color: var(--text); }
+button:disabled { opacity: 0.45; cursor: default; }
+main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: 16px;
+  padding: 16px;
+}
+.board-wrap { min-width: 0; }
+canvas { width: 100%; max-width: 900px; height: auto; display: block; border-radius: 8px; background: #2a5f8f; }
+aside section, aside details {
+  background: var(--panel);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+aside h3 { margin: 0 0 6px; font-size: 15px; }
+aside p { margin: 4px 0; }
+.hint { color: var(--muted); }
+.tag { font-size: 11px; padding: 1px 6px; border-radius: 4px; color: #fff; vertical-align: middle; }
+.buy { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.buy button { display: flex; justify-content: space-between; }
+#log { list-style: none; margin: 0; padding: 0; font-size: 13px; color: var(--muted); }
+#log li { padding: 2px 0; }
+#banner {
+  padding: 12px 16px;
+  text-align: center;
+  font-weight: 700;
+  background: var(--accent);
+  color: #1d2128;
+}
+#tooltip {
+  position: fixed;
+  pointer-events: none;
+  background: rgba(0, 0, 0, 0.85);
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 13px;
+}
+summary { cursor: pointer; font-weight: 600; }
+@media (max-width: 760px) {
+  main { grid-template-columns: 1fr; padding: 16px; }
+  .actions { margin-left: 0; }
+}

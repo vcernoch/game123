@@ -1,0 +1,16 @@
+{
+  "name": "game123",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Hexová říše – tahová strategie v prohlížeči",
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "smoke": "node tests/smoke.mjs",
+    "check": "npm test && npm run smoke",
+    "serve": "node tools/serve.mjs"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.65.0"
+  }
+}

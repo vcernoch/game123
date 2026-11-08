@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="cs">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hexová říše</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Cpolygon points=%2716,2 29,9 29,23 16,30 3,23 3,9%27 fill=%27%23e0b44a%27/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>Hexová říše</h1>
+    <div class="stats">
+      <span>Kolo <b id="turn">1</b></span>
+      <span>Zlato <b id="gold">0</b> <small id="income"></small></span>
+      <span>Města <b id="cities">0</b></span>
+    </div>
+    <div class="actions">
+      <button id="new-game" class="secondary">Nová hra</button>
+      <button id="end-turn">Ukončit tah</button>
+    </div>
+  </header>
+  <div id="banner" hidden></div>
+  <main>
+    <div class="board-wrap"><canvas id="board"></canvas></div>
+    <aside>
+      <section id="info"></section>
+      <section>
+        <h3>Kronika</h3>
+        <ul id="log"></ul>
+      </section>
+      <details>
+        <summary>Jak hrát</summary>
+        <p>Klikni na svou modrou jednotku, pak na zvýrazněné pole pro pohyb nebo na nepřítele se žlutým kroužkem pro útok.
+          Vstupem do města ho dobudeš. Ve vlastním městě, kde nestojí jednotka, můžeš verbovat.
+          Vyhraješ, když AI přijde o všechna města. Enter = konec tahu, Esc = zrušit výběr.</p>
+      </details>
+    </aside>
+  </main>
+  <div id="tooltip" hidden></div>
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
