@@ -3,7 +3,7 @@ import {
   createGame, reachable, attackTargets, moveUnit, attack, buyUnit, endTurn,
   unitAt, cityAt, getUnit, incomeOf, previewAttack, tileAt, pathTo, nextActiveUnit, cityInfo,
   cloneState, drainEvents, migrateState, visibleTiles, exploredTiles, build, unitCost, hasBuilding,
-  rankOf, rankMult,
+  rankOf, rankMult, buildingCost, unitMove, factionOf,
 } from './game.js';
 import { createAnimator } from './anim.js';
 import { decideTap } from './input.js';
@@ -11,7 +11,7 @@ import { GAME_VERSION, GAME_DATE } from './version.js';
 import { runAITurn } from './ai.js';
 import { render, canvasSize, pickHex } from './render.js';
 import { key } from './hex.js';
-import { UNIT_TYPES, TERRAIN, PLAYERS, DIFFICULTY, BUILDINGS, RANKS } from './rules.js';
+import { UNIT_TYPES, TERRAIN, PLAYERS, DIFFICULTY, BUILDINGS, RANKS, FACTIONS } from './rules.js';
 
 const SAVE_KEY = 'game123-save';
 const PREFS_KEY = 'game123-prefs';
@@ -118,7 +118,7 @@ function updateHud() {
     const t = UNIT_TYPES[u.type];
     html += `<h3>${t.name} <span class="tag" style="background:${PLAYERS[u.owner].color}">${PLAYERS[u.owner].name}</span></h3>
       <p>Životy ${u.hp}/${t.hp} · Útok ${fmt(t.atk * rankMult(u))} · Obrana ${fmt(t.def * rankMult(u))} · Dosah ${t.range}</p>
-      <p>Pohyb ${fmt(u.movesLeft)}/${t.move}${u.hasAttacked ? ' · už útočil' : ''}</p>
+      <p>Pohyb ${fmt(u.movesLeft)}/${unitMove(state, u)}${u.hasAttacked ? ' · už útočil' : ''}</p>
       <p>${rankLine(u)}</p>${t.desc ? `<p class="hint">${t.desc}</p>` : ''}`;
   }
   if (city) {
@@ -132,7 +132,7 @@ function updateHud() {
       const blocked = !!unitAt(state, city.q, city.r);
       html += '<h4>Verbovat</h4><div class="buy">';
       for (const [type, t] of Object.entries(UNIT_TYPES)) {
-        const cost = unitCost(city, type);
+        const cost = unitCost(state, city, type);
         const dis = blocked || state.gold[0] < cost ? 'disabled' : '';
         html += `<button data-buy="${type}" ${dis} title="${t.desc || ''}">${t.name} <small>${cost} zl.</small></button>`;
       }
@@ -142,8 +142,9 @@ function updateHud() {
       if (todo.length) {
         html += '<h4>Stavět</h4><div class="buy">';
         for (const [b, info] of todo) {
-          const dis = state.gold[0] < info.cost ? 'disabled' : '';
-          html += `<button data-build="${b}" class="secondary" ${dis}><span>${info.symbol} ${info.name}</span><small>${info.cost} zl.</small><small class="desc">${info.desc}</small></button>`;
+          const bc = buildingCost(state, 0, b);
+          const dis = state.gold[0] < bc ? 'disabled' : '';
+          html += `<button data-build="${b}" class="secondary" ${dis}><span>${info.symbol} ${info.name}</span><small>${bc} zl.</small><small class="desc">${info.desc}</small></button>`;
         }
         html += '</div>';
       }
@@ -174,7 +175,8 @@ function updateHud() {
   if (!html) {
     const diff = DIFFICULTY[state.difficulty] || DIFFICULTY.normal;
     html = `<p class="hint">Klikni na svou jednotku (modrá) nebo město.</p>
-      <p class="hint">Obtížnost: ${diff.name}${state.fog ? '' : ' · bez mlhy'}</p>`;
+      <p class="hint">Obtížnost: ${diff.name}${state.fog ? '' : ' · bez mlhy'}</p>
+      ${state.factions && state.factions[0] ? `<p class="hint">Ty: ${factionOf(state, 0).name} · AI: ${factionOf(state, 1).name}</p>` : ''}`;
   }
   info.innerHTML = html;
 
@@ -326,6 +328,7 @@ function newGame() {
   const diff = DIFFICULTY[prefs.difficulty] ? prefs.difficulty : state.difficulty || 'normal';
   form.elements.difficulty.value = diff;
   form.elements.fog.checked = prefs.fog !== false;
+  form.elements.faction.value = FACTIONS[prefs.faction] ? prefs.faction : 'kingdom';
   $('new-game-warning').hidden = state.winner !== null;
   dlg.showModal();
 }
@@ -343,7 +346,11 @@ $('new-game-dialog').addEventListener('close', () => {
   const dlg = $('new-game-dialog');
   if (dlg.returnValue !== 'start') return;
   const form = dlg.querySelector('form');
-  const options = { difficulty: form.elements.difficulty.value, fog: form.elements.fog.checked };
+  const options = {
+    difficulty: form.elements.difficulty.value,
+    fog: form.elements.fog.checked,
+    faction: form.elements.faction.value,
+  };
   savePrefs(options);
   startNewGame(options);
 });
@@ -406,6 +413,10 @@ window.__game = {
   setAnimSpeed: (x) => { anim.speed = x; },
   newGame: (seed, options = {}) => { state = createGame({ seed, ...options }); resize(); draw(); },
 };
+
+// Volby frakcí v dialogu se generují z rules.js, ať se nové frakce objeví samy.
+$('faction-options').innerHTML = Object.entries(FACTIONS).map(([id, f], i) => `
+  <label><input type="radio" name="faction" value="${id}" ${i === 0 ? 'checked' : ''}> <b>${f.name}</b> <small>${f.desc}</small></label>`).join('');
 
 $('version').textContent = `v${GAME_VERSION}`;
 $('version').title = `Verze ${GAME_VERSION} z ${GAME_DATE}`;

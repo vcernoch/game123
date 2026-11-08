@@ -9,7 +9,7 @@ Odškrtávej `[x]` po dokončení. Nové nápady přidávej na konec příslušn
 - [x] Jednoduchá AI, vítězství/porážka
 - [x] Ukládání do localStorage, testy logiky, smoke test v prohlížeči
 
-## Fáze 1 – hratelnost
+## Fáze 1 – hratelnost ✅
 - [x] Šipka/cesta ukazující trasu při najetí na cílové pole
 - [x] Animace pohybu a útoku (krátké, aby AI tah byl čitelný)
 - [x] Mlha války: vidíš jen okolí svých jednotek a měst
@@ -18,13 +18,13 @@ Odškrtávej `[x]` po dokončení. Nové nápady přidávej na konec příslušn
 - [x] Výběr obtížnosti AI (snadná / normální / těžká)
 - [x] Ovládání dotykem na mobilu (větší zásahová plocha, potvrzení útoku)
 
-## Fáze 2 – hloubka
+## Fáze 2 – hloubka ✅
 - [x] Budovy ve městech (hradby, trh, kasárna)
 - [x] Zkušenosti jednotek a povýšení
 - [x] Nové jednotky: obléhací stroj, kopiník (bonus proti jezdcům)
 - [x] Silnice nebo řeky ovlivňující pohyb (silnice; řeky zatím ne – viz Nápady)
 - [x] Lepší AI: obrana vlastních měst, soustředění sil, ústup zraněných
-- [ ] Více frakcí s odlišnými bonusy
+- [x] Více frakcí s odlišnými bonusy
 
 ## Fáze 3 – obsah a lesk
 - [ ] Hlavní menu, volba velikosti mapy a počtu AI

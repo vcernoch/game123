@@ -3,12 +3,20 @@ import { key, neighbors, distance } from './hex.js';
 import { generateMap } from './map.js';
 import {
   TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY, VISION, DIFFICULTY, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, ROAD_COST,
+  FACTIONS, NO_FACTION,
 } from './rules.js';
 
 export function createGame({
   seed = 1, cols = 14, rows = 10, neutralCities = 4, fog = true, difficulty = 'normal',
+  faction = 'kingdom', aiFaction = null,
 } = {}) {
   if (!DIFFICULTY[difficulty]) difficulty = 'normal';
+  if (!FACTIONS[faction]) faction = 'kingdom';
+  if (!FACTIONS[aiFaction]) {
+    // AI dostane jinou frakci než hráč, vybranou podle seedu (opakovatelně)
+    const others = Object.keys(FACTIONS).filter((f) => f !== faction);
+    aiFaction = others[Math.abs(seed) % others.length];
+  }
   const { tiles, cities, starts } = generateMap(seed, cols, rows, neutralCities);
   for (const c of cities) c.buildings = [];
   const state = {
@@ -28,6 +36,7 @@ export function createGame({
     events: [],
     fog,
     difficulty,
+    factions: [faction, aiFaction],
     explored: PLAYERS.map(() => []),
   };
   starts.forEach((s, owner) => {
@@ -36,7 +45,7 @@ export function createGame({
     if (free) spawnUnit(state, 'archer', owner, free.q, free.r);
   });
   for (const u of state.units.filter((x) => x.owner === 0)) {
-    u.movesLeft = UNIT_TYPES[u.type].move;
+    u.movesLeft = unitMove(state, u);
     u.hasAttacked = false;
   }
   state.events = [];
@@ -44,7 +53,7 @@ export function createGame({
   return state;
 }
 
-export const STATE_VERSION = 7;
+export const STATE_VERSION = 8;
 
 // Převede uložený stav starší verze na aktuální; neznámý formát vrátí null.
 export function migrateState(s) {
@@ -75,6 +84,10 @@ export function migrateState(s) {
   if (s.version === 6) {
     // silnice přibyly až ve verzi 7 – staré mapy je prostě nemají (tile.road chybí = bez silnice)
     s.version = 7;
+  }
+  if (s.version === 7) {
+    s.factions = [null, null]; // staré hry hrají bez frakcí
+    s.version = 8;
   }
   return s.version === STATE_VERSION ? s : null;
 }
@@ -186,9 +199,34 @@ export const CITY_DEF_BONUS = 0.25;
 
 export const hasBuilding = (city, b) => !!city.buildings && city.buildings.includes(b);
 
-export function cityIncome(city) {
+// ---------- frakce ----------
+
+export function factionOf(state, player) {
+  const id = state && state.factions ? state.factions[player] : null;
+  return FACTIONS[id] || NO_FACTION;
+}
+
+export function unitMove(state, unit) {
+  const bonus = factionOf(state, unit.owner).moveBonus;
+  return UNIT_TYPES[unit.type].move + ((bonus && bonus[unit.type]) || 0);
+}
+
+export function buildingCost(state, player, building) {
+  const d = factionOf(state, player).buildingDiscount;
+  return Math.max(1, BUILDINGS[building].cost - ((d && d[building]) || 0));
+}
+
+// Obranný bonus terénu pro jednotku (Lesní lid má v lese navíc).
+export function terrainDefense(state, unit, tile) {
+  const f = factionOf(state, unit.owner);
+  return TERRAIN[tile.terrain].defBonus + (tile.terrain === 'forest' ? f.forestDefense || 0 : 0);
+}
+
+// Příjem města; se state se započítá i bonus frakce majitele.
+export function cityIncome(city, state = null) {
   const base = city.capital ? ECONOMY.capitalIncome : ECONOMY.cityIncome;
-  return base + (hasBuilding(city, 'market') ? BUILDING_EFFECTS.marketIncome : 0);
+  const faction = state && city.owner !== null ? factionOf(state, city.owner).cityIncome || 0 : 0;
+  return base + faction + (hasBuilding(city, 'market') ? BUILDING_EFFECTS.marketIncome : 0);
 }
 
 // Násobitel obrany posádky ve vlastním městě (město + případné hradby).
@@ -196,14 +234,16 @@ export function cityDefenseMult(city) {
   return (1 + CITY_DEF_BONUS) * (hasBuilding(city, 'walls') ? 1 + BUILDING_EFFECTS.wallsDefense : 1);
 }
 
-// Cena jednotky při verbování v daném městě (kasárna zlevňují).
-export function unitCost(city, type) {
-  const discount = hasBuilding(city, 'barracks') ? BUILDING_EFFECTS.barracksDiscount : 0;
+// Cena jednotky při verbování v daném městě (kasárna a frakce majitele zlevňují).
+export function unitCost(state, city, type) {
+  let discount = hasBuilding(city, 'barracks') ? BUILDING_EFFECTS.barracksDiscount : 0;
+  const fd = city.owner !== null ? factionOf(state, city.owner).unitDiscount : null;
+  if (fd && fd[type]) discount += fd[type];
   return Math.max(1, UNIT_TYPES[type].cost - discount);
 }
 
 export function incomeOf(state, player) {
-  const base = state.cities.filter((c) => c.owner === player).reduce((sum, c) => sum + cityIncome(c), 0);
+  const base = state.cities.filter((c) => c.owner === player).reduce((sum, c) => sum + cityIncome(c, state), 0);
   return Math.max(0, base + difficultyOf(state, player).incomeBonus);
 }
 
@@ -215,11 +255,12 @@ export function difficultyOf(state, player) {
 
 // Souhrn pro tooltip města: příjem, bonus obrany posádky (terén + město) a léčení.
 export function cityInfo(state, city) {
-  const t = TERRAIN[tileAt(state, city.q, city.r).terrain];
-  const defMult = (1 + t.defBonus) * cityDefenseMult(city);
+  const tile = tileAt(state, city.q, city.r);
+  const owner = city.owner === null ? null : { owner: city.owner };
+  const defMult = (1 + (owner ? terrainDefense(state, owner, tile) : TERRAIN[tile.terrain].defBonus)) * cityDefenseMult(city);
   const garrison = unitAt(state, city.q, city.r) || null;
   return {
-    income: cityIncome(city),
+    income: cityIncome(city, state),
     defensePct: Math.round((defMult - 1) * 100),
     heal: ECONOMY.healInCity,
     garrison: garrison && garrison.owner === city.owner ? garrison : null,
@@ -227,10 +268,15 @@ export function cityInfo(state, city) {
 }
 
 // Cena kroku z pole `from` na sousední pole `to` (silnice zlevňují, jinak terén cílového pole).
-export function stepCost(state, from, to) {
+// unit (nepovinná) určuje frakci – Lesní lid chodí lesem levněji.
+export function stepCost(state, from, to, unit = null) {
   const a = tileAt(state, from.q, from.r);
   const b = tileAt(state, to.q, to.r);
   if (a && b && a.road && b.road) return ROAD_COST;
+  if (unit && b.terrain === 'forest') {
+    const fc = factionOf(state, unit.owner).forestCost;
+    if (fc) return fc;
+  }
   return TERRAIN[b.terrain].cost;
 }
 
@@ -251,7 +297,7 @@ function searchMoves(state, unit) {
       const other = unitAt(state, n.q, n.r);
       if (other && other.owner !== unit.owner) continue;
       // vstup do terénu za 2 je povolen i s 1 zbývajícím bodem, pokud je to první krok
-      let cost = cur.cost + stepCost(state, cur, n);
+      let cost = cur.cost + stepCost(state, cur, n, unit);
       if (cost > unit.movesLeft) {
         if (cur.cost === 0 && unit.movesLeft > 0) cost = unit.movesLeft;
         else continue;
@@ -330,7 +376,7 @@ export function vsMult(unit, other) {
 // Obrana jednotky; attacker (nepovinný) určuje bonusy proti typu a obléhání.
 export function defenseValue(state, unit, attacker = null) {
   const t = tileAt(state, unit.q, unit.r);
-  let d = UNIT_TYPES[unit.type].def * rankMult(unit) * (1 + TERRAIN[t.terrain].defBonus) * vsMult(unit, attacker);
+  let d = UNIT_TYPES[unit.type].def * rankMult(unit) * (1 + terrainDefense(state, unit, t)) * vsMult(unit, attacker);
   const city = cityAt(state, unit.q, unit.r);
   if (city && city.owner === unit.owner) {
     const siege = attacker && UNIT_TYPES[attacker.type].siege;
@@ -404,7 +450,9 @@ export function moveUnit(state, unitId, q, r) {
     const prev = city.owner;
     city.owner = unit.owner;
     emit(state, { type: 'capture', cityId: city.id, owner: unit.owner });
-    addLog(state, `${PLAYERS[unit.owner].name}: dobyto město ${city.name}`);
+    const loot = factionOf(state, unit.owner).captureGold || 0;
+    state.gold[unit.owner] += loot;
+    addLog(state, `${PLAYERS[unit.owner].name}: dobyto město ${city.name}${loot ? ` (kořist ${loot} zl.)` : ''}`);
     if (prev !== null) checkWinner(state);
   }
   updateExplored(state, unit.owner);
@@ -455,7 +503,7 @@ export function buyUnit(state, cityId, type) {
   const city = state.cities.find((c) => c.id === cityId);
   const t = UNIT_TYPES[type];
   if (!city || !t || city.owner !== state.current || state.winner !== null) return false;
-  const cost = unitCost(city, type);
+  const cost = unitCost(state, city, type);
   if (state.gold[state.current] < cost || unitAt(state, city.q, city.r)) return false;
   state.gold[state.current] -= cost;
   spawnUnit(state, type, state.current, city.q, city.r);
@@ -468,8 +516,9 @@ export function build(state, cityId, building) {
   const city = state.cities.find((c) => c.id === cityId);
   const b = BUILDINGS[building];
   if (!city || !b || city.owner !== state.current || state.winner !== null) return false;
-  if (hasBuilding(city, building) || state.gold[state.current] < b.cost) return false;
-  state.gold[state.current] -= b.cost;
+  const cost = buildingCost(state, state.current, building);
+  if (hasBuilding(city, building) || state.gold[state.current] < cost) return false;
+  state.gold[state.current] -= cost;
   city.buildings = [...(city.buildings || []), building];
   emit(state, { type: 'build', cityId, building });
   addLog(state, `${PLAYERS[state.current].name}: dokončena stavba ${b.name} (${city.name})`);
@@ -488,7 +537,7 @@ export function endTurn(state) {
   if (state.current === 0) state.turn++;
   state.gold[state.current] += incomeOf(state, state.current);
   for (const u of state.units.filter((x) => x.owner === state.current)) {
-    u.movesLeft = UNIT_TYPES[u.type].move;
+    u.movesLeft = unitMove(state, u);
     u.hasAttacked = false;
     u.moved = false;
   }

@@ -2,9 +2,9 @@
 import { distance, key } from './hex.js';
 import {
   reachable, attackTargets, previewAttack, moveUnit, attack, buyUnit,
-  unitAt, getUnit, tileAt, difficultyOf, visibleTiles, exploredTiles, build, hasBuilding, unitCost,
+  unitAt, getUnit, tileAt, difficultyOf, visibleTiles, exploredTiles, build, hasBuilding, unitCost, buildingCost, factionOf,
 } from './game.js';
-import { UNIT_TYPES, TERRAIN, BUILDINGS } from './rules.js';
+import { UNIT_TYPES, TERRAIN } from './rules.js';
 
 // Co AI ví o mapě. Na těžké obtížnosti vidí všechno, jinak jen to, co prozkoumala a vidí.
 export function aiKnowledge(state, me) {
@@ -150,13 +150,13 @@ export function buildSomething(state, me) {
   const mine = state.cities.filter((c) => c.owner === me).sort((a, b) => b.capital - a.capital);
   for (const city of mine) {
     const threatened = state.units.some((u) => u.owner !== me && know.sees(u.q, u.r) && distance(u, city) <= 3);
-    if (threatened && !hasBuilding(city, 'walls') && state.gold[me] >= BUILDINGS.walls.cost) {
+    if (threatened && !hasBuilding(city, 'walls') && state.gold[me] >= buildingCost(state, me, 'walls')) {
       build(state, city.id, 'walls');
     }
   }
   for (const b of ['market', 'barracks']) {
     for (const city of mine) {
-      if (!hasBuilding(city, b) && state.gold[me] >= BUILDINGS[b].cost + RESERVE) build(state, city.id, b);
+      if (!hasBuilding(city, b) && state.gold[me] >= buildingCost(state, me, b) + RESERVE) build(state, city.id, b);
     }
   }
 }
@@ -254,14 +254,17 @@ function evalPos(state, unit, q, r, goals, range, know) {
 export function pickRecruit(state, me, city) {
   const know = aiKnowledge(state, me);
   const enemyHorse = state.units.filter((u) => u.owner !== me && u.type === 'horseman' && know.sees(u.q, u.r)).length;
-  const ratio = { warrior: 3, archer: 2, horseman: 2, spearman: 1 + enemyHorse, catapult: state.turn >= 8 ? 1 : 0 };
+  const ratio = { warrior: 3, archer: 2, horseman: 2, spearman: 1 + 2 * enemyHorse, catapult: state.turn >= 8 ? 1 : 0 };
+  // silné stránky vlastní frakce: zlevněných jednotek chce víc
+  const favored = factionOf(state, me).unitDiscount || {};
+  for (const type of Object.keys(favored)) ratio[type] += 2;
   const count = {};
   for (const u of state.units) if (u.owner === me) count[u.type] = (count[u.type] || 0) + 1;
   let best = null;
   let bestNeed = Infinity;
   let bestWant = 0;
   for (const [type, want] of Object.entries(ratio)) {
-    if (!want || state.gold[me] < unitCost(city, type)) continue;
+    if (!want || state.gold[me] < unitCost(state, city, type)) continue;
     const need = (count[type] || 0) / want;
     // při shodě vyhrává typ, kterého chceme víc
     if (need < bestNeed || (need === bestNeed && want > bestWant)) { bestNeed = need; best = type; bestWant = want; }

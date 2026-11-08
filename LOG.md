@@ -2,6 +2,19 @@
 
 Nejnovější záznam nahoře. Formát: datum – co se udělalo – stav testů – otázky pro Vladimíra.
 
+## 2026-11-08 – Frakce
+- `FACTIONS` v `rules.js` (generické položky, chybějící = bez bonusu):
+  - **Království**: +1 zlato za každé město, hradby o 10 levnější.
+  - **Horda**: jezdci o 4 levnější a s pohybem +1, za dobyté město kořist 5 zlatých.
+  - **Lesní lid**: les stojí 1 pohyb a dává +25 % obrany navíc, lučištníci o 3 levnější.
+- Pomocníci v `game.js`: `factionOf`, `unitMove`, `buildingCost`, `terrainDefense`; `cityIncome(city, state)` a `stepCost(..., unit)` berou frakci v úvahu. **Změna API:** `unitCost(state, city, type)` (dřív `unitCost(city, type)`).
+- Hráč volí frakci v dialogu nové hry (volby se generují z `rules.js`), AI dostane podle seedu jinou. V panelu je vidět „Ty: … · AI: …“.
+- AI verbuje víc jednotek, které má její frakce zlevněné, a na viditelné jezdce reaguje silněji (2 kopiníci na jezdce v cílovém poměru).
+- Balanc (dočasný skript, AI proti AI, 40 seedů × všech 6 dvojic frakcí): Horda byla s jen levnějšími jezdci na 43 %, s kořistí 10 zl. na 64 %, s kořistí 5 zl. vyrovnaně. Výsledek po všech úpravách: Království 56 %, Horda 48 %, Lesní lid 46 % (šum při 160 hrách je zhruba ±4 %).
+- Struktura stavu: `state.version` 8 (`factions`), staré hry hrají bez frakcí.
+- Testy: +2 logické (bonusy každé frakce včetně lesa a kořisti, AI má jinou frakci, migrace, AI vs AI se všemi frakcemi).
+- Stav: `npm run check` zelený (32 logických testů + smoke). Fáze 1 a 2 roadmapy jsou hotové.
+
 ## 2026-11-08 – Lepší AI
 - `planStrike()`: AI zkusí útok z každého dosažitelného pole a vybere nejlepší kombinaci „dojdi a zaútoč“ (terén ovlivňuje protiúder).
 - Soustředění: střelci a katapulty táhnou první, hodnocení útoku preferuje oslabené a dražší cíle, takže boj na blízko dorazí, co střelci nahlodali.

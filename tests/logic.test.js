@@ -5,6 +5,7 @@ import {
   previewAttack, cloneState, pathTo, nextActiveUnit, tileAt, cityInfo, incomeOf, defenseValue,
   drainEvents, applyEvent, migrateState, STATE_VERSION,
   visibleTiles, exploredTiles, build, unitCost, rankOf, stepCost, getUnit,
+  buildingCost, unitMove, factionOf,
 } from '../src/game.js';
 import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
@@ -14,7 +15,7 @@ import { readFileSync } from 'node:fs';
 import { GAME_VERSION, GAME_DATE } from '../src/version.js';
 import { pathExists } from '../src/map.js';
 import { distance, key, neighbors } from '../src/hex.js';
-import { UNIT_TYPES, TERRAIN, BUILDINGS, BUILDING_EFFECTS, RANKS, XP } from '../src/rules.js';
+import { UNIT_TYPES, TERRAIN, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, FACTIONS } from '../src/rules.js';
 
 test('mapa je deterministická a startovní města jsou propojená', () => {
   for (const seed of [1, 2, 3, 42, 999]) {
@@ -130,7 +131,7 @@ test('trasa vede po sousedních polích a její cena odpovídá dosahu', () => {
         for (let i = 1; i < path.length; i++) {
           assert.equal(distance(path[i - 1], path[i]), 1);
           assert.ok(isPassable(s, path[i].q, path[i].r));
-          sum += stepCost(s, path[i - 1], path[i]);
+          sum += stepCost(s, path[i - 1], path[i], u);
         }
         // cena je buď součet terénu, nebo zkrácená na zbývající body (velký první krok)
         assert.ok(cost === sum || (path.length === 2 && cost === u.movesLeft), `seed ${seed} ${k}`);
@@ -358,13 +359,13 @@ test('budovy: stojí zlato, nejdou postavit dvakrát a mají účinek', () => {
   assert.equal(Math.round((mult - 1) * 100), cityInfo(s, cap).defensePct);
 
   assert.ok(build(s, cap.id, 'barracks'));
-  assert.equal(unitCost(cap, 'warrior'), UNIT_TYPES.warrior.cost - BUILDING_EFFECTS.barracksDiscount);
+  assert.equal(unitCost(s, cap, 'warrior'), UNIT_TYPES.warrior.cost - BUILDING_EFFECTS.barracksDiscount);
   // verbování v kasárnách stojí méně
   const moveAway = [...reachable(s, u).keys()][0].split(',').map(Number);
   moveUnit(s, u.id, moveAway[0], moveAway[1]);
   const g = s.gold[0];
   assert.ok(buyUnit(s, cap.id, 'warrior'));
-  assert.equal(s.gold[0], g - unitCost(cap, 'warrior'));
+  assert.equal(s.gold[0], g - unitCost(s, cap, 'warrior'));
   s.gold[0] = 0;
   assert.ok(!build(s, cap.id, 'nesmysl'));
 });
@@ -582,3 +583,63 @@ function reachableFrom(s, unit, t) {
   unit.q = saved.q; unit.r = saved.r;
   return ok;
 }
+
+test('frakce: každá má své bonusy a AI dostane jinou než hráč', () => {
+  for (const f of Object.keys(FACTIONS)) {
+    const s = createGame({ seed: 10, faction: f });
+    assert.equal(s.factions[0], f);
+    assert.ok(FACTIONS[s.factions[1]] && s.factions[1] !== f, `AI má jinou frakci než ${f}`);
+  }
+  assert.equal(createGame({ seed: 10, faction: 'nesmysl' }).factions[0], 'kingdom');
+  assert.equal(createGame({ seed: 10, faction: 'horde', aiFaction: 'forest' }).factions[1], 'forest');
+
+  // Království: +1 zlato za město, levnější hradby
+  const k = createGame({ seed: 10, faction: 'kingdom', aiFaction: 'horde' });
+  const h = createGame({ seed: 10, faction: 'horde', aiFaction: 'kingdom' });
+  assert.equal(incomeOf(k, 0), incomeOf(h, 0) + 1);
+  assert.ok(buildingCost(k, 0, 'walls') < buildingCost(h, 0, 'walls'));
+
+  // Horda: levnější a rychlejší jezdci
+  const hCap = h.cities.find((c) => c.owner === 0);
+  const kCap = k.cities.find((c) => c.owner === 0);
+  assert.ok(unitCost(h, hCap, 'horseman') < unitCost(k, kCap, 'horseman'));
+  const rider = { type: 'horseman', owner: 0 };
+  assert.equal(unitMove(h, rider), UNIT_TYPES.horseman.move + 1);
+  assert.equal(unitMove(k, rider), UNIT_TYPES.horseman.move);
+
+  // Lesní lid: les za 1 a obrana v lese navíc
+  const fo = createGame({ seed: 10, faction: 'forest', aiFaction: 'kingdom' });
+  const forest = Object.values(fo.tiles).find((t) => t.terrain === 'forest' && !t.road);
+  const from = neighbors(forest.q, forest.r).map((n) => fo.tiles[key(n.q, n.r)]).find((t) => t && !t.road);
+  const elf = { type: 'warrior', owner: 0, q: forest.q, r: forest.r, xp: 0 };
+  const man = { ...elf, owner: 1 };
+  assert.equal(stepCost(fo, from, forest, elf), 1);
+  assert.equal(stepCost(fo, from, forest, man), TERRAIN.forest.cost);
+  assert.ok(defenseValue(fo, elf) > defenseValue(fo, man));
+
+  // Horda: kořist za dobytí neutrálního města
+  for (const [faction, loot] of [['horde', FACTIONS.horde.captureGold], ['kingdom', 0]]) {
+    const g = createGame({ seed: 10, faction, fog: false });
+    const city = g.cities.find((c) => c.owner === null);
+    const u = g.units.find((x) => x.owner === 0);
+    const spot = neighbors(city.q, city.r).find((n) => isPassable(g, n.q, n.r) && !unitAt(g, n.q, n.r));
+    u.q = spot.q; u.r = spot.r; u.movesLeft = 9;
+    const gold = g.gold[0];
+    assert.ok(moveUnit(g, u.id, city.q, city.r));
+    assert.equal(g.gold[0], gold + loot, faction);
+  }
+});
+
+test('frakce: stará hra je bez frakcí a AI vs AI s frakcemi doběhne', () => {
+  const old = createGame({ seed: 4 });
+  old.version = 7;
+  delete old.factions;
+  const m = migrateState(old);
+  assert.deepEqual(m.factions, [null, null]);
+  assert.equal(factionOf(m, 0).name, '—');
+  for (const faction of Object.keys(FACTIONS)) {
+    const s = createGame({ seed: 21, faction });
+    for (let i = 0; i < 120 && s.winner === null; i++) { runAITurn(s); endTurn(s); }
+    for (const u of s.units) assert.ok(u.movesLeft <= unitMove(s, u));
+  }
+});

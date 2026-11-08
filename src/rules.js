@@ -41,6 +41,20 @@ export const RANKS = [
 ];
 export const XP = { attack: 1, kill: 1, defend: 1, rankBonus: 0.15, promotionHeal: 3 };
 
+// Frakce: každá strana má jednu. Chybějící položka = bez bonusu.
+// cityIncome: zlato navíc za každé město; unitDiscount / buildingDiscount: sleva podle typu;
+// moveBonus: pohyb navíc podle typu jednotky; forestCost / forestDefense: pohyb a obrana v lese;
+// captureGold: kořist za dobytí města.
+export const FACTIONS = {
+  kingdom: { name: 'Království', desc: '+1 zlato za každé město, hradby o 10 levnější',
+    cityIncome: 1, buildingDiscount: { walls: 10 } },
+  horde:   { name: 'Horda', desc: 'jezdci o 4 levnější a s pohybem +1, za dobyté město kořist 5 zlatých',
+    unitDiscount: { horseman: 4 }, moveBonus: { horseman: 1 }, captureGold: 5 },
+  forest:  { name: 'Lesní lid', desc: 'les stojí jen 1 pohyb a dává +25 % obrany navíc, lučištníci o 3 levnější',
+    unitDiscount: { archer: 3 }, forestCost: 1, forestDefense: 0.25 },
+};
+export const NO_FACTION = { name: '—', desc: '' };
+
 // Obtížnost ovlivňuje jen AI hráče.
 // seesAll: AI ignoruje mlhu války; incomeBonus: zlato navíc za kolo; startGold: zlato navíc na začátku;
 // caution: jak moc AI váhá s útokem (vyšší = opatrnější, hraje hůř).
