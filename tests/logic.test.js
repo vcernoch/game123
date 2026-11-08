@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   createGame, reachable, moveUnit, attack, buyUnit, endTurn, unitAt, isPassable,
-  previewAttack, cloneState, pathTo, nextActiveUnit, tileAt,
+  previewAttack, cloneState, pathTo, nextActiveUnit, tileAt, cityInfo, incomeOf, defenseValue,
 } from '../src/game.js';
 import { runAITurn } from '../src/ai.js';
 import { pathExists } from '../src/map.js';
@@ -145,4 +145,19 @@ test('Tab vybírá cyklicky jednotky, které ještě mohou jednat', () => {
   b.movesLeft = 0;
   b.hasAttacked = true;
   assert.equal(nextActiveUnit(s, 0), null);
+});
+
+test('informace o městě souhlasí s příjmem a obranou', () => {
+  const s = createGame({ seed: 9 });
+  const sum = s.cities.filter((c) => c.owner === 0).reduce((a, c) => a + cityInfo(s, c).income, 0);
+  assert.equal(sum, incomeOf(s, 0));
+  const capital = s.cities.find((c) => c.owner === 0 && c.capital);
+  const info = cityInfo(s, capital);
+  const u = unitAt(s, capital.q, capital.r);
+  assert.ok(u && u.owner === 0, 'v hlavním městě stojí vlastní jednotka');
+  assert.equal(info.garrison.id, u.id);
+  const mult = defenseValue(s, u) / UNIT_TYPES[u.type].def;
+  assert.equal(Math.round((mult - 1) * 100), info.defensePct);
+  const neutral = s.cities.find((c) => c.owner === null);
+  assert.equal(cityInfo(s, neutral).garrison, null);
 });

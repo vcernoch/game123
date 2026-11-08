@@ -1,7 +1,7 @@
 // Propojení logiky, vykreslení a ovládání v prohlížeči.
 import {
   createGame, reachable, attackTargets, moveUnit, attack, buyUnit, endTurn,
-  unitAt, cityAt, getUnit, incomeOf, previewAttack, tileAt, pathTo, nextActiveUnit,
+  unitAt, cityAt, getUnit, incomeOf, previewAttack, tileAt, pathTo, nextActiveUnit, cityInfo,
 } from './game.js';
 import { runAITurn } from './ai.js';
 import { render, canvasSize, pickHex } from './render.js';
@@ -83,7 +83,9 @@ function updateHud() {
   }
   if (city) {
     const owner = city.owner === null ? 'neutrální' : PLAYERS[city.owner].name;
-    html += `<h3>${city.name}</h3><p>Vlastník: ${owner}${city.capital ? ' · hlavní město' : ''}</p>`;
+    const ci = cityInfo(state, city);
+    html += `<h3>${city.name}</h3><p>Vlastník: ${owner}${city.capital ? ' · hlavní město' : ''}</p>
+      <p>Příjem +${ci.income} zl./kolo · Obrana posádky +${ci.defensePct} % · Léčení +${ci.heal}</p>`;
     if (city.owner === 0 && state.current === 0 && !aiRunning) {
       const blocked = !!unitAt(state, city.q, city.r);
       html += '<div class="buy">';
@@ -98,6 +100,11 @@ function updateHud() {
   if (!u && !city && hover && tileAt(state, hover.q, hover.r)) {
     const t = TERRAIN[tileAt(state, hover.q, hover.r).terrain];
     html = `<p>${t.name}${t.passable ? ` · pohyb ${t.cost} · obrana +${Math.round(t.defBonus * 100)} %` : ' · neprůchodné'}</p>`;
+    const hc = cityAt(state, hover.q, hover.r);
+    if (hc) {
+      const ci = cityInfo(state, hc);
+      html = `<h3>${hc.name}</h3><p>Příjem +${ci.income} zl./kolo · Obrana posádky +${ci.defensePct} %</p>` + html;
+    }
   }
   if (!html) html = '<p class="hint">Klikni na svou jednotku (modrá) nebo město.</p>';
   info.innerHTML = html;
@@ -159,6 +166,15 @@ function onMove(ev) {
   }
 }
 
+// Zobrazí tooltip u kurzoru, ale nenechá ho přetéct přes okraj okna.
+function placeTip(tip, ev) {
+  tip.hidden = false;
+  const x = Math.min(ev.clientX + 12, window.innerWidth - tip.offsetWidth - 8);
+  const y = Math.min(ev.clientY + 12, window.innerHeight - tip.offsetHeight - 8);
+  tip.style.left = `${Math.max(8, x)}px`;
+  tip.style.top = `${Math.max(8, y)}px`;
+}
+
 function showTooltip(ev, hex) {
   const tip = $('tooltip');
   const sel = selectedUnit();
@@ -166,9 +182,14 @@ function showTooltip(ev, hex) {
   if (sel && target && sel.owner === state.current && attackTargets(state, sel).includes(target)) {
     const p = previewAttack(state, sel, target);
     tip.textContent = `Útok: −${p.damage}${p.kills ? ' (zničí)' : ''}, protiúder −${p.counter}`;
-    tip.hidden = false;
-    tip.style.left = `${ev.clientX + 12}px`;
-    tip.style.top = `${ev.clientY + 12}px`;
+    placeTip(tip, ev);
+  } else if (hex && cityAt(state, hex.q, hex.r)) {
+    const city = cityAt(state, hex.q, hex.r);
+    const ci = cityInfo(state, city);
+    const owner = city.owner === null ? 'neutrální' : PLAYERS[city.owner].name;
+    const gar = ci.garrison ? UNIT_TYPES[ci.garrison.type].name : 'bez posádky';
+    tip.textContent = `${city.name} (${owner}): +${ci.income} zl./kolo · obrana +${ci.defensePct} % · ${gar}`;
+    placeTip(tip, ev);
   } else {
     tip.hidden = true;
   }

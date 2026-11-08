@@ -14,7 +14,7 @@ Odškrtávej `[x]` po dokončení. Nové nápady přidávej na konec příslušn
 - [ ] Animace pohybu a útoku (krátké, aby AI tah byl čitelný)
 - [ ] Mlha války: vidíš jen okolí svých jednotek a měst
 - [x] Tlačítko „další jednotka s pohybem“ (Tab)
-- [ ] Zobrazení příjmu a obrany u města při najetí myší
+- [x] Zobrazení příjmu a obrany u města při najetí myší
 - [ ] Výběr obtížnosti AI (snadná / normální / těžká)
 - [ ] Ovládání dotykem na mobilu (větší zásahová plocha, potvrzení útoku)
 

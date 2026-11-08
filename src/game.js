@@ -52,10 +52,27 @@ export function isFree(state, q, r) {
   return isPassable(state, q, r) && !unitAt(state, q, r);
 }
 
+export const CITY_DEF_BONUS = 0.25;
+
+export function cityIncome(city) {
+  return city.capital ? ECONOMY.capitalIncome : ECONOMY.cityIncome;
+}
+
 export function incomeOf(state, player) {
-  return state.cities
-    .filter((c) => c.owner === player)
-    .reduce((sum, c) => sum + (c.capital ? ECONOMY.capitalIncome : ECONOMY.cityIncome), 0);
+  return state.cities.filter((c) => c.owner === player).reduce((sum, c) => sum + cityIncome(c), 0);
+}
+
+// Souhrn pro tooltip města: příjem, bonus obrany posádky (terén + město) a léčení.
+export function cityInfo(state, city) {
+  const t = TERRAIN[tileAt(state, city.q, city.r).terrain];
+  const defMult = (1 + t.defBonus) * (1 + CITY_DEF_BONUS);
+  const garrison = unitAt(state, city.q, city.r) || null;
+  return {
+    income: cityIncome(city),
+    defensePct: Math.round((defMult - 1) * 100),
+    heal: ECONOMY.healInCity,
+    garrison: garrison && garrison.owner === city.owner ? garrison : null,
+  };
 }
 
 // Prohledá dosažitelná pole (Dijkstra). Vrací ceny i předchůdce, aby šla složit trasa.
@@ -130,7 +147,7 @@ export function defenseValue(state, unit) {
   const t = tileAt(state, unit.q, unit.r);
   let d = UNIT_TYPES[unit.type].def * (1 + TERRAIN[t.terrain].defBonus);
   const city = cityAt(state, unit.q, unit.r);
-  if (city && city.owner === unit.owner) d *= 1.25;
+  if (city && city.owner === unit.owner) d *= 1 + CITY_DEF_BONUS;
   return d;
 }
 

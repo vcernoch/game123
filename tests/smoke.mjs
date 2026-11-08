@@ -68,6 +68,22 @@ try {
   await mkdir('artifacts', { recursive: true });
   await page.screenshot({ path: 'artifacts/screenshot.png', fullPage: true });
 
+  // najetí na město ukáže tooltip s příjmem
+  const cityPt = await page.evaluate(async () => {
+    const rnd = await import('./src/render.js');
+    const st = window.__game.getState();
+    const c = st.cities.find((x) => x.owner === 0) || st.cities[0];
+    const p = rnd.tileCenter(c.q, c.r);
+    const rect = document.getElementById('board').getBoundingClientRect();
+    const k = rect.width / rnd.canvasSize(st).w;
+    return { x: rect.left + p.x * k, y: rect.top + p.y * k };
+  });
+  await page.keyboard.press('Escape');
+  await page.mouse.move(cityPt.x, cityPt.y);
+  const tipText = await page.evaluate(() => !document.getElementById('tooltip').hidden && document.getElementById('tooltip').textContent);
+  if (!tipText || !tipText.includes('zl./kolo')) throw new Error(`tooltip města chybí: ${tipText}`);
+  await page.screenshot({ path: 'artifacts/screenshot-city.png' });
+
   // mobilní šířka – žádný vodorovný scroll
   await page.setViewportSize({ width: 390, height: 844 });
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
