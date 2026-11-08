@@ -10,10 +10,10 @@ Odškrtávej `[x]` po dokončení. Nové nápady přidávej na konec příslušn
 - [x] Ukládání do localStorage, testy logiky, smoke test v prohlížeči
 
 ## Fáze 1 – hratelnost
-- [ ] Šipka/cesta ukazující trasu při najetí na cílové pole
+- [x] Šipka/cesta ukazující trasu při najetí na cílové pole
 - [ ] Animace pohybu a útoku (krátké, aby AI tah byl čitelný)
 - [ ] Mlha války: vidíš jen okolí svých jednotek a měst
-- [ ] Tlačítko „další jednotka s pohybem“ (Tab)
+- [x] Tlačítko „další jednotka s pohybem“ (Tab)
 - [ ] Zobrazení příjmu a obrany u města při najetí myší
 - [ ] Výběr obtížnosti AI (snadná / normální / těžká)
 - [ ] Ovládání dotykem na mobilu (větší zásahová plocha, potvrzení útoku)

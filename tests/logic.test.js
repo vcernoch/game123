@@ -2,12 +2,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   createGame, reachable, moveUnit, attack, buyUnit, endTurn, unitAt, isPassable,
-  previewAttack, cloneState,
+  previewAttack, cloneState, pathTo, nextActiveUnit, tileAt,
 } from '../src/game.js';
 import { runAITurn } from '../src/ai.js';
 import { pathExists } from '../src/map.js';
 import { distance, key } from '../src/hex.js';
-import { UNIT_TYPES } from '../src/rules.js';
+import { UNIT_TYPES, TERRAIN } from '../src/rules.js';
 
 test('mapa je deterministická a startovní města jsou propojená', () => {
   for (const seed of [1, 2, 3, 42, 999]) {
@@ -106,4 +106,43 @@ test('AI vs AI odehraje 120 kol bez chyby a bez porušení pravidel', () => {
     JSON.parse(JSON.stringify(cloneState(s)));
   }
   assert.ok(finished >= 1, 'aspoň jedna hra AI vs AI by měla skončit');
+});
+
+test('trasa vede po sousedních polích a její cena odpovídá dosahu', () => {
+  for (const seed of [3, 7, 11, 21]) {
+    const s = createGame({ seed });
+    for (const u of s.units.filter((x) => x.owner === 0)) {
+      const reach = reachable(s, u);
+      for (const [k, cost] of reach) {
+        const [q, r] = k.split(',').map(Number);
+        const path = pathTo(s, u, q, r);
+        assert.ok(path, `trasa na ${k}`);
+        assert.deepEqual(path[0], { q: u.q, r: u.r });
+        assert.deepEqual(path[path.length - 1], { q, r });
+        let sum = 0;
+        for (let i = 1; i < path.length; i++) {
+          assert.equal(distance(path[i - 1], path[i]), 1);
+          assert.ok(isPassable(s, path[i].q, path[i].r));
+          sum += TERRAIN[tileAt(s, path[i].q, path[i].r).terrain].cost;
+        }
+        // cena je buď součet terénu, nebo zkrácená na zbývající body (velký první krok)
+        assert.ok(cost === sum || (path.length === 2 && cost === u.movesLeft), `seed ${seed} ${k}`);
+      }
+      assert.equal(pathTo(s, u, u.q, u.r), null);
+    }
+  }
+});
+
+test('Tab vybírá cyklicky jednotky, které ještě mohou jednat', () => {
+  const s = createGame({ seed: 5 });
+  const [a, b] = s.units.filter((u) => u.owner === 0).sort((x, y) => x.id - y.id);
+  assert.equal(nextActiveUnit(s, 0).id, a.id);
+  assert.equal(nextActiveUnit(s, 0, a.id).id, b.id);
+  assert.equal(nextActiveUnit(s, 0, b.id).id, a.id);
+  a.movesLeft = 0;
+  a.hasAttacked = true;
+  assert.equal(nextActiveUnit(s, 0, b.id).id, b.id);
+  b.movesLeft = 0;
+  b.hasAttacked = true;
+  assert.equal(nextActiveUnit(s, 0), null);
 });

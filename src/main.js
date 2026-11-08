@@ -1,7 +1,7 @@
 // Propojení logiky, vykreslení a ovládání v prohlížeči.
 import {
   createGame, reachable, attackTargets, moveUnit, attack, buyUnit, endTurn,
-  unitAt, cityAt, getUnit, incomeOf, previewAttack, tileAt,
+  unitAt, cityAt, getUnit, incomeOf, previewAttack, tileAt, pathTo, nextActiveUnit,
 } from './game.js';
 import { runAITurn } from './ai.js';
 import { render, canvasSize, pickHex } from './render.js';
@@ -59,6 +59,7 @@ function draw() {
     reachable: mine ? reachable(state, u) : null,
     targets: mine ? new Set(attackTargets(state, u).map((t) => t.id)) : null,
     hover,
+    path: mine && hover && !unitAt(state, hover.q, hover.r) ? pathTo(state, u, hover.q, hover.r) : null,
   });
   updateHud();
 }
@@ -209,6 +210,7 @@ canvas.addEventListener('mousemove', onMove);
 canvas.addEventListener('mouseleave', () => { hover = null; $('tooltip').hidden = true; draw(); });
 $('end-turn').addEventListener('click', doEndTurn);
 $('new-game').addEventListener('click', newGame);
+$('next-unit').addEventListener('click', selectNextUnit);
 $('info').addEventListener('click', (ev) => {
   const btn = ev.target.closest('button[data-buy]');
   if (!btn || !selectedCityId) return;
@@ -216,13 +218,27 @@ $('info').addEventListener('click', (ev) => {
 });
 window.addEventListener('keydown', (ev) => {
   if (ev.key === 'Enter' || ev.key === 'e') doEndTurn();
+  if (ev.key === 'Tab') { ev.preventDefault(); selectNextUnit(); }
   if (ev.key === 'Escape') { selectedId = null; selectedCityId = null; draw(); }
 });
+
+// Vybere další jednotku, která ještě může jednat (Tab / tlačítko).
+function selectNextUnit() {
+  if (aiRunning || state.winner !== null) return;
+  const cur = selectedUnit();
+  const next = nextActiveUnit(state, 0, cur && cur.owner === 0 ? cur.id : null);
+  selectedId = next ? next.id : null;
+  const city = next && cityAt(state, next.q, next.r);
+  selectedCityId = city ? city.id : null;
+  draw();
+}
 
 // Háček pro automatické testy (Playwright).
 window.__game = {
   getState: () => state,
   endTurn: doEndTurn,
+  nextUnit: selectNextUnit,
+  selectedId: () => selectedId,
   isBusy: () => aiRunning,
   newGame: (seed) => { state = createGame({ seed }); resize(); draw(); },
 };

@@ -38,6 +38,33 @@ try {
     throw new Error(`kola nepřibývají (turn=${turn})`);
   }
   await page.click('#board', { position: { x: box.width / 2, y: box.height / 2 } });
+
+  // Tab vybere jednotku s pohybem a najetí na vzdálené pole ukáže trasu
+  if ((await page.evaluate(() => window.__game.getState().winner)) === null) {
+    await page.keyboard.press('Tab');
+    const picked = await page.evaluate(() => window.__game.selectedId());
+    if (picked === null) throw new Error('Tab nevybral žádnou jednotku');
+    const far = await page.evaluate(async () => {
+      const g = await import('./src/game.js');
+      const rnd = await import('./src/render.js');
+      const st = window.__game.getState();
+      const u = g.getUnit(st, window.__game.selectedId());
+      let bestK = null;
+      for (const [k] of g.reachable(st, u)) {
+        const [q, r] = k.split(',').map(Number);
+        const len = g.pathTo(st, u, q, r).length;
+        if (!bestK || len > bestK.len) bestK = { q, r, len };
+      }
+      if (!bestK) return null;
+      // přepočet středu pole na souřadnice stránky
+      const c = rnd.tileCenter(bestK.q, bestK.r);
+      const { w } = rnd.canvasSize(st);
+      const rect = document.getElementById('board').getBoundingClientRect();
+      const k = rect.width / w;
+      return { x: rect.left + c.x * k, y: rect.top + c.y * k };
+    });
+    if (far) await page.mouse.move(far.x, far.y);
+  }
   await mkdir('artifacts', { recursive: true });
   await page.screenshot({ path: 'artifacts/screenshot.png', fullPage: true });
 
