@@ -2,6 +2,15 @@
 
 Nejnovější záznam nahoře. Formát: datum – co se udělalo – stav testů – otázky pro Vladimíra.
 
+## 2026-11-08 – Mlha války
+- `visibleTiles()`, `updateExplored()`, `exploredTiles()` v `game.js`. Dohled jednotek je v `rules.js` (`sight`: válečník a lučištník 2, jezdec 3), města 2, kopce +1 (`VISION`).
+- Prozkoumaná pole se pamatují v `state.explored` (pole klíčů na hráče, JSON). `createGame({ fog })` umí mlhu vypnout, po konci hry se odkryje celá mapa.
+- Kreslení: neprozkoumané pole je tmavé, prozkoumané a právě neviditelné ztmavené, cizí jednotky v mlze se nekreslí ani na ně nejde kliknout. Tah AI se animuje jen tam, kde na něj hráč vidí.
+- Struktura stavu: `state.version` 3 (`fog`, `explored`), migrace z verze 1 i 2 v `migrateState()`.
+- Testy: +1 logický (dohled kolem jednotek, nepřátelské hlavní město na začátku skryté, prozkoumané ⊇ viditelné a po pohybu neubývá, bez mlhy / po konci hry vidět vše); test migrace kontroluje dopočítání `explored`.
+- Stav: `npm run check` zelený (14 logických testů + smoke).
+- Známá omezení (vědomě nechaná na později, zapsaná v Nápadech): AI zatím vidí celou mapu; kronika vypisuje i akce AI v mlze; dosah pohybu nepočítá s pohybem na pole se skrytou nepřátelskou jednotkou (to pole prostě nejde označit, což trochu prozrazuje, že tam něco stojí).
+
 ## 2026-11-08 – Animace pohybu a útoku
 - Akce v `game.js` zapisují události do `state.events` (pohyb s trasou, útok s poškozením, verbování, dobytí). `drainEvents()` je vybere, `applyEvent()` je umí přehrát na kopii stavu.
 - Nový `src/anim.js`: přehrává události nad kopií stavu z doby před akcí – jednotky jdou po trase krok za krokem, útočník udělá výpad, nad cíli vyskočí čísla poškození, u dobytí „Dobyto!“. Animuje se tah AI i akce hráče.

@@ -13,7 +13,8 @@ const lerp = (a, b, t) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t 
 const ease = (t) => (t < 0.5 ? 2 * t * t : 1 - 2 * (1 - t) * (1 - t));
 
 // redraw: překreslí jen plátno (HUD se během animace nepřepisuje, aby nemizela tlačítka).
-export function createAnimator(redraw) {
+// isVisible(state, q, r): jestli hráč u obrazovky pole vidí – co je v mlze, se neanimuje.
+export function createAnimator(redraw, isVisible = () => true) {
   const a = {
     display: null,        // stav, který se právě kreslí (null = skutečný stav)
     unitPos: new Map(),   // id jednotky -> {x, y} během pohybu
@@ -104,9 +105,10 @@ export function createAnimator(redraw) {
     a.busy = true;
     ensureLoop();
     for (const ev of events) {
+      const shown = eventVisible(a.display, ev);
       // nová jednotka a dobytí se nejdřív ukážou, pak se chvíli čeká
       if (ev.type === 'spawn' || ev.type === 'capture') applyEvent(a.display, ev);
-      await animate(ev);
+      if (shown) await animate(ev);
       if (ev.type !== 'spawn' && ev.type !== 'capture') applyEvent(a.display, ev);
       a.unitPos.clear();
     }
@@ -115,6 +117,16 @@ export function createAnimator(redraw) {
     a.skipping = false;
     redraw();
   };
+
+  // Událost stojí za animaci, jen když se aspoň zčásti odehrává na viditelném poli.
+  function eventVisible(st, ev) {
+    const see = (p) => p && isVisible(st, p.q, p.r);
+    if (ev.type === 'move') return ev.path.some(see);
+    if (ev.type === 'attack') return see(getUnit(st, ev.attackerId)) || see(getUnit(st, ev.defenderId));
+    if (ev.type === 'capture') return see(st.cities.find((c) => c.id === ev.cityId));
+    if (ev.type === 'spawn') return see(ev.unit);
+    return true;
+  }
 
   a.skip = () => { if (a.busy) a.skipping = true; };
   a.view = () => ({ unitPos: a.unitPos, floaters: floaterView() });

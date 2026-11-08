@@ -2,7 +2,7 @@
 import {
   createGame, reachable, attackTargets, moveUnit, attack, buyUnit, endTurn,
   unitAt, cityAt, getUnit, incomeOf, previewAttack, tileAt, pathTo, nextActiveUnit, cityInfo,
-  cloneState, drainEvents, migrateState,
+  cloneState, drainEvents, migrateState, visibleTiles, exploredTiles,
 } from './game.js';
 import { createAnimator } from './anim.js';
 import { runAITurn } from './ai.js';
@@ -20,10 +20,16 @@ let selectedId = null;
 let selectedCityId = null;
 let hover = null;
 let aiRunning = false;
-const anim = createAnimator(drawBoard);
+const anim = createAnimator(drawBoard, (st, q, r) => visibleTiles(st, 0).has(key(q, r)));
 try {
   if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) anim.speed = 0;
 } catch { /* starý prohlížeč */ }
+
+// Jednotka na poli, jen pokud ji hráč vidí (cizí jednotky v mlze jako by nebyly).
+function seenUnitAt(q, r) {
+  const u = unitAt(state, q, r);
+  return u && (u.owner === 0 || visibleTiles(state, 0).has(key(q, r))) ? u : null;
+}
 
 // Hráč nemůže jednat, dokud hraje AI nebo běží animace.
 const busy = () => aiRunning || anim.busy;
@@ -68,13 +74,17 @@ function draw() {
 function drawBoard() {
   const u = selectedUnit();
   const mine = u && u.owner === state.current && !busy();
-  render(ctx, anim.display || state, {
+  const shown = anim.display || state;
+  render(ctx, shown, {
     ...anim.view(),
+    visible: visibleTiles(shown, 0),
+    explored: exploredTiles(shown, 0),
+    viewer: 0,
     selectedId,
     reachable: mine ? reachable(state, u) : null,
     targets: mine ? new Set(attackTargets(state, u).map((t) => t.id)) : null,
     hover,
-    path: mine && hover && !unitAt(state, hover.q, hover.r) ? pathTo(state, u, hover.q, hover.r) : null,
+    path: mine && hover && !seenUnitAt(hover.q, hover.r) ? pathTo(state, u, hover.q, hover.r) : null,
   });
 }
 
@@ -111,7 +121,9 @@ function updateHud() {
       if (blocked) html += '<p class="hint">Město je obsazené – nejdřív z něj odejdi jednotkou.</p>';
     }
   }
-  if (!u && !city && hover && tileAt(state, hover.q, hover.r)) {
+  if (!u && !city && hover && !exploredTiles(state, 0).has(key(hover.q, hover.r))) {
+    html = '<p>Neprozkoumané území</p>';
+  } else if (!u && !city && hover && tileAt(state, hover.q, hover.r)) {
     const t = TERRAIN[tileAt(state, hover.q, hover.r).terrain];
     html = `<p>${t.name}${t.passable ? ` · pohyb ${t.cost} · obrana +${Math.round(t.defBonus * 100)} %` : ' · neprůchodné'}</p>`;
     const hc = cityAt(state, hover.q, hover.r);
@@ -146,8 +158,8 @@ function onClick(ev) {
   const p = canvasPoint(ev);
   const hex = pickHex(p.x, p.y);
   if (!tileAt(state, hex.q, hex.r)) return;
-  const clickedUnit = unitAt(state, hex.q, hex.r);
-  const clickedCity = cityAt(state, hex.q, hex.r);
+  const clickedUnit = seenUnitAt(hex.q, hex.r);
+  const clickedCity = exploredTiles(state, 0).has(key(hex.q, hex.r)) ? cityAt(state, hex.q, hex.r) : null;
   const sel = selectedUnit();
 
   if (sel && sel.owner === state.current) {
@@ -195,12 +207,12 @@ function placeTip(tip, ev) {
 function showTooltip(ev, hex) {
   const tip = $('tooltip');
   const sel = selectedUnit();
-  const target = hex && unitAt(state, hex.q, hex.r);
+  const target = hex && seenUnitAt(hex.q, hex.r);
   if (sel && target && sel.owner === state.current && attackTargets(state, sel).includes(target)) {
     const p = previewAttack(state, sel, target);
     tip.textContent = `Útok: −${p.damage}${p.kills ? ' (zničí)' : ''}, protiúder −${p.counter}`;
     placeTip(tip, ev);
-  } else if (hex && cityAt(state, hex.q, hex.r)) {
+  } else if (hex && cityAt(state, hex.q, hex.r) && exploredTiles(state, 0).has(key(hex.q, hex.r))) {
     const city = cityAt(state, hex.q, hex.r);
     const ci = cityInfo(state, city);
     const owner = city.owner === null ? 'neutrální' : PLAYERS[city.owner].name;

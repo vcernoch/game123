@@ -1,9 +1,9 @@
 // Čistá herní logika bez DOM. Stav je obyčejný JSON objekt (dá se uložit).
 import { key, neighbors, distance } from './hex.js';
 import { generateMap } from './map.js';
-import { TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY } from './rules.js';
+import { TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY, VISION } from './rules.js';
 
-export function createGame({ seed = 1, cols = 14, rows = 10, neutralCities = 4 } = {}) {
+export function createGame({ seed = 1, cols = 14, rows = 10, neutralCities = 4, fog = true } = {}) {
   const { tiles, cities, starts } = generateMap(seed, cols, rows, neutralCities);
   const state = {
     version: STATE_VERSION,
@@ -20,6 +20,8 @@ export function createGame({ seed = 1, cols = 14, rows = 10, neutralCities = 4 }
     nextUnitId: 1,
     log: [],
     events: [],
+    fog,
+    explored: PLAYERS.map(() => []),
   };
   starts.forEach((s, owner) => {
     spawnUnit(state, 'warrior', owner, s.q, s.r);
@@ -31,10 +33,11 @@ export function createGame({ seed = 1, cols = 14, rows = 10, neutralCities = 4 }
     u.hasAttacked = false;
   }
   state.events = [];
+  PLAYERS.forEach((_, p) => updateExplored(state, p));
   return state;
 }
 
-export const STATE_VERSION = 2;
+export const STATE_VERSION = 3;
 
 // Převede uložený stav starší verze na aktuální; neznámý formát vrátí null.
 export function migrateState(s) {
@@ -43,7 +46,54 @@ export function migrateState(s) {
     s.events = [];
     s.version = 2;
   }
+  if (s.version === 2) {
+    // mlha války: staré hry ji dostanou taky, prozkoumané je to, co je vidět teď
+    s.fog = true;
+    s.explored = PLAYERS.map(() => []);
+    PLAYERS.forEach((_, p) => updateExplored(s, p));
+    s.version = 3;
+  }
   return s.version === STATE_VERSION ? s : null;
+}
+
+// ---------- mlha války ----------
+
+// Pole, která hráč právě vidí (Set klíčů). Bez mlhy vidí všechno.
+export function visibleTiles(state, player) {
+  const seen = new Set();
+  if (!state.fog || state.winner !== null) {
+    for (const k of Object.keys(state.tiles)) seen.add(k);
+    return seen;
+  }
+  const look = (q, r, radius) => {
+    for (let dq = -radius; dq <= radius; dq++) {
+      for (let dr = Math.max(-radius, -dq - radius); dr <= Math.min(radius, -dq + radius); dr++) {
+        const k = key(q + dq, r + dr);
+        if (state.tiles[k]) seen.add(k);
+      }
+    }
+  };
+  for (const u of state.units) {
+    if (u.owner !== player) continue;
+    const onHills = tileAt(state, u.q, u.r).terrain === 'hills';
+    look(u.q, u.r, UNIT_TYPES[u.type].sight + (onHills ? VISION.hillsBonus : 0));
+  }
+  for (const c of state.cities) if (c.owner === player) look(c.q, c.r, VISION.city);
+  return seen;
+}
+
+// Přidá aktuálně viditelná pole mezi prozkoumaná (state.explored[player] je seřazené pole klíčů).
+export function updateExplored(state, player) {
+  if (!state.explored) return;
+  const all = new Set(state.explored[player] || []);
+  for (const k of visibleTiles(state, player)) all.add(k);
+  state.explored[player] = [...all].sort();
+}
+
+// Prozkoumaná pole jako Set (pro rychlé dotazy při kreslení).
+export function exploredTiles(state, player) {
+  if (!state.fog) return new Set(Object.keys(state.tiles));
+  return new Set(state.explored ? state.explored[player] : []);
 }
 
 // ---------- události pro animace ----------
@@ -235,6 +285,7 @@ export function spawnUnit(state, type, owner, q, r) {
   };
   state.units.push(unit);
   emit(state, { type: 'spawn', unit: { ...unit } });
+  updateExplored(state, owner);
   return unit;
 }
 
@@ -257,6 +308,7 @@ export function moveUnit(state, unitId, q, r) {
     addLog(state, `${PLAYERS[unit.owner].name}: dobyto město ${city.name}`);
     if (prev !== null) checkWinner(state);
   }
+  updateExplored(state, unit.owner);
   return true;
 }
 

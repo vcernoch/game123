@@ -34,17 +34,30 @@ function hexPath(ctx, cx, cy, size) {
 }
 
 // view = { selectedId, reachable: Map, targets: Set(unitId), hover: {q,r}, path: [{q,r}],
-//          unitPos: Map(unitId -> {x,y}) pro animace, floaters: [{x,y,text,color,age}] }
+//          unitPos: Map(unitId -> {x,y}) pro animace, floaters: [{x,y,text,color,age}],
+//          visible/explored: Set klíčů pro mlhu války (chybí = vidět vše), viewer: hráč u obrazovky }
 export function render(ctx, state, view = {}) {
   const { w, h } = canvasSize(state);
   ctx.clearRect(0, 0, w, h);
 
+  const seen = (q, r) => !view.visible || view.visible.has(key(q, r));
+  const known = (q, r) => !view.explored || view.explored.has(key(q, r));
+
   for (const t of Object.values(state.tiles)) {
     const c = tileCenter(t.q, t.r);
     hexPath(ctx, c.x, c.y, HEX_SIZE - 1);
-    ctx.fillStyle = TERRAIN[t.terrain].color;
-    ctx.fill();
-    drawTerrainDetail(ctx, t.terrain, c.x, c.y);
+    if (known(t.q, t.r)) {
+      ctx.fillStyle = TERRAIN[t.terrain].color;
+      ctx.fill();
+      drawTerrainDetail(ctx, t.terrain, c.x, c.y);
+      if (!seen(t.q, t.r)) {
+        ctx.fillStyle = 'rgba(12,14,22,0.5)';
+        ctx.fill();
+      }
+    } else {
+      ctx.fillStyle = '#2a2f3a';
+      ctx.fill();
+    }
     if (view.reachable && view.reachable.has(key(t.q, t.r))) {
       ctx.fillStyle = 'rgba(255,255,255,0.35)';
       ctx.fill();
@@ -62,7 +75,7 @@ export function render(ctx, state, view = {}) {
     ctx.stroke();
   }
 
-  for (const city of state.cities) drawCity(ctx, city);
+  for (const city of state.cities) if (known(city.q, city.r)) drawCity(ctx, city);
 
   if (view.path && view.path.length > 1) drawPath(ctx, view.path);
 
@@ -71,6 +84,11 @@ export function render(ctx, state, view = {}) {
   const units = [...state.units].sort((a, b) => moving.has(a.id) - moving.has(b.id));
   for (const u of units) {
     const c = moving.get(u.id) || tileCenter(u.q, u.r);
+    // cizí jednotky v mlze nekreslíme (u animace podle pole, kde právě je)
+    if (view.visible && u.owner !== view.viewer) {
+      const at = moving.has(u.id) ? pickHex(c.x, c.y) : u;
+      if (!seen(at.q, at.r)) continue;
+    }
     drawUnit(ctx, u, c.x, c.y, u.id === view.selectedId, state.current === u.owner);
     if (view.targets && view.targets.has(u.id)) {
       ctx.beginPath();

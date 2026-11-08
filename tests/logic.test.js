@@ -4,6 +4,7 @@ import {
   createGame, reachable, moveUnit, attack, buyUnit, endTurn, unitAt, isPassable,
   previewAttack, cloneState, pathTo, nextActiveUnit, tileAt, cityInfo, incomeOf, defenseValue,
   drainEvents, applyEvent, migrateState, STATE_VERSION,
+  visibleTiles, exploredTiles,
 } from '../src/game.js';
 import { runAITurn } from '../src/ai.js';
 import { pathExists } from '../src/map.js';
@@ -210,6 +211,42 @@ test('starý uložený stav (verze 1) se převede, neznámý se zahodí', () => 
   const m = migrateState(old);
   assert.equal(m.version, STATE_VERSION);
   assert.deepEqual(m.events, []);
+  assert.ok(m.fog && m.explored[0].length > 0, 'migrace dopočítá prozkoumaná pole');
   assert.equal(migrateState({ version: 99 }), null);
   assert.equal(migrateState(null), null);
+});
+
+test('mlha války: vidíš okolí svých jednotek a měst, prozkoumané se pamatuje', () => {
+  const s = createGame({ seed: 6 });
+  const vis = visibleTiles(s, 0);
+  for (const u of s.units.filter((x) => x.owner === 0)) {
+    assert.ok(vis.has(key(u.q, u.r)));
+    const sight = UNIT_TYPES[u.type].sight;
+    for (const k of Object.keys(s.tiles)) {
+      const [q, r] = k.split(',').map(Number);
+      if (distance(u, { q, r }) <= sight) assert.ok(vis.has(k), `pole ${k} v dohledu`);
+    }
+  }
+  // nepřátelské hlavní město je na začátku daleko a nevidíš ho
+  const enemyCap = s.cities.find((c) => c.owner === 1 && c.capital);
+  assert.ok(!vis.has(key(enemyCap.q, enemyCap.r)));
+  assert.ok(vis.size < Object.keys(s.tiles).length);
+  // prozkoumané ⊇ viditelné a po pohybu neubývá
+  const before = exploredTiles(s, 0);
+  for (const k of vis) assert.ok(before.has(k));
+  const u = s.units.find((x) => x.owner === 0);
+  let far = null;
+  for (const [k] of reachable(s, u)) {
+    const [q, r] = k.split(',').map(Number);
+    if (!far || distance(u, { q, r }) > distance(u, far)) far = { q, r };
+  }
+  moveUnit(s, u.id, far.q, far.r);
+  const after = exploredTiles(s, 0);
+  for (const k of before) assert.ok(after.has(k));
+  assert.ok(after.size >= before.size);
+  // bez mlhy nebo po konci hry je vidět všechno
+  const open = createGame({ seed: 6, fog: false });
+  assert.equal(visibleTiles(open, 0).size, Object.keys(open.tiles).length);
+  s.winner = 0;
+  assert.equal(visibleTiles(s, 0).size, Object.keys(s.tiles).length);
 });
