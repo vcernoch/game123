@@ -2,6 +2,16 @@
 
 Nejnovější záznam nahoře. Formát: datum – co se udělalo – stav testů – otázky pro Vladimíra.
 
+## 2026-11-08 – Silnice
+- Generátor mapy staví silnice: minimální kostra mezi všemi městy, každý úsek vede nejlevnější cestou terénem a slévá se s už hotovou silnicí (`buildRoads` v `map.js`). Mapa zůstává deterministická podle seedu.
+- `stepCost()` v `game.js`: krok ze silnice na silnici stojí `ROAD_COST` = 0,5 bodu pohybu (jinak terén cílového pole). Trasa, dosah i AI to používají automaticky.
+- Kreslení: hnědá cesta od středu pole k sousedům se silnicí, takže ji mlha ztmaví spolu s polem. Panel při najetí ukáže „silnice“. Body pohybu se zobrazují i s půlkami.
+- Řeky jsem vynechal (úkol zněl „silnice nebo řeky“) a dal je do Nápadů.
+- Struktura stavu: `state.version` 7 (`tile.road`); staré uložené mapy se načtou bez silnic.
+- Smoke test: krok se stavbou trhu teď začíná v čerstvé hře – pasivní hráč ve smoke testu je díky rychlejší AI po silnicích dřív obsazený.
+- Testy: +1 logický (silnice vedou přes všechna města a tvoří jednu síť, jen po průchodném terénu, krok po silnici je levnější, migrace). Test trasy počítá cenu přes `stepCost`.
+- Stav: `npm run check` zelený (27 logických testů + smoke).
+
 ## 2026-11-08 – Kopiník a katapult
 - Kopiník (12 zl., útok 3, obrana 4): `bonusVs: { horseman: 1 }` – proti jezdci dvojnásobná síla v útoku, obraně i protiúderu.
 - Katapult (20 zl., útok 6, obrana 1, pohyb 1, dostřel 2, 7 životů): `siege: 0.5` – +50 % proti jednotkám ve městech a ignoruje hradby (ne základní bonus města).

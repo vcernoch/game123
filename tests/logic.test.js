@@ -4,7 +4,7 @@ import {
   createGame, reachable, moveUnit, attack, buyUnit, endTurn, unitAt, isPassable,
   previewAttack, cloneState, pathTo, nextActiveUnit, tileAt, cityInfo, incomeOf, defenseValue,
   drainEvents, applyEvent, migrateState, STATE_VERSION,
-  visibleTiles, exploredTiles, build, unitCost, rankOf,
+  visibleTiles, exploredTiles, build, unitCost, rankOf, stepCost,
 } from '../src/game.js';
 import { runAITurn, goalsFor, buildSomething, pickRecruit } from '../src/ai.js';
 import { decideTap } from '../src/input.js';
@@ -128,7 +128,7 @@ test('trasa vede po sousedních polích a její cena odpovídá dosahu', () => {
         for (let i = 1; i < path.length; i++) {
           assert.equal(distance(path[i - 1], path[i]), 1);
           assert.ok(isPassable(s, path[i].q, path[i].r));
-          sum += TERRAIN[tileAt(s, path[i].q, path[i].r).terrain].cost;
+          sum += stepCost(s, path[i - 1], path[i]);
         }
         // cena je buď součet terénu, nebo zkrácená na zbývající body (velký první krok)
         assert.ok(cost === sum || (path.length === 2 && cost === u.movesLeft), `seed ${seed} ${k}`);
@@ -488,4 +488,36 @@ test('AI verbuje i nové jednotky a na jezdce odpovídá kopiníky', () => {
     }
   }
   assert.ok(seen.has('spearman') && seen.has('catapult'), [...seen].join(','));
+});
+
+test('silnice spojují všechna města a zrychlují pohyb', () => {
+  for (const seed of [1, 2, 3, 9, 77]) {
+    const s = createGame({ seed });
+    const roads = Object.values(s.tiles).filter((t) => t.road);
+    assert.ok(roads.length >= s.cities.length, `seed ${seed}: málo silnic`);
+    for (const c of s.cities) assert.ok(s.tiles[key(c.q, c.r)].road, `město ${c.name} bez silnice`);
+    // po silnicích se dá dojít z prvního města do všech ostatních
+    const start = key(s.cities[0].q, s.cities[0].r);
+    const seen = new Set([start]);
+    const queue = [s.cities[0]];
+    while (queue.length) {
+      const cur = queue.shift();
+      for (const n of neighbors(cur.q, cur.r)) {
+        const k = key(n.q, n.r);
+        if (!seen.has(k) && s.tiles[k] && s.tiles[k].road) { seen.add(k); queue.push(n); }
+      }
+    }
+    for (const c of s.cities) assert.ok(seen.has(key(c.q, c.r)), `seed ${seed}: ${c.name} mimo síť`);
+    assert.ok(roads.every((t) => isPassable(s, t.q, t.r)));
+  }
+  // krok po silnici je levnější než po terénu
+  const s = createGame({ seed: 1 });
+  const a = Object.values(s.tiles).find((t) => t.road && neighbors(t.q, t.r).some((n) => s.tiles[key(n.q, n.r)]?.road));
+  const b = neighbors(a.q, a.r).map((n) => s.tiles[key(n.q, n.r)]).find((t) => t && t.road);
+  assert.ok(stepCost(s, a, b) < TERRAIN[b.terrain].cost);
+  // stará hra (verze 6) se načte bez silnic
+  const old = createGame({ seed: 1 });
+  old.version = 6;
+  for (const t of Object.values(old.tiles)) delete t.road;
+  assert.equal(migrateState(old).version, STATE_VERSION);
 });

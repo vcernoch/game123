@@ -50,6 +50,9 @@ export const DIFFICULTY = {
   hard:   { name: 'Těžká',     seesAll: true,  incomeBonus: 3,  startGold: 10,  caution: 0.8 },
 };
 
+// Silnice: krok z pole se silnicí na další pole se silnicí stojí jen tolik bodů pohybu.
+export const ROAD_COST = 0.5;
+
 // Mlha války: dohled měst a bonus z kopců.
 export const VISION = { city: 2, hillsBonus: 1 };
 

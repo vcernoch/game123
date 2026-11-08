@@ -1,5 +1,5 @@
 // Vykreslení na canvas. Žádná herní logika, jen kreslení stavu.
-import { hexToPixel, hexCorners, pixelToHex, key } from './hex.js';
+import { hexToPixel, hexCorners, pixelToHex, key, neighbors } from './hex.js';
 import { TERRAIN, UNIT_TYPES, PLAYERS, NEUTRAL_COLOR, RANKS } from './rules.js';
 
 export const HEX_SIZE = 32;
@@ -50,6 +50,7 @@ export function render(ctx, state, view = {}) {
       ctx.fillStyle = TERRAIN[t.terrain].color;
       ctx.fill();
       drawTerrainDetail(ctx, t.terrain, c.x, c.y);
+      if (t.road) drawRoad(ctx, state, t, c);
       // detail terénu kreslí vlastní cesty – obrys hexu je potřeba založit znovu
       hexPath(ctx, c.x, c.y, HEX_SIZE - 1);
       if (!seen(t.q, t.r)) {
@@ -159,6 +160,31 @@ function drawPath(ctx, path) {
     ctx.beginPath();
     ctx.arc(pts[i].x, pts[i].y, 4, 0, Math.PI * 2);
     ctx.fill();
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// Silnice: z každého pole se silnicí půlka cesty ke každému sousedovi se silnicí.
+function drawRoad(ctx, state, t, c) {
+  const ends = [];
+  for (const n of neighbors(t.q, t.r)) {
+    const nt = state.tiles[key(n.q, n.r)];
+    if (!nt || !nt.road) continue;
+    const nc = tileCenter(n.q, n.r);
+    ends.push({ x: (c.x + nc.x) / 2, y: (c.y + nc.y) / 2 });
+  }
+  ctx.save();
+  ctx.lineCap = 'round';
+  for (const [color, width] of [['#6b4f2a', 6], ['#c9a66b', 3]]) {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.beginPath();
+    for (const e of ends) {
+      ctx.moveTo(c.x, c.y);
+      ctx.lineTo(e.x, e.y);
+    }
+    if (!ends.length) ctx.arc(c.x, c.y, width / 2, 0, Math.PI * 2);
     ctx.stroke();
   }
   ctx.restore();

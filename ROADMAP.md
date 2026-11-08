@@ -22,7 +22,7 @@ Odškrtávej `[x]` po dokončení. Nové nápady přidávej na konec příslušn
 - [x] Budovy ve městech (hradby, trh, kasárna)
 - [x] Zkušenosti jednotek a povýšení
 - [x] Nové jednotky: obléhací stroj, kopiník (bonus proti jezdcům)
-- [ ] Silnice nebo řeky ovlivňující pohyb
+- [x] Silnice nebo řeky ovlivňující pohyb (silnice; řeky zatím ne – viz Nápady)
 - [ ] Lepší AI: obrana vlastních měst, soustředění sil, ústup zraněných
 - [ ] Více frakcí s odlišnými bonusy
 
@@ -36,3 +36,4 @@ Odškrtávej `[x]` po dokončení. Nové nápady přidávej na konec příslušn
 - Diplomacie s více AI
 - Náhodné události (mor, úroda, vzpoura)
 - Kronika by mohla skrývat akce AI, které hráč neviděl
+- Řeky na hranách hexů (pohyb navíc, bonus obránci) – doplněk k silnicím

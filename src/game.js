@@ -2,7 +2,7 @@
 import { key, neighbors, distance } from './hex.js';
 import { generateMap } from './map.js';
 import {
-  TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY, VISION, DIFFICULTY, BUILDINGS, BUILDING_EFFECTS, RANKS, XP,
+  TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY, VISION, DIFFICULTY, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, ROAD_COST,
 } from './rules.js';
 
 export function createGame({
@@ -44,7 +44,7 @@ export function createGame({
   return state;
 }
 
-export const STATE_VERSION = 6;
+export const STATE_VERSION = 7;
 
 // Převede uložený stav starší verze na aktuální; neznámý formát vrátí null.
 export function migrateState(s) {
@@ -71,6 +71,10 @@ export function migrateState(s) {
   if (s.version === 5) {
     for (const u of s.units) u.xp = 0;
     s.version = 6;
+  }
+  if (s.version === 6) {
+    // silnice přibyly až ve verzi 7 – staré mapy je prostě nemají (tile.road chybí = bez silnice)
+    s.version = 7;
   }
   return s.version === STATE_VERSION ? s : null;
 }
@@ -222,6 +226,14 @@ export function cityInfo(state, city) {
   };
 }
 
+// Cena kroku z pole `from` na sousední pole `to` (silnice zlevňují, jinak terén cílového pole).
+export function stepCost(state, from, to) {
+  const a = tileAt(state, from.q, from.r);
+  const b = tileAt(state, to.q, to.r);
+  if (a && b && a.road && b.road) return ROAD_COST;
+  return TERRAIN[b.terrain].cost;
+}
+
 // Prohledá dosažitelná pole (Dijkstra). Vrací ceny i předchůdce, aby šla složit trasa.
 // Přes vlastní jednotky lze projít, ale ne zastavit.
 function searchMoves(state, unit) {
@@ -239,8 +251,7 @@ function searchMoves(state, unit) {
       const other = unitAt(state, n.q, n.r);
       if (other && other.owner !== unit.owner) continue;
       // vstup do terénu za 2 je povolen i s 1 zbývajícím bodem, pokud je to první krok
-      const stepCost = TERRAIN[t.terrain].cost;
-      let cost = cur.cost + stepCost;
+      let cost = cur.cost + stepCost(state, cur, n);
       if (cost > unit.movesLeft) {
         if (cur.cost === 0 && unit.movesLeft > 0) cost = unit.movesLeft;
         else continue;

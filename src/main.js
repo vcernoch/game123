@@ -118,7 +118,7 @@ function updateHud() {
     const t = UNIT_TYPES[u.type];
     html += `<h3>${t.name} <span class="tag" style="background:${PLAYERS[u.owner].color}">${PLAYERS[u.owner].name}</span></h3>
       <p>Životy ${u.hp}/${t.hp} · Útok ${fmt(t.atk * rankMult(u))} · Obrana ${fmt(t.def * rankMult(u))} · Dosah ${t.range}</p>
-      <p>Pohyb ${u.movesLeft}/${t.move}${u.hasAttacked ? ' · už útočil' : ''}</p>
+      <p>Pohyb ${fmt(u.movesLeft)}/${t.move}${u.hasAttacked ? ' · už útočil' : ''}</p>
       <p>${rankLine(u)}</p>${t.desc ? `<p class="hint">${t.desc}</p>` : ''}`;
   }
   if (city) {
@@ -152,8 +152,10 @@ function updateHud() {
   if (!u && !city && hover && !exploredTiles(state, 0).has(key(hover.q, hover.r))) {
     html = '<p>Neprozkoumané území</p>';
   } else if (!u && !city && hover && tileAt(state, hover.q, hover.r)) {
-    const t = TERRAIN[tileAt(state, hover.q, hover.r).terrain];
-    html = `<p>${t.name}${t.passable ? ` · pohyb ${t.cost} · obrana +${Math.round(t.defBonus * 100)} %` : ' · neprůchodné'}</p>`;
+    const tile = tileAt(state, hover.q, hover.r);
+    const t = TERRAIN[tile.terrain];
+    const road = tile.road ? ' · silnice (po silnici pohyb ½)' : '';
+    html = `<p>${t.name}${t.passable ? ` · pohyb ${t.cost} · obrana +${Math.round(t.defBonus * 100)} %` : ' · neprůchodné'}${road}</p>`;
     const hc = cityAt(state, hover.q, hover.r);
     if (hc) {
       const ci = cityInfo(state, hc);

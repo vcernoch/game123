@@ -97,7 +97,56 @@ function tryGenerate(seed, cols, rows, neutralCount) {
   }
   if (cities.length < 2 + neutralCount) return null;
 
+  buildRoads(tiles, cities);
   return { tiles, cities, starts };
+}
+
+// Silnice: minimální kostra mezi městy, každý úsek vede nejlevnější cestou terénem.
+function buildRoads(tiles, cities) {
+  const connected = [cities[0]];
+  const rest = cities.slice(1);
+  while (rest.length) {
+    let best = null;
+    for (const a of connected) {
+      for (const b of rest) {
+        const p = cheapestPath(tiles, a, b);
+        if (p && (!best || p.cost < best.cost)) best = { ...p, b };
+      }
+    }
+    if (!best) break;
+    for (const k of best.path) tiles[k].road = true;
+    connected.push(best.b);
+    rest.splice(rest.indexOf(best.b), 1);
+  }
+}
+
+// Dijkstra po průchodném terénu; po už postavené silnici je to levnější (silnice se slévají).
+function cheapestPath(tiles, from, to) {
+  const start = key(from.q, from.r);
+  const goal = key(to.q, to.r);
+  const dist = new Map([[start, 0]]);
+  const prev = new Map();
+  const open = [start];
+  while (open.length) {
+    open.sort((a, b) => dist.get(a) - dist.get(b) || (a < b ? -1 : 1));
+    const cur = open.shift();
+    if (cur === goal) break;
+    const t = tiles[cur];
+    for (const n of neighbors(t.q, t.r)) {
+      const k = key(n.q, n.r);
+      const nt = tiles[k];
+      if (!nt || !TERRAIN[nt.terrain].passable) continue;
+      const d = dist.get(cur) + (nt.road ? 0.5 : TERRAIN[nt.terrain].cost);
+      if (dist.has(k) && dist.get(k) <= d) continue;
+      dist.set(k, d);
+      prev.set(k, cur);
+      open.push(k);
+    }
+  }
+  if (!dist.has(goal)) return null;
+  const path = [];
+  for (let k = goal; k !== undefined; k = prev.get(k)) path.push(k);
+  return { path, cost: dist.get(goal) };
 }
 
 export function pathExists(tiles, from, to) {

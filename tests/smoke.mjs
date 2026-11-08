@@ -122,9 +122,18 @@ try {
     if (!at || at.q !== moved.q || at.r !== moved.r) throw new Error('jednotka se nepřesunula kliknutím');
   }
 
-  // stavba: vyber hlavní město a postav trh tlačítkem v panelu
-  await page.evaluate(() => { window.__game.getState().gold[0] = 99; });
-  await page.mouse.click(cityPt.x, cityPt.y);
+  // stavba: v čerstvé hře vyber hlavní město a postav trh tlačítkem v panelu
+  await page.evaluate(() => { window.__game.newGame(12345); window.__game.getState().gold[0] = 99; });
+  const capPt = await page.evaluate(async () => {
+    const rnd = await import('./src/render.js');
+    const st = window.__game.getState();
+    const c = st.cities.find((x) => x.owner === 0 && x.capital);
+    const p = rnd.tileCenter(c.q, c.r);
+    const rect = document.getElementById('board').getBoundingClientRect();
+    const k = rect.width / rnd.canvasSize(st).w;
+    return { x: rect.left + p.x * k, y: rect.top + p.y * k };
+  });
+  await page.mouse.click(capPt.x, capPt.y);
   const marketBtn = page.locator('button[data-build="market"]');
   if (!(await marketBtn.count())) throw new Error('v panelu města chybí tlačítko stavby');
   await marketBtn.click();
