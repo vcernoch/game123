@@ -15,7 +15,9 @@ import { readFileSync } from 'node:fs';
 import { GAME_VERSION, GAME_DATE } from '../src/version.js';
 import { pathExists } from '../src/map.js';
 import { distance, key, neighbors } from '../src/hex.js';
-import { UNIT_TYPES, TERRAIN, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, FACTIONS } from '../src/rules.js';
+import {
+  UNIT_TYPES, TERRAIN, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, FACTIONS, MAP_SIZES,
+} from '../src/rules.js';
 
 test('mapa je deterministická a startovní města jsou propojená', () => {
   for (const seed of [1, 2, 3, 42, 999]) {
@@ -642,4 +644,21 @@ test('frakce: stará hra je bez frakcí a AI vs AI s frakcemi doběhne', () => {
     for (let i = 0; i < 120 && s.winner === null; i++) { runAITurn(s); endTurn(s); }
     for (const u of s.units) assert.ok(u.movesLeft <= unitMove(s, u));
   }
+});
+
+test('velikosti mapy: všechny se vygenerují propojené a hra na nich doběhne', () => {
+  for (const [size, m] of Object.entries(MAP_SIZES)) {
+    for (const seed of [1, 2, 3]) {
+      const s = createGame({ seed, size });
+      assert.equal(s.cols, m.cols);
+      assert.equal(s.rows, m.rows);
+      assert.equal(Object.keys(s.tiles).length, m.cols * m.rows);
+      assert.equal(s.cities.length, m.neutralCities + 2);
+      for (const c of s.cities) assert.ok(pathExists(s.tiles, s.cities[0], c), `${size}/${seed}: ${c.name}`);
+    }
+    const g = createGame({ seed: 5, size });
+    for (let i = 0; i < 400 && g.winner === null; i++) { runAITurn(g); endTurn(g); }
+    assert.ok(g.winner !== null || g.turn > 150, `${size}: hra se zasekla`);
+  }
+  assert.equal(createGame({ seed: 1, size: 'nesmysl' }).cols, 14);
 });

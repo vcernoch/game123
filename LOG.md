@@ -2,6 +2,14 @@
 
 Nejnovější záznam nahoře. Formát: datum – co se udělalo – stav testů – otázky pro Vladimíra.
 
+## 2026-11-08 – Hlavní menu a velikost mapy
+- `MAP_SIZES` v `rules.js`: Malá 10×8 (4 města), Střední 14×10 (6), Velká 20×14 (10). `createGame({ size })`.
+- Při první návštěvě (bez uložené hry) se dialog nové hry otevře sám jako hlavní menu (bez varování o ztrátě hry). Volby velikosti se generují z `rules.js` a pamatují se.
+- Přiblížená mapa na mobilu má přirozenou šířku podle velikosti mapy (CSS proměnná `--zoom-w`).
+- Původní úkol „Hlavní menu, volba velikosti mapy a počtu AI“ jsem rozdělil: víc AI soupeřů je samostatný úkol v roadmapě. Kód všude počítá se dvěma hráči (střídání tahů, vítězství, barvy, mlha, frakce), takže to chce vlastní běh.
+- Testy: +1 logický (všechny velikosti: rozměry, počet měst, propojenost, AI vs AI doběhne). Smoke test ověří, že se menu při první návštěvě otevře (desktop i telefon), a uloží `screenshot-menu.png` / `screenshot-menu-mobile.png`.
+- Stav: `npm run check` zelený (33 logických testů + smoke).
+
 ## 2026-11-08 – Frakce
 - `FACTIONS` v `rules.js` (generické položky, chybějící = bez bonusu):
   - **Království**: +1 zlato za každé město, hradby o 10 levnější.

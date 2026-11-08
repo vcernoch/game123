@@ -67,6 +67,13 @@ export const DIFFICULTY = {
 // Silnice: krok z pole se silnicí na další pole se silnicí stojí jen tolik bodů pohybu.
 export const ROAD_COST = 0.5;
 
+// Velikosti mapy pro dialog nové hry.
+export const MAP_SIZES = {
+  small:  { name: 'Malá',    cols: 10, rows: 8,  neutralCities: 2, desc: 'rychlá hra' },
+  medium: { name: 'Střední', cols: 14, rows: 10, neutralCities: 4, desc: 'klasika' },
+  large:  { name: 'Velká',   cols: 20, rows: 14, neutralCities: 8, desc: 'dlouhá hra s víc městy' },
+};
+
 // Mlha války: dohled měst a bonus z kopců.
 export const VISION = { city: 2, hillsBonus: 1 };
 

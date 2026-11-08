@@ -3,13 +3,14 @@ import { key, neighbors, distance } from './hex.js';
 import { generateMap } from './map.js';
 import {
   TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY, VISION, DIFFICULTY, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, ROAD_COST,
-  FACTIONS, NO_FACTION,
+  FACTIONS, NO_FACTION, MAP_SIZES,
 } from './rules.js';
 
 export function createGame({
-  seed = 1, cols = 14, rows = 10, neutralCities = 4, fog = true, difficulty = 'normal',
+  seed = 1, size = null, cols = 14, rows = 10, neutralCities = 4, fog = true, difficulty = 'normal',
   faction = 'kingdom', aiFaction = null,
 } = {}) {
+  if (MAP_SIZES[size]) ({ cols, rows, neutralCities } = MAP_SIZES[size]);
   if (!DIFFICULTY[difficulty]) difficulty = 'normal';
   if (!FACTIONS[faction]) faction = 'kingdom';
   if (!FACTIONS[aiFaction]) {

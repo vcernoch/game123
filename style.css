@@ -103,5 +103,5 @@ fieldset small, .check small { display: block; color: var(--muted); margin-left:
   /* přiblížená mapa: větší hexy pro prsty, posun uvnitř rámečku (stránka se do šířky neposouvá) */
   .zoom-btn { display: block; width: 100%; }
   .board-wrap.zoomed { overflow: auto; max-height: 75vh; border-radius: 8px; -webkit-overflow-scrolling: touch; }
-  .board-wrap.zoomed canvas { width: 820px; max-width: none; }
+  .board-wrap.zoomed canvas { width: var(--zoom-w, 820px); max-width: none; }
 }

@@ -11,7 +11,9 @@ import { GAME_VERSION, GAME_DATE } from './version.js';
 import { runAITurn } from './ai.js';
 import { render, canvasSize, pickHex } from './render.js';
 import { key } from './hex.js';
-import { UNIT_TYPES, TERRAIN, PLAYERS, DIFFICULTY, BUILDINGS, RANKS, FACTIONS } from './rules.js';
+import {
+  UNIT_TYPES, TERRAIN, PLAYERS, DIFFICULTY, BUILDINGS, RANKS, FACTIONS, MAP_SIZES,
+} from './rules.js';
 
 const SAVE_KEY = 'game123-save';
 const PREFS_KEY = 'game123-prefs';
@@ -19,6 +21,7 @@ const canvas = document.getElementById('board');
 const ctx = canvas.getContext('2d');
 const $ = (id) => document.getElementById(id);
 
+const hadSave = !!load();
 let state = load() || createGame({ seed: randomSeed() });
 let selectedId = null;
 let selectedCityId = null;
@@ -65,6 +68,7 @@ function resize() {
   canvas.width = w * dpr;
   canvas.height = h * dpr;
   canvas.style.aspectRatio = `${w} / ${h}`;
+  canvas.style.setProperty('--zoom-w', `${Math.round(w)}px`); // přiblížená mapa v přirozené velikosti
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
 
@@ -320,7 +324,7 @@ function savePrefs(prefs) {
   try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch { /* bez úložiště */ }
 }
 
-function newGame() {
+function newGame({ firstVisit = false } = {}) {
   if (busy()) return;
   const dlg = $('new-game-dialog');
   const form = dlg.querySelector('form');
@@ -329,7 +333,8 @@ function newGame() {
   form.elements.difficulty.value = diff;
   form.elements.fog.checked = prefs.fog !== false;
   form.elements.faction.value = FACTIONS[prefs.faction] ? prefs.faction : 'kingdom';
-  $('new-game-warning').hidden = state.winner !== null;
+  form.elements.size.value = MAP_SIZES[prefs.size] ? prefs.size : 'medium';
+  $('new-game-warning').hidden = firstVisit || state.winner !== null;
   dlg.showModal();
 }
 
@@ -350,6 +355,7 @@ $('new-game-dialog').addEventListener('close', () => {
     difficulty: form.elements.difficulty.value,
     fog: form.elements.fog.checked,
     faction: form.elements.faction.value,
+    size: form.elements.size.value,
   };
   savePrefs(options);
   startNewGame(options);
@@ -368,7 +374,7 @@ canvas.addEventListener('click', onClick);
 canvas.addEventListener('mousemove', onMove);
 canvas.addEventListener('mouseleave', () => { hover = null; $('tooltip').hidden = true; draw(); });
 $('end-turn').addEventListener('click', doEndTurn);
-$('new-game').addEventListener('click', newGame);
+$('new-game').addEventListener('click', () => newGame());
 $('next-unit').addEventListener('click', selectNextUnit);
 $('info').addEventListener('click', (ev) => {
   const bBtn = ev.target.closest('button[data-build]');
@@ -414,6 +420,9 @@ window.__game = {
   newGame: (seed, options = {}) => { state = createGame({ seed, ...options }); resize(); draw(); },
 };
 
+$('size-options').innerHTML = Object.entries(MAP_SIZES).map(([id, m]) => `
+  <label><input type="radio" name="size" value="${id}" ${id === 'medium' ? 'checked' : ''}> <b>${m.name}</b> <small>${m.cols} × ${m.rows}, ${m.neutralCities + 2} měst – ${m.desc}</small></label>`).join('');
+
 // Volby frakcí v dialogu se generují z rules.js, ať se nové frakce objeví samy.
 $('faction-options').innerHTML = Object.entries(FACTIONS).map(([id, f], i) => `
   <label><input type="radio" name="faction" value="${id}" ${i === 0 ? 'checked' : ''}> <b>${f.name}</b> <small>${f.desc}</small></label>`).join('');
@@ -423,3 +432,5 @@ $('version').title = `Verze ${GAME_VERSION} z ${GAME_DATE}`;
 
 resize();
 draw();
+// první návštěva (žádná uložená hra): dialog nové hry slouží jako hlavní menu
+if (!hadSave) newGame({ firstVisit: true });

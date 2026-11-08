@@ -23,6 +23,10 @@ try {
   page.on('console', (m) => { if (m.type() === 'error') errors.push(`console: ${m.text()}`); });
   await page.goto(url);
   await page.waitForFunction(() => window.__game);
+  // první návštěva: dialog nové hry funguje jako hlavní menu
+  await page.waitForSelector('#new-game-dialog[open]', { timeout: 2000 });
+  await page.screenshot({ path: 'artifacts/screenshot-menu.png' });
+  await page.click('#new-game-dialog button[value="cancel"]');
   await page.evaluate(() => window.__game.newGame(12345));
   await page.evaluate(() => window.__game.setAnimSpeed(0.25));
   const shownVersion = await page.textContent('#version');
@@ -167,6 +171,9 @@ try {
   phone.on('pageerror', (e) => errors.push(`pageerror (dotyk): ${e.message}`));
   await phone.goto(url);
   await phone.waitForFunction(() => window.__game);
+  await phone.waitForSelector('#new-game-dialog[open]', { timeout: 2000 });
+  await phone.screenshot({ path: 'artifacts/screenshot-menu-mobile.png' });
+  await phone.tap('#new-game-dialog button[value="cancel"]');
   await phone.evaluate(() => { window.__game.newGame(12345); window.__game.setAnimSpeed(0); });
   await phone.tap('#zoom');
   const tilePoint = (q, r) => phone.evaluate(async ([q, r]) => {
