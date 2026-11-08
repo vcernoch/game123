@@ -15,7 +15,7 @@ Odškrtávej `[x]` po dokončení. Nové nápady přidávej na konec příslušn
 - [x] Mlha války: vidíš jen okolí svých jednotek a měst
 - [x] Tlačítko „další jednotka s pohybem“ (Tab)
 - [x] Zobrazení příjmu a obrany u města při najetí myší
-- [ ] Výběr obtížnosti AI (snadná / normální / těžká)
+- [x] Výběr obtížnosti AI (snadná / normální / těžká)
 - [ ] Ovládání dotykem na mobilu (větší zásahová plocha, potvrzení útoku)
 
 ## Fáze 2 – hloubka
@@ -35,5 +35,4 @@ Odškrtávej `[x]` po dokončení. Nové nápady přidávej na konec příslušn
 ## Nápady (neřazené)
 - Diplomacie s více AI
 - Náhodné události (mor, úroda, vzpoura)
-- AI respektující mlhu války (teď vidí celou mapu) – hodí se k výběru obtížnosti
 - Kronika by mohla skrývat akce AI, které hráč neviděl

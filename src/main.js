@@ -9,9 +9,10 @@ import { GAME_VERSION, GAME_DATE } from './version.js';
 import { runAITurn } from './ai.js';
 import { render, canvasSize, pickHex } from './render.js';
 import { key } from './hex.js';
-import { UNIT_TYPES, TERRAIN, PLAYERS } from './rules.js';
+import { UNIT_TYPES, TERRAIN, PLAYERS, DIFFICULTY } from './rules.js';
 
 const SAVE_KEY = 'game123-save';
+const PREFS_KEY = 'game123-prefs';
 const canvas = document.getElementById('board');
 const ctx = canvas.getContext('2d');
 const $ = (id) => document.getElementById(id);
@@ -133,7 +134,11 @@ function updateHud() {
       html = `<h3>${hc.name}</h3><p>Příjem +${ci.income} zl./kolo · Obrana posádky +${ci.defensePct} %</p>` + html;
     }
   }
-  if (!html) html = '<p class="hint">Klikni na svou jednotku (modrá) nebo město.</p>';
+  if (!html) {
+    const diff = DIFFICULTY[state.difficulty] || DIFFICULTY.normal;
+    html = `<p class="hint">Klikni na svou jednotku (modrá) nebo město.</p>
+      <p class="hint">Obtížnost: ${diff.name}${state.fog ? '' : ' · bez mlhy'}</p>`;
+  }
   info.innerHTML = html;
 
   $('log').innerHTML = state.log.slice(-8).reverse().map((l) => `<li><b>${l.turn}.</b> ${l.msg}</li>`).join('');
@@ -257,16 +262,44 @@ function doEndTurn() {
   }, 250);
 }
 
+// Poslední volba v dialogu nové hry (jen pohodlí, hra funguje i bez úložiště).
+function loadPrefs() {
+  try { return JSON.parse(localStorage.getItem(PREFS_KEY)) || {}; } catch { return {}; }
+}
+
+function savePrefs(prefs) {
+  try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch { /* bez úložiště */ }
+}
+
 function newGame() {
   if (busy()) return;
-  if (state.winner === null && !confirm('Začít novou hru? Rozehraná hra se ztratí.')) return;
-  state = createGame({ seed: randomSeed() });
+  const dlg = $('new-game-dialog');
+  const form = dlg.querySelector('form');
+  const prefs = loadPrefs();
+  const diff = DIFFICULTY[prefs.difficulty] ? prefs.difficulty : state.difficulty || 'normal';
+  form.elements.difficulty.value = diff;
+  form.elements.fog.checked = prefs.fog !== false;
+  $('new-game-warning').hidden = state.winner !== null;
+  dlg.showModal();
+}
+
+function startNewGame(options) {
+  state = createGame({ seed: randomSeed(), ...options });
   selectedId = null;
   selectedCityId = null;
   save();
   resize();
   draw();
 }
+
+$('new-game-dialog').addEventListener('close', () => {
+  const dlg = $('new-game-dialog');
+  if (dlg.returnValue !== 'start') return;
+  const form = dlg.querySelector('form');
+  const options = { difficulty: form.elements.difficulty.value, fog: form.elements.fog.checked };
+  savePrefs(options);
+  startNewGame(options);
+});
 
 canvas.addEventListener('click', onClick);
 canvas.addEventListener('mousemove', onMove);
@@ -280,6 +313,7 @@ $('info').addEventListener('click', (ev) => {
   if (!busy() && buyUnit(state, selectedCityId, btn.dataset.buy)) afterAction();
 });
 window.addEventListener('keydown', (ev) => {
+  if ($('new-game-dialog').open) return; // klávesy patří dialogu
   if (ev.key === 'Enter' || ev.key === 'e') doEndTurn();
   if (ev.key === 'Tab') { ev.preventDefault(); selectNextUnit(); }
   if (ev.key === 'Escape') {
@@ -308,7 +342,7 @@ window.__game = {
   isBusy: busy,
   version: GAME_VERSION,
   setAnimSpeed: (x) => { anim.speed = x; },
-  newGame: (seed) => { state = createGame({ seed }); resize(); draw(); },
+  newGame: (seed, options = {}) => { state = createGame({ seed, ...options }); resize(); draw(); },
 };
 
 $('version').textContent = `v${GAME_VERSION}`;

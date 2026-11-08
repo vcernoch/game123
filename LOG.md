@@ -2,6 +2,16 @@
 
 Nejnovější záznam nahoře. Formát: datum – co se udělalo – stav testů – otázky pro Vladimíra.
 
+## 2026-11-08 – Výběr obtížnosti AI (běh pro v0.4.0)
+- Tento běh je na Vladimírovu žádost delší než obvyklé max. 3 úkoly.
+- `DIFFICULTY` v `rules.js`: snadná / normální / těžká. Mění zlato AI na startu a za kolo, opatrnost při útoku a to, jestli AI vidí přes mlhu.
+- AI na snadné a normální teď respektuje mlhu války: míří jen na známá města a viditelné nepřátele, jinak prozkoumává (`aiKnowledge`, `goalsFor` v `ai.js`). Těžká AI vidí celou mapu jako dřív.
+- Dialog „Nová hra“ (HTML `<dialog>`) s volbou obtížnosti a mlhy; poslední volba se pamatuje v localStorage. Obtížnost je vidět v bočním panelu.
+- Struktura stavu: `state.version` 4 (`difficulty`), staré hry dostanou „normální“.
+- Testy: +2 logické (zlato/příjem podle obtížnosti, normální AI na začátku nezná hráčovo město, simulace 6 her: těžká AI si vede lépe než snadná). Smoke test projde dialogem (těžká, bez mlhy) a uloží `artifacts/screenshot-dialog.png`.
+- Pozor na balanc: „normální“ AI je teď slabší než dřív, protože už nepodvádí. Kdo chce původní sílu, má „těžkou“.
+- Stav: `npm run check` zelený (17 logických testů + smoke).
+
 ## 2026-11-08 – Ukazatel verze (v0.3.0)
 - Na přání Vladimíra: v záhlaví vedle názvu je verze hry (`v0.3.0`, po najetí myší i datum).
 - Verze je v `src/version.js` a musí souhlasit s `package.json` – hlídá to nový test, smoke test kontroluje, že se v záhlaví opravdu zobrazí.

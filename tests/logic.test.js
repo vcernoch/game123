@@ -6,7 +6,7 @@ import {
   drainEvents, applyEvent, migrateState, STATE_VERSION,
   visibleTiles, exploredTiles,
 } from '../src/game.js';
-import { runAITurn } from '../src/ai.js';
+import { runAITurn, goalsFor } from '../src/ai.js';
 import { readFileSync } from 'node:fs';
 import { GAME_VERSION, GAME_DATE } from '../src/version.js';
 import { pathExists } from '../src/map.js';
@@ -258,4 +258,39 @@ test('verze hry souhlasí s package.json a má platný formát', () => {
   assert.equal(GAME_VERSION, pkg.version);
   assert.match(GAME_VERSION, /^\d+\.\d+\.\d+$/);
   assert.match(GAME_DATE, /^\d{4}-\d{2}-\d{2}$/);
+});
+
+test('obtížnost: AI na normální nevidí přes mlhu, na těžké ano a má víc zlata', () => {
+  const normal = createGame({ seed: 4 });
+  const hard = createGame({ seed: 4, difficulty: 'hard' });
+  const easy = createGame({ seed: 4, difficulty: 'easy' });
+  assert.equal(normal.difficulty, 'normal');
+  assert.equal(createGame({ seed: 4, difficulty: 'nesmysl' }).difficulty, 'normal');
+  assert.ok(hard.gold[1] > normal.gold[1] && normal.gold[1] > easy.gold[1]);
+  assert.equal(hard.gold[0], easy.gold[0], 'hráč má vždy stejné startovní zlato');
+  assert.ok(incomeOf(hard, 1) > incomeOf(normal, 1) && incomeOf(normal, 1) > incomeOf(easy, 1));
+  assert.equal(incomeOf(hard, 0), incomeOf(easy, 0));
+
+  const myCap = normal.cities.find((c) => c.owner === 0 && c.capital);
+  const aiUnit = normal.units.find((u) => u.owner === 1);
+  const goalsN = goalsFor(normal, aiUnit);
+  assert.ok(!goalsN.some((g) => g.q === myCap.q && g.r === myCap.r && !g.explore), 'normální AI nezná hráčovo hlavní město');
+  assert.ok(goalsN.every((g) => g.explore), 'na začátku normální AI jen průzkumničí');
+  const aiUnitH = hard.units.find((u) => u.owner === 1);
+  assert.ok(goalsFor(hard, aiUnitH).some((g) => g.q === myCap.q && g.r === myCap.r), 'těžká AI vidí vše');
+});
+
+test('obtížnost má znát: těžká AI si vede lépe než snadná', () => {
+  const score = (difficulty) => {
+    let total = 0;
+    for (const seed of [11, 12, 13, 14, 15, 16]) {
+      const s = createGame({ seed, difficulty });
+      for (let i = 0; i < 80 && s.winner === null; i++) { runAITurn(s); endTurn(s); }
+      total += s.winner === 1 ? 10 : s.winner === 0 ? -10 : s.cities.filter((c) => c.owner === 1).length;
+    }
+    return total;
+  };
+  const easy = score('easy');
+  const hard = score('hard');
+  assert.ok(hard > easy, `těžká ${hard} > snadná ${easy}`);
 });

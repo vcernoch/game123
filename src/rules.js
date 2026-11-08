@@ -19,6 +19,15 @@ export const PLAYERS = [
   { name: 'AI',  color: '#d23c3c', light: '#ffa3a3', isAI: true },
 ];
 
+// Obtížnost ovlivňuje jen AI hráče.
+// seesAll: AI ignoruje mlhu války; incomeBonus: zlato navíc za kolo; startGold: zlato navíc na začátku;
+// caution: jak moc AI váhá s útokem (vyšší = opatrnější, hraje hůř).
+export const DIFFICULTY = {
+  easy:   { name: 'Snadná',    seesAll: false, incomeBonus: -2, startGold: -10, caution: 1.6 },
+  normal: { name: 'Normální',  seesAll: false, incomeBonus: 0,  startGold: 0,   caution: 1 },
+  hard:   { name: 'Těžká',     seesAll: true,  incomeBonus: 3,  startGold: 10,  caution: 0.8 },
+};
+
 // Mlha války: dohled měst a bonus z kopců.
 export const VISION = { city: 2, hillsBonus: 1 };
 

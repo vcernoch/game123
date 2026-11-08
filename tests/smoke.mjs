@@ -122,6 +122,20 @@ try {
     if (!at || at.q !== moved.q || at.r !== moved.r) throw new Error('jednotka se nepřesunula kliknutím');
   }
 
+  // dialog nové hry: těžká obtížnost bez mlhy
+  await page.click('#new-game');
+  await page.waitForSelector('#new-game-dialog[open]');
+  await page.check('input[name="difficulty"][value="hard"]');
+  await page.uncheck('input[name="fog"]');
+  await page.screenshot({ path: 'artifacts/screenshot-dialog.png' });
+  await page.click('#start-game');
+  await page.waitForFunction(() => window.__game.getState().difficulty === 'hard', null, { timeout: 2000 }).catch(() => {});
+  const opts = await page.evaluate(() => {
+    const s = window.__game.getState();
+    return { d: s.difficulty, fog: s.fog, open: document.getElementById('new-game-dialog').open };
+  });
+  if (opts.d !== 'hard' || opts.fog !== false || opts.open) throw new Error(`dialog nové hry: ${JSON.stringify(opts)}`);
+
   // mobilní šířka – žádný vodorovný scroll
   await page.setViewportSize({ width: 390, height: 844 });
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);

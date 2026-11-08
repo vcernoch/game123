@@ -39,6 +39,23 @@
     </aside>
   </main>
   <div id="tooltip" hidden></div>
+  <dialog id="new-game-dialog">
+    <form method="dialog">
+      <h2>Nová hra</h2>
+      <fieldset>
+        <legend>Obtížnost AI</legend>
+        <label><input type="radio" name="difficulty" value="easy"> <b>Snadná</b> <small>AI má méně zlata, váhá s útokem a nevidí přes mlhu</small></label>
+        <label><input type="radio" name="difficulty" value="normal" checked> <b>Normální</b> <small>férová AI, která taky musí průzkumničit</small></label>
+        <label><input type="radio" name="difficulty" value="hard"> <b>Těžká</b> <small>AI vidí celou mapu a má zlato navíc</small></label>
+      </fieldset>
+      <label class="check"><input type="checkbox" name="fog" checked> Mlha války</label>
+      <p class="hint" id="new-game-warning">Rozehraná hra se ztratí.</p>
+      <div class="dialog-actions">
+        <button value="cancel" class="secondary" formnovalidate>Zrušit</button>
+        <button value="start" id="start-game">Začít hru</button>
+      </div>
+    </form>
+  </dialog>
   <script type="module" src="src/main.js"></script>
 </body>
 </html>

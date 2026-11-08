@@ -1,9 +1,12 @@
 // Čistá herní logika bez DOM. Stav je obyčejný JSON objekt (dá se uložit).
 import { key, neighbors, distance } from './hex.js';
 import { generateMap } from './map.js';
-import { TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY, VISION } from './rules.js';
+import { TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY, VISION, DIFFICULTY } from './rules.js';
 
-export function createGame({ seed = 1, cols = 14, rows = 10, neutralCities = 4, fog = true } = {}) {
+export function createGame({
+  seed = 1, cols = 14, rows = 10, neutralCities = 4, fog = true, difficulty = 'normal',
+} = {}) {
+  if (!DIFFICULTY[difficulty]) difficulty = 'normal';
   const { tiles, cities, starts } = generateMap(seed, cols, rows, neutralCities);
   const state = {
     version: STATE_VERSION,
@@ -13,7 +16,7 @@ export function createGame({ seed = 1, cols = 14, rows = 10, neutralCities = 4, 
     tiles,
     cities,
     units: [],
-    gold: PLAYERS.map(() => ECONOMY.startGold),
+    gold: PLAYERS.map((p) => ECONOMY.startGold + (p.isAI ? DIFFICULTY[difficulty].startGold : 0)),
     turn: 1,
     current: 0,
     winner: null,
@@ -21,6 +24,7 @@ export function createGame({ seed = 1, cols = 14, rows = 10, neutralCities = 4, 
     log: [],
     events: [],
     fog,
+    difficulty,
     explored: PLAYERS.map(() => []),
   };
   starts.forEach((s, owner) => {
@@ -37,7 +41,7 @@ export function createGame({ seed = 1, cols = 14, rows = 10, neutralCities = 4, 
   return state;
 }
 
-export const STATE_VERSION = 3;
+export const STATE_VERSION = 4;
 
 // Převede uložený stav starší verze na aktuální; neznámý formát vrátí null.
 export function migrateState(s) {
@@ -52,6 +56,10 @@ export function migrateState(s) {
     s.explored = PLAYERS.map(() => []);
     PLAYERS.forEach((_, p) => updateExplored(s, p));
     s.version = 3;
+  }
+  if (s.version === 3) {
+    s.difficulty = 'normal';
+    s.version = 4;
   }
   return s.version === STATE_VERSION ? s : null;
 }
@@ -157,7 +165,14 @@ export function cityIncome(city) {
 }
 
 export function incomeOf(state, player) {
-  return state.cities.filter((c) => c.owner === player).reduce((sum, c) => sum + cityIncome(c), 0);
+  const base = state.cities.filter((c) => c.owner === player).reduce((sum, c) => sum + cityIncome(c), 0);
+  return Math.max(0, base + difficultyOf(state, player).incomeBonus);
+}
+
+// Nastavení obtížnosti pro daného hráče (člověk má vždy neutrální hodnoty).
+export function difficultyOf(state, player) {
+  if (!PLAYERS[player].isAI) return DIFFICULTY.normal;
+  return DIFFICULTY[state.difficulty] || DIFFICULTY.normal;
 }
 
 // Souhrn pro tooltip města: příjem, bonus obrany posádky (terén + město) a léčení.
