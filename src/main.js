@@ -8,6 +8,7 @@ import {
 import { createAnimator } from './anim.js';
 import { decideTap } from './input.js';
 import { createSound, soundFor } from './sound.js';
+import { chartSvg, summaryRows } from './stats.js';
 import { GAME_VERSION, GAME_DATE } from './version.js';
 import { runAITurn } from './ai.js';
 import { render, canvasSize, pickHex } from './render.js';
@@ -203,10 +204,35 @@ function updateHud() {
   }
   if (state.winner !== null) {
     banner.hidden = false;
-    banner.textContent = state.winner === 0 ? 'Vítězství! Dobyl jsi nepřátelskou pevnost.' : 'Porážka. AI dobyla tvoje města.';
+    $('banner-text').textContent = state.winner === 0
+      ? `Vítězství v ${state.turn}. kole! Dobyl jsi nepřátelská města.`
+      : `Porážka v ${state.turn}. kole. AI dobyla tvoje města.`;
+    if (!statsShownForEnd) { $('stats-panel').open = true; statsShownForEnd = true; }
   } else {
     banner.hidden = true;
+    statsShownForEnd = false;
   }
+  updateStats();
+}
+
+let statsShownForEnd = false;
+let statsKey = '';
+
+// Panel statistik: graf síly a souhrn. Překresluje se jen při změně (updateHud běží často).
+function updateStats() {
+  if (!$('stats-panel').open) return;
+  const h = state.history || [];
+  const key = `${h.length}:${state.winner}:${JSON.stringify(state.stats)}:${h.length ? h[h.length - 1].power : ''}`;
+  if (key === statsKey) return;
+  statsKey = key;
+  if (h.length < 2) {
+    $('stats').innerHTML = '<p class="hint">Graf se objeví po několika kolech.</p>';
+    return;
+  }
+  const rows = summaryRows(state).map(([label, a, b]) => `<tr><th>${label}</th><td>${a}</td><td>${b}</td></tr>`).join('');
+  $('stats').innerHTML = '<h4>Síla armád</h4>' + chartSvg(h, { title: 'Síla armád v čase' })
+    + '<h4>Počet měst</h4>' + chartSvg(h, { metric: 'cities', height: 110, title: 'Počet měst' })
+    + `<table class="stats-table"><tr><th></th><th>${PLAYERS[0].name}</th><th>${PLAYERS[1].name}</th></tr>${rows}</table>`;
 }
 
 function canvasPoint(ev) {
@@ -405,6 +431,8 @@ canvas.addEventListener('mousemove', onMove);
 canvas.addEventListener('mouseleave', () => { hover = null; $('tooltip').hidden = true; draw(); });
 $('end-turn').addEventListener('click', doEndTurn);
 $('new-game').addEventListener('click', () => newGame());
+$('banner-new').addEventListener('click', () => newGame());
+$('stats-panel').addEventListener('toggle', () => { statsKey = ''; updateStats(); });
 $('next-unit').addEventListener('click', selectNextUnit);
 $('info').addEventListener('click', (ev) => {
   const bBtn = ev.target.closest('button[data-build]');
@@ -447,6 +475,7 @@ window.__game = {
   isBusy: busy,
   version: GAME_VERSION,
   setAnimSpeed: (x) => { anim.speed = x; },
+  refresh: () => { resize(); draw(); },
   newGame: (seed, options = {}) => { state = createGame({ seed, ...options }); resize(); draw(); },
 };
 

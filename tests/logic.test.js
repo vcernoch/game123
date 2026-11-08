@@ -5,12 +5,13 @@ import {
   previewAttack, cloneState, pathTo, nextActiveUnit, tileAt, cityInfo, incomeOf, defenseValue,
   drainEvents, applyEvent, migrateState, STATE_VERSION,
   visibleTiles, exploredTiles, build, unitCost, rankOf, stepCost, getUnit,
-  buildingCost, unitMove, factionOf,
+  buildingCost, unitMove, factionOf, armyPower,
 } from '../src/game.js';
 import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
 } from '../src/ai.js';
 import { decideTap } from '../src/input.js';
+import { chartSvg, summaryRows } from '../src/stats.js';
 import { soundFor, createLimiter, createSound, SOUND_NAMES } from '../src/sound.js';
 import { readFileSync } from 'node:fs';
 import { GAME_VERSION, GAME_DATE } from '../src/version.js';
@@ -690,4 +691,35 @@ test('zvuky: každá událost má zvuk a omezovač brání kakofonii', () => {
   // v Node není AudioContext – přehrání nesmí spadnout
   const snd = createSound();
   assert.doesNotThrow(() => snd.play('hit'));
+});
+
+test('statistiky: historie po kolech, počítadla a graf', () => {
+  const s = createGame({ seed: 4, fog: false });
+  assert.equal(s.history.length, 1);
+  assert.equal(s.history[0].turn, 1);
+  assert.equal(armyPower(s, 0), s.history[0].power[0]);
+  for (let i = 0; i < 400 && s.winner === null; i++) { runAITurn(s); endTurn(s); }
+  assert.ok(s.winner !== null);
+  const turns = s.history.map((e) => e.turn);
+  assert.deepEqual(turns, [...new Set(turns)], 'každé kolo jen jednou');
+  assert.equal(turns[turns.length - 1], s.turn, 'poslední záznam je z konce hry');
+  assert.equal(s.history[s.history.length - 1].cities[1 - s.winner], 0, 'poražený nemá města');
+  const total = s.stats.kills[0] + s.stats.kills[1];
+  assert.equal(total, s.stats.losses[0] + s.stats.losses[1], 'co jeden zničil, druhý ztratil');
+  assert.ok(total > 0 && s.stats.captures[s.winner] > 0);
+  const svg = chartSvg(s.history);
+  assert.equal((svg.match(/<polyline/g) || []).length, 2);
+  assert.ok(!svg.includes('NaN'));
+  assert.ok(!chartSvg([s.history[0]]).includes('NaN'), 'graf s jedním bodem');
+  assert.ok(!chartSvg([]).includes('NaN'), 'prázdný graf');
+  assert.equal(summaryRows(s).length, 4);
+  // stav zůstává JSON a stará hra dostane prázdné statistiky
+  assert.deepEqual(JSON.parse(JSON.stringify(s)).stats, s.stats);
+  const old = createGame({ seed: 4 });
+  old.version = 8;
+  delete old.history;
+  delete old.stats;
+  const m = migrateState(old);
+  assert.deepEqual(m.history, []);
+  assert.deepEqual(m.stats.kills, [0, 0]);
 });

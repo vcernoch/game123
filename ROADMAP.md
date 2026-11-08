@@ -30,7 +30,7 @@ Odškrtávej `[x]` po dokončení. Nové nápady přidávej na konec příslušn
 - [x] Hlavní menu, volba velikosti mapy
 - [ ] Více AI soupeřů (kód teď počítá se dvěma hráči – větší přestavba, vč. vítězství a diplomacie)
 - [x] Zvukové efekty generované přes WebAudio
-- [ ] Statistiky na konci hry (graf síly v čase)
+- [x] Statistiky na konci hry (graf síly v čase)
 - [ ] Kampaň nebo scénáře s cíli
 
 ## Nápady (neřazené)

@@ -38,6 +38,8 @@ export function createGame({
     fog,
     difficulty,
     factions: [faction, aiFaction],
+    history: [],
+    stats: emptyStats(),
     explored: PLAYERS.map(() => []),
   };
   starts.forEach((s, owner) => {
@@ -51,10 +53,46 @@ export function createGame({
   }
   state.events = [];
   PLAYERS.forEach((_, p) => updateExplored(state, p));
+  recordHistory(state);
   return state;
 }
 
-export const STATE_VERSION = 8;
+// ---------- statistiky ----------
+
+function emptyStats() {
+  return { kills: PLAYERS.map(() => 0), losses: PLAYERS.map(() => 0), captures: PLAYERS.map(() => 0) };
+}
+
+// Síla armády: cena jednotek vážená životy a hodností (hrubé, ale srovnatelné číslo).
+export function armyPower(state, player) {
+  let sum = 0;
+  for (const u of state.units) {
+    if (u.owner !== player) continue;
+    sum += UNIT_TYPES[u.type].cost * (u.hp / UNIT_TYPES[u.type].hp) * rankMult(u);
+  }
+  return Math.round(sum);
+}
+
+// Zapíše stav kola do historie (jednou za kolo; opakovaný zápis kolo přepíše).
+export function recordHistory(state) {
+  if (!state.history) state.history = [];
+  const entry = {
+    turn: state.turn,
+    power: PLAYERS.map((_, p) => armyPower(state, p)),
+    cities: PLAYERS.map((_, p) => state.cities.filter((c) => c.owner === p).length),
+    gold: [...state.gold],
+  };
+  const last = state.history[state.history.length - 1];
+  if (last && last.turn === entry.turn) state.history[state.history.length - 1] = entry;
+  else state.history.push(entry);
+}
+
+function countStat(state, name, player) {
+  if (!state.stats) state.stats = emptyStats();
+  state.stats[name][player]++;
+}
+
+export const STATE_VERSION = 9;
 
 // Převede uložený stav starší verze na aktuální; neznámý formát vrátí null.
 export function migrateState(s) {
@@ -89,6 +127,11 @@ export function migrateState(s) {
   if (s.version === 7) {
     s.factions = [null, null]; // staré hry hrají bez frakcí
     s.version = 8;
+  }
+  if (s.version === 8) {
+    s.history = []; // statistiky začnou od načtení
+    s.stats = emptyStats();
+    s.version = 9;
   }
   return s.version === STATE_VERSION ? s : null;
 }
@@ -451,6 +494,7 @@ export function moveUnit(state, unitId, q, r) {
     const prev = city.owner;
     city.owner = unit.owner;
     emit(state, { type: 'capture', cityId: city.id, owner: unit.owner });
+    countStat(state, 'captures', unit.owner);
     const loot = factionOf(state, unit.owner).captureGold || 0;
     state.gold[unit.owner] += loot;
     addLog(state, `${PLAYERS[unit.owner].name}: dobyto město ${city.name}${loot ? ` (kořist ${loot} zl.)` : ''}`);
@@ -477,6 +521,8 @@ export function attack(state, attackerId, defenderId) {
   if (d.hp <= 0) {
     removeUnit(state, d.id);
     addLog(state, `${PLAYERS[a.owner].name}: ${aName} zničil jednotku ${dName}`);
+    countStat(state, 'kills', a.owner);
+    countStat(state, 'losses', d.owner);
     ev.promoted = gainXp(state, a, XP.attack + XP.kill);
   } else {
     a.hp -= res.counter;
@@ -486,6 +532,8 @@ export function attack(state, attackerId, defenderId) {
     if (a.hp <= 0) {
       removeUnit(state, a.id);
       addLog(state, `${aName} padl v boji`);
+      countStat(state, 'kills', d.owner);
+      countStat(state, 'losses', a.owner);
     } else {
       ev.promoted = gainXp(state, a, XP.attack);
     }
@@ -535,7 +583,10 @@ export function endTurn(state) {
     u.hp = Math.min(UNIT_TYPES[u.type].hp, u.hp + heal);
   }
   state.current = (state.current + 1) % PLAYERS.length;
-  if (state.current === 0) state.turn++;
+  if (state.current === 0) {
+    state.turn++;
+    recordHistory(state);
+  }
   state.gold[state.current] += incomeOf(state, state.current);
   for (const u of state.units.filter((x) => x.owner === state.current)) {
     u.movesLeft = unitMove(state, u);
@@ -555,6 +606,7 @@ function checkWinner(state) {
     if (!hasCity) {
       state.winner = (p + 1) % PLAYERS.length;
       addLog(state, `Konec hry – vítěz: ${PLAYERS[state.winner].name}`);
+      recordHistory(state);
       return;
     }
   }

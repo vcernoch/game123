@@ -21,12 +21,16 @@
       <button id="end-turn">Ukončit tah</button>
     </div>
   </header>
-  <div id="banner" hidden></div>
+  <div id="banner" hidden><span id="banner-text"></span> <button id="banner-new" class="secondary">Nová hra</button></div>
   <main>
     <button id="zoom" class="secondary zoom-btn" aria-pressed="false">Přiblížit mapu</button>
     <div class="board-wrap"><canvas id="board"></canvas></div>
     <aside>
       <section id="info"></section>
+      <details id="stats-panel">
+        <summary>Statistiky</summary>
+        <div id="stats"></div>
+      </details>
       <section>
         <h3>Kronika</h3>
         <ul id="log"></ul>

@@ -83,6 +83,13 @@ aside h4 { margin: 10px 0 0; font-size: 13px; color: var(--muted); font-weight: 
   font-size: 13px;
 }
 summary { cursor: pointer; font-weight: 600; }
+.chart { width: 100%; height: auto; margin-top: 4px; font: 11px system-ui, sans-serif; }
+.chart text { fill: var(--muted); }
+.chart .axis { stroke: #4a515d; stroke-width: 1; }
+.stats-table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 6px; }
+.stats-table th, .stats-table td { padding: 3px 4px; text-align: right; }
+.stats-table th:first-child, .stats-table td:first-child { text-align: left; color: var(--muted); font-weight: 400; }
+#banner button { margin-left: 8px; }
 dialog {
   background: var(--panel);
   color: var(--text);

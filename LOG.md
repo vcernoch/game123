@@ -2,6 +2,15 @@
 
 Nejnovější záznam nahoře. Formát: datum – co se udělalo – stav testů – otázky pro Vladimíra.
 
+## 2026-11-08 – Statistiky a graf síly
+- `state.history`: na začátku každého kola (a při konci hry) se zapíše síla armád, počet měst a zlato obou stran. `armyPower()` = cena jednotek vážená životy a hodností.
+- `state.stats`: zničené a ztracené jednotky, dobytá města.
+- Nový `src/stats.js`: `chartSvg()` vyrobí čárový graf jako SVG řetězec (bez knihovny), `summaryRows()` souhrnnou tabulku.
+- UI: rozbalovací panel „Statistiky“ (dá se otevřít i během hry), při konci hry se otevře sám. Banner konce hry ukazuje kolo a má tlačítko „Nová hra“. Po konci hry se jednotky už nekreslí jako vyčerpané.
+- Struktura stavu: `state.version` 9 (`history`, `stats`), staré hry začnou sbírat statistiky od načtení.
+- Testy: +1 logický (záznam jednou za kolo a na konci hry, zničené = ztracené, vítěz má dobytá města, graf bez NaN i pro 0–1 bodů, migrace). Smoke test dohraje malou mapu a ověří banner, otevřený panel a oba grafy (`artifacts/screenshot-end.png`).
+- Stav: `npm run check` zelený (35 logických testů + smoke).
+
 ## 2026-11-08 – Zvukové efekty
 - Nový `src/sound.js`: všechny zvuky se syntetizují (oscilátory + filtrovaný šum), žádné nahrávky ani externí soubory. Zvuky: krok, zásah, zničení, povýšení, dobytí/ztráta města, stavba, verbování, klik, znělka vítězství a porážky.
 - `soundFor(event)` mapuje herní události na zvuky; animátor má nový callback `onShow`, takže zní jen to, co hráč skutečně vidí (ne tahy AI v mlze). Omezovač pustí stejný zvuk nejvýš jednou za 90 ms (přeskočená animace nespustí kakofonii).

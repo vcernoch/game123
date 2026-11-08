@@ -164,6 +164,27 @@ try {
   });
   if (opts.d !== 'hard' || opts.fog !== false || opts.open) throw new Error(`dialog nové hry: ${JSON.stringify(opts)}`);
 
+  // konec hry: malá mapa dohraná AI za oba hráče, pak obrazovka se statistikami
+  await page.evaluate(async () => {
+    const g = await import('./src/game.js');
+    const ai = await import('./src/ai.js');
+    window.__game.newGame(7, { size: 'small', fog: false });
+    const st = window.__game.getState();
+    for (let i = 0; i < 400 && st.winner === null; i++) { ai.runAITurn(st); g.endTurn(st); }
+    g.drainEvents(st);
+    window.__game.refresh();
+  });
+  const end = await page.evaluate(() => ({
+    winner: window.__game.getState().winner,
+    banner: !document.getElementById('banner').hidden,
+    statsOpen: document.getElementById('stats-panel').open,
+    charts: document.querySelectorAll('#stats svg.chart').length,
+  }));
+  if (end.winner === null || !end.banner || !end.statsOpen || end.charts !== 2) {
+    throw new Error(`konec hry / statistiky: ${JSON.stringify(end)}`);
+  }
+  await page.screenshot({ path: 'artifacts/screenshot-end.png', fullPage: true });
+
   // mobilní šířka – žádný vodorovný scroll
   await page.setViewportSize({ width: 390, height: 844 });
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);

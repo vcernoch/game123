@@ -92,7 +92,7 @@ export function render(ctx, state, view = {}) {
       const at = moving.has(u.id) ? pickHex(c.x, c.y) : u;
       if (!seen(at.q, at.r)) continue;
     }
-    drawUnit(ctx, u, c.x, c.y, u.id === view.selectedId, state.current === u.owner);
+    drawUnit(ctx, u, c.x, c.y, u.id === view.selectedId, state.current === u.owner && state.winner === null);
     if (view.targets && view.targets.has(u.id)) {
       ctx.beginPath();
       ctx.arc(c.x, c.y, HEX_SIZE * 0.72, 0, Math.PI * 2);
