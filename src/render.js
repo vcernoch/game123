@@ -50,6 +50,8 @@ export function render(ctx, state, view = {}) {
       ctx.fillStyle = TERRAIN[t.terrain].color;
       ctx.fill();
       drawTerrainDetail(ctx, t.terrain, c.x, c.y);
+      // detail terénu kreslí vlastní cesty – obrys hexu je potřeba založit znovu
+      hexPath(ctx, c.x, c.y, HEX_SIZE - 1);
       if (!seen(t.q, t.r)) {
         ctx.fillStyle = 'rgba(12,14,22,0.5)';
         ctx.fill();

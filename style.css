@@ -44,7 +44,9 @@ main {
   gap: 16px;
   padding: 16px;
 }
-.board-wrap { min-width: 0; }
+.board-wrap { min-width: 0; position: relative; }
+.zoom-btn { display: none; }
+.confirm { color: var(--accent); font-weight: 600; }
 canvas { width: 100%; max-width: 900px; height: auto; display: block; border-radius: 8px; background: #2a5f8f; }
 aside section, aside details {
   background: var(--panel);
@@ -95,4 +97,8 @@ fieldset small, .check small { display: block; color: var(--muted); margin-left:
 @media (max-width: 760px) {
   main { grid-template-columns: 1fr; padding: 16px; }
   .actions { margin-left: 0; }
+  /* přiblížená mapa: větší hexy pro prsty, posun uvnitř rámečku (stránka se do šířky neposouvá) */
+  .zoom-btn { display: block; width: 100%; }
+  .board-wrap.zoomed { overflow: auto; max-height: 75vh; border-radius: 8px; -webkit-overflow-scrolling: touch; }
+  .board-wrap.zoomed canvas { width: 820px; max-width: none; }
 }

@@ -7,10 +7,11 @@ import {
   visibleTiles, exploredTiles,
 } from '../src/game.js';
 import { runAITurn, goalsFor } from '../src/ai.js';
+import { decideTap } from '../src/input.js';
 import { readFileSync } from 'node:fs';
 import { GAME_VERSION, GAME_DATE } from '../src/version.js';
 import { pathExists } from '../src/map.js';
-import { distance, key } from '../src/hex.js';
+import { distance, key, neighbors } from '../src/hex.js';
 import { UNIT_TYPES, TERRAIN } from '../src/rules.js';
 
 test('mapa je deterministická a startovní města jsou propojená', () => {
@@ -293,4 +294,42 @@ test('obtížnost má znát: těžká AI si vede lépe než snadná', () => {
   const easy = score('easy');
   const hard = score('hard');
   assert.ok(hard > easy, `těžká ${hard} > snadná ${easy}`);
+});
+
+test('dotyk: první klepnutí ukáže náhled, druhé na stejné pole provede akci', () => {
+  const s = createGame({ seed: 7 });
+  const u = s.units.find((x) => x.owner === 0);
+  const [k] = reachable(s, u).keys();
+  const [q, r] = k.split(',').map(Number);
+  // myš: rovnou pohyb
+  assert.deepEqual(decideTap(s, { selectedId: u.id }, q, r), { type: 'move', unitId: u.id, q, r });
+  // dotyk: nejdřív náhled, pak pohyb
+  const first = decideTap(s, { selectedId: u.id, confirm: true }, q, r);
+  assert.equal(first.type, 'preview');
+  assert.equal(first.kind, 'move');
+  const second = decideTap(s, { selectedId: u.id, confirm: true, pending: { q: first.q, r: first.r } }, q, r);
+  assert.equal(second.type, 'move');
+  // klepnutí jinam náhled zruší (výběr), klepnutí mimo mapu nic
+  const elsewhere = decideTap(s, { selectedId: u.id, confirm: true, pending: { q, r } }, u.q, u.r);
+  assert.equal(elsewhere.type, 'select');
+  assert.equal(elsewhere.unitId, u.id);
+  assert.equal(decideTap(s, { selectedId: u.id }, 999, 999).type, 'none');
+});
+
+test('dotyk: útok potřebuje potvrzení a skrytou jednotku v mlze nejde vybrat', () => {
+  const s = createGame({ seed: 7 });
+  const u = s.units.find((x) => x.owner === 0);
+  const enemy = s.units.find((x) => x.owner === 1);
+  // nepřítel daleko v mlze: klepnutí na něj ho nevybere
+  assert.equal(decideTap(s, { selectedId: null }, enemy.q, enemy.r).unitId, null);
+  // přesuneme nepřítele vedle naší jednotky (pole volné a průchozí)
+  const spot = neighbors(u.q, u.r).find((n) => isPassable(s, n.q, n.r) && !unitAt(s, n.q, n.r));
+  enemy.q = spot.q;
+  enemy.r = spot.r;
+  const first = decideTap(s, { selectedId: u.id, confirm: true }, spot.q, spot.r);
+  assert.equal(first.type, 'preview');
+  assert.equal(first.kind, 'attack');
+  assert.equal(first.targetId, enemy.id);
+  const second = decideTap(s, { selectedId: u.id, confirm: true, pending: spot }, spot.q, spot.r);
+  assert.deepEqual(second, { type: 'attack', unitId: u.id, targetId: enemy.id });
 });

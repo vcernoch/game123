@@ -2,6 +2,14 @@
 
 Nejnovější záznam nahoře. Formát: datum – co se udělalo – stav testů – otázky pro Vladimíra.
 
+## 2026-11-08 – Ovládání dotykem
+- Nový `src/input.js` s čistou funkcí `decideTap()`: co znamená klik/klepnutí (výběr, pohyb, útok, náhled). Myš jedná hned, dotyk (pointerType touch/pen) napřed ukáže trasu nebo odhad útoku v panelu a provede akci až po druhém klepnutí na stejné pole.
+- Na úzkých displejích je tlačítko „Přiblížit mapu“: mapa má pak 820 px a posouvá se uvnitř rámečku (stránka se do šířky neposouvá, ověřuje smoke test). Políčko má pak na telefonu ~56 px místo ~27 px.
+- Na dotyk se neukazuje plovoucí tooltip (překážel by prstu), náhled je v bočním panelu.
+- Oprava staré chyby v kreslení: detail terénu (stromy, kopce, hory) přepsal cestu hexu, takže zvýraznění dosahu, ztmavení mlhou i obrys se u lesa/kopců/hor kreslily jen na poslední strom/kopec.
+- Testy: +2 logické (náhled → potvrzení pohybu i útoku, zrušení klepnutím jinam, nepřítel v mlze nejde vybrat). Smoke test nově spouští telefon s dotykem (`hasTouch`), přiblíží mapu, vybere jednotku, ověří, že první klepnutí nepohne a druhé ano, a uloží `artifacts/screenshot-touch.png`.
+- Stav: `npm run check` zelený (19 logických testů + smoke).
+
 ## 2026-11-08 – Výběr obtížnosti AI (běh pro v0.4.0)
 - Tento běh je na Vladimírovu žádost delší než obvyklé max. 3 úkoly.
 - `DIFFICULTY` v `rules.js`: snadná / normální / těžká. Mění zlato AI na startu a za kolo, opatrnost při útoku a to, jestli AI vidí přes mlhu.

@@ -142,6 +142,48 @@ try {
   if (overflow) throw new Error('na mobilu je vodorovný scroll');
   await page.screenshot({ path: 'artifacts/screenshot-mobile.png', fullPage: true });
 
+  // dotykový telefon: přiblížená mapa, klepnutí = náhled, druhé klepnutí = pohyb
+  const touchCtx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+  const phone = await touchCtx.newPage();
+  phone.on('pageerror', (e) => errors.push(`pageerror (dotyk): ${e.message}`));
+  await phone.goto(url);
+  await phone.waitForFunction(() => window.__game);
+  await phone.evaluate(() => { window.__game.newGame(12345); window.__game.setAnimSpeed(0); });
+  await phone.tap('#zoom');
+  const tilePoint = (q, r) => phone.evaluate(async ([q, r]) => {
+    const rnd = await import('./src/render.js');
+    const st = window.__game.getState();
+    const c = rnd.tileCenter(q, r);
+    const rect = document.getElementById('board').getBoundingClientRect();
+    const k = rect.width / rnd.canvasSize(st).w;
+    return { x: rect.left + c.x * k, y: rect.top + c.y * k };
+  }, [q, r]);
+  const plan = await phone.evaluate(async () => {
+    const g = await import('./src/game.js');
+    const st = window.__game.getState();
+    const u = st.units.find((x) => x.owner === 0 && x.type === 'archer') || st.units.find((x) => x.owner === 0);
+    const [k] = g.reachable(st, u).keys();
+    const [q, r] = k.split(',').map(Number);
+    return { id: u.id, from: { q: u.q, r: u.r }, to: { q, r } };
+  });
+  let pt = await tilePoint(plan.from.q, plan.from.r);
+  await phone.touchscreen.tap(pt.x, pt.y);
+  if ((await phone.evaluate(() => window.__game.selectedId())) !== plan.id) throw new Error('dotyk: jednotka se nevybrala');
+  pt = await tilePoint(plan.to.q, plan.to.r);
+  await phone.touchscreen.tap(pt.x, pt.y);
+  const afterFirst = await phone.evaluate((id) => window.__game.getState().units.find((u) => u.id === id), plan.id);
+  if (afterFirst.q !== plan.from.q || afterFirst.r !== plan.from.r) throw new Error('dotyk: pohyb proběhl bez potvrzení');
+  if (!(await phone.$('#info .confirm'))) throw new Error('dotyk: chybí výzva k potvrzení');
+  await phone.screenshot({ path: 'artifacts/screenshot-touch.png' });
+  await phone.touchscreen.tap(pt.x, pt.y);
+  await phone.waitForFunction(() => !window.__game.isBusy(), null, { timeout: 5000 });
+  const afterSecond = await phone.evaluate((id) => window.__game.getState().units.find((u) => u.id === id), plan.id);
+  if (afterSecond.q !== plan.to.q || afterSecond.r !== plan.to.r) throw new Error('dotyk: druhé klepnutí nepohnulo jednotkou');
+  if (await phone.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1)) {
+    throw new Error('dotyk: přiblížená mapa způsobila vodorovný scroll stránky');
+  }
+  await touchCtx.close();
+
   if (errors.length) throw new Error(errors.join('\n'));
   console.log(`SMOKE OK – kolo ${turn}, screenshoty v artifacts/`);
 } catch (e) {

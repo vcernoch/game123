@@ -16,7 +16,7 @@ Odškrtávej `[x]` po dokončení. Nové nápady přidávej na konec příslušn
 - [x] Tlačítko „další jednotka s pohybem“ (Tab)
 - [x] Zobrazení příjmu a obrany u města při najetí myší
 - [x] Výběr obtížnosti AI (snadná / normální / těžká)
-- [ ] Ovládání dotykem na mobilu (větší zásahová plocha, potvrzení útoku)
+- [x] Ovládání dotykem na mobilu (větší zásahová plocha, potvrzení útoku)
 
 ## Fáze 2 – hloubka
 - [ ] Budovy ve městech (hradby, trh, kasárna)
