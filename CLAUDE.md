@@ -12,6 +12,7 @@ Hraje se proti AI na hexové mapě. Kód a texty ve hře jsou česky.
 - `src/game.js` – čistá herní logika bez DOM, stav je JSON
 - `src/ai.js` – AI protivník
 - `src/render.js` – kreslení na canvas
+- `src/anim.js` – přehrávání herních událostí (`state.events`) jako animací
 - `src/main.js` – ovládání, HUD, ukládání do localStorage, háček `window.__game` pro testy
 - `tests/logic.test.js` – testy logiky (`npm test`)
 - `tests/smoke.mjs` – headless Chrome test + screenshoty do `artifacts/` (`npm run smoke`)

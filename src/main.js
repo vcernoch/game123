@@ -2,7 +2,9 @@
 import {
   createGame, reachable, attackTargets, moveUnit, attack, buyUnit, endTurn,
   unitAt, cityAt, getUnit, incomeOf, previewAttack, tileAt, pathTo, nextActiveUnit, cityInfo,
+  cloneState, drainEvents, migrateState, visibleTiles, exploredTiles,
 } from './game.js';
+import { createAnimator } from './anim.js';
 import { runAITurn } from './ai.js';
 import { render, canvasSize, pickHex } from './render.js';
 import { key } from './hex.js';
@@ -18,6 +20,19 @@ let selectedId = null;
 let selectedCityId = null;
 let hover = null;
 let aiRunning = false;
+const anim = createAnimator(drawBoard, (st, q, r) => visibleTiles(st, 0).has(key(q, r)));
+try {
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) anim.speed = 0;
+} catch { /* starý prohlížeč */ }
+
+// Jednotka na poli, jen pokud ji hráč vidí (cizí jednotky v mlze jako by nebyly).
+function seenUnitAt(q, r) {
+  const u = unitAt(state, q, r);
+  return u && (u.owner === 0 || visibleTiles(state, 0).has(key(q, r))) ? u : null;
+}
+
+// Hráč nemůže jednat, dokud hraje AI nebo běží animace.
+const busy = () => aiRunning || anim.busy;
 
 function randomSeed() {
   return Math.floor(Math.random() * 1e9);
@@ -32,7 +47,7 @@ function load() {
     const raw = localStorage.getItem(SAVE_KEY);
     if (!raw) return null;
     const s = JSON.parse(raw);
-    return s && s.version === 1 ? s : null;
+    return migrateState(s);
   } catch {
     return null;
   }
@@ -52,16 +67,25 @@ function selectedUnit() {
 }
 
 function draw() {
+  drawBoard();
+  updateHud();
+}
+
+function drawBoard() {
   const u = selectedUnit();
-  const mine = u && u.owner === state.current && !aiRunning;
-  render(ctx, state, {
+  const mine = u && u.owner === state.current && !busy();
+  const shown = anim.display || state;
+  render(ctx, shown, {
+    ...anim.view(),
+    visible: visibleTiles(shown, 0),
+    explored: exploredTiles(shown, 0),
+    viewer: 0,
     selectedId,
     reachable: mine ? reachable(state, u) : null,
     targets: mine ? new Set(attackTargets(state, u).map((t) => t.id)) : null,
     hover,
-    path: mine && hover && !unitAt(state, hover.q, hover.r) ? pathTo(state, u, hover.q, hover.r) : null,
+    path: mine && hover && !seenUnitAt(hover.q, hover.r) ? pathTo(state, u, hover.q, hover.r) : null,
   });
-  updateHud();
 }
 
 function updateHud() {
@@ -69,7 +93,7 @@ function updateHud() {
   $('gold').textContent = state.gold[0];
   $('income').textContent = `+${incomeOf(state, 0)}`;
   $('cities').textContent = `${state.cities.filter((c) => c.owner === 0).length} / ${state.cities.length}`;
-  $('end-turn').disabled = aiRunning || state.winner !== null;
+  $('end-turn').disabled = busy() || state.winner !== null;
 
   const info = $('info');
   const u = selectedUnit();
@@ -86,7 +110,7 @@ function updateHud() {
     const ci = cityInfo(state, city);
     html += `<h3>${city.name}</h3><p>Vlastník: ${owner}${city.capital ? ' · hlavní město' : ''}</p>
       <p>Příjem +${ci.income} zl./kolo · Obrana posádky +${ci.defensePct} % · Léčení +${ci.heal}</p>`;
-    if (city.owner === 0 && state.current === 0 && !aiRunning) {
+    if (city.owner === 0 && state.current === 0 && !busy()) {
       const blocked = !!unitAt(state, city.q, city.r);
       html += '<div class="buy">';
       for (const [type, t] of Object.entries(UNIT_TYPES)) {
@@ -97,7 +121,9 @@ function updateHud() {
       if (blocked) html += '<p class="hint">Město je obsazené – nejdřív z něj odejdi jednotkou.</p>';
     }
   }
-  if (!u && !city && hover && tileAt(state, hover.q, hover.r)) {
+  if (!u && !city && hover && !exploredTiles(state, 0).has(key(hover.q, hover.r))) {
+    html = '<p>Neprozkoumané území</p>';
+  } else if (!u && !city && hover && tileAt(state, hover.q, hover.r)) {
     const t = TERRAIN[tileAt(state, hover.q, hover.r).terrain];
     html = `<p>${t.name}${t.passable ? ` · pohyb ${t.cost} · obrana +${Math.round(t.defBonus * 100)} %` : ' · neprůchodné'}</p>`;
     const hc = cityAt(state, hover.q, hover.r);
@@ -127,26 +153,29 @@ function canvasPoint(ev) {
 }
 
 function onClick(ev) {
-  if (aiRunning || state.winner !== null) return;
+  if (busy()) { anim.skip(); return; }
+  if (state.winner !== null) return;
   const p = canvasPoint(ev);
   const hex = pickHex(p.x, p.y);
   if (!tileAt(state, hex.q, hex.r)) return;
-  const clickedUnit = unitAt(state, hex.q, hex.r);
-  const clickedCity = cityAt(state, hex.q, hex.r);
+  const clickedUnit = seenUnitAt(hex.q, hex.r);
+  const clickedCity = exploredTiles(state, 0).has(key(hex.q, hex.r)) ? cityAt(state, hex.q, hex.r) : null;
   const sel = selectedUnit();
 
   if (sel && sel.owner === state.current) {
     if (clickedUnit && clickedUnit.owner !== sel.owner) {
       if (attackTargets(state, sel).includes(clickedUnit)) {
+        const before = cloneState(state);
         attack(state, sel.id, clickedUnit.id);
         if (!getUnit(state, sel.id)) selectedId = null;
-        afterAction();
+        afterAction(before);
         return;
       }
     } else if (!clickedUnit && reachable(state, sel).has(key(hex.q, hex.r))) {
+      const before = cloneState(state);
       moveUnit(state, sel.id, hex.q, hex.r);
       selectedCityId = clickedCity ? clickedCity.id : null;
-      afterAction();
+      afterAction(before);
       return;
     }
   }
@@ -178,12 +207,12 @@ function placeTip(tip, ev) {
 function showTooltip(ev, hex) {
   const tip = $('tooltip');
   const sel = selectedUnit();
-  const target = hex && unitAt(state, hex.q, hex.r);
+  const target = hex && seenUnitAt(hex.q, hex.r);
   if (sel && target && sel.owner === state.current && attackTargets(state, sel).includes(target)) {
     const p = previewAttack(state, sel, target);
     tip.textContent = `Útok: −${p.damage}${p.kills ? ' (zničí)' : ''}, protiúder −${p.counter}`;
     placeTip(tip, ev);
-  } else if (hex && cityAt(state, hex.q, hex.r)) {
+  } else if (hex && cityAt(state, hex.q, hex.r) && exploredTiles(state, 0).has(key(hex.q, hex.r))) {
     const city = cityAt(state, hex.q, hex.r);
     const ci = cityInfo(state, city);
     const owner = city.owner === null ? 'neutrální' : PLAYERS[city.owner].name;
@@ -195,28 +224,40 @@ function showTooltip(ev, hex) {
   }
 }
 
-function afterAction() {
+// Po akci hráče: uložit a přehrát, co se stalo (before = stav před akcí).
+async function afterAction(before = null) {
+  const events = drainEvents(state);
   save();
   draw();
+  if (before && events.length) {
+    await anim.play(before, events);
+    draw();
+  }
 }
 
 function doEndTurn() {
-  if (aiRunning || state.winner !== null) return;
+  if (busy() || state.winner !== null) return;
   selectedId = null;
   selectedCityId = null;
+  $('tooltip').hidden = true;
   endTurn(state);
+  drainEvents(state);
   aiRunning = true;
   draw();
-  setTimeout(() => {
+  setTimeout(async () => {
+    const before = cloneState(state);
     runAITurn(state);
+    const events = drainEvents(state);
     if (state.winner === null) endTurn(state);
-    aiRunning = false;
     save();
+    await anim.play(before, events);
+    aiRunning = false;
     draw();
-  }, 350);
+  }, 250);
 }
 
 function newGame() {
+  if (busy()) return;
   if (state.winner === null && !confirm('Začít novou hru? Rozehraná hra se ztratí.')) return;
   state = createGame({ seed: randomSeed() });
   selectedId = null;
@@ -235,17 +276,20 @@ $('next-unit').addEventListener('click', selectNextUnit);
 $('info').addEventListener('click', (ev) => {
   const btn = ev.target.closest('button[data-buy]');
   if (!btn || !selectedCityId) return;
-  if (buyUnit(state, selectedCityId, btn.dataset.buy)) afterAction();
+  if (!busy() && buyUnit(state, selectedCityId, btn.dataset.buy)) afterAction();
 });
 window.addEventListener('keydown', (ev) => {
   if (ev.key === 'Enter' || ev.key === 'e') doEndTurn();
   if (ev.key === 'Tab') { ev.preventDefault(); selectNextUnit(); }
-  if (ev.key === 'Escape') { selectedId = null; selectedCityId = null; draw(); }
+  if (ev.key === 'Escape') {
+    if (busy()) { anim.skip(); return; }
+    selectedId = null; selectedCityId = null; draw();
+  }
 });
 
 // Vybere další jednotku, která ještě může jednat (Tab / tlačítko).
 function selectNextUnit() {
-  if (aiRunning || state.winner !== null) return;
+  if (busy() || state.winner !== null) return;
   const cur = selectedUnit();
   const next = nextActiveUnit(state, 0, cur && cur.owner === 0 ? cur.id : null);
   selectedId = next ? next.id : null;
@@ -260,7 +304,8 @@ window.__game = {
   endTurn: doEndTurn,
   nextUnit: selectNextUnit,
   selectedId: () => selectedId,
-  isBusy: () => aiRunning,
+  isBusy: busy,
+  setAnimSpeed: (x) => { anim.speed = x; },
   newGame: (seed) => { state = createGame({ seed }); resize(); draw(); },
 };
 

@@ -1,12 +1,12 @@
 // Čistá herní logika bez DOM. Stav je obyčejný JSON objekt (dá se uložit).
 import { key, neighbors, distance } from './hex.js';
 import { generateMap } from './map.js';
-import { TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY } from './rules.js';
+import { TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY, VISION } from './rules.js';
 
-export function createGame({ seed = 1, cols = 14, rows = 10, neutralCities = 4 } = {}) {
+export function createGame({ seed = 1, cols = 14, rows = 10, neutralCities = 4, fog = true } = {}) {
   const { tiles, cities, starts } = generateMap(seed, cols, rows, neutralCities);
   const state = {
-    version: 1,
+    version: STATE_VERSION,
     seed,
     cols,
     rows,
@@ -19,6 +19,9 @@ export function createGame({ seed = 1, cols = 14, rows = 10, neutralCities = 4 }
     winner: null,
     nextUnitId: 1,
     log: [],
+    events: [],
+    fog,
+    explored: PLAYERS.map(() => []),
   };
   starts.forEach((s, owner) => {
     spawnUnit(state, 'warrior', owner, s.q, s.r);
@@ -29,7 +32,102 @@ export function createGame({ seed = 1, cols = 14, rows = 10, neutralCities = 4 }
     u.movesLeft = UNIT_TYPES[u.type].move;
     u.hasAttacked = false;
   }
+  state.events = [];
+  PLAYERS.forEach((_, p) => updateExplored(state, p));
   return state;
+}
+
+export const STATE_VERSION = 3;
+
+// Převede uložený stav starší verze na aktuální; neznámý formát vrátí null.
+export function migrateState(s) {
+  if (!s || typeof s !== 'object') return null;
+  if (s.version === 1) {
+    s.events = [];
+    s.version = 2;
+  }
+  if (s.version === 2) {
+    // mlha války: staré hry ji dostanou taky, prozkoumané je to, co je vidět teď
+    s.fog = true;
+    s.explored = PLAYERS.map(() => []);
+    PLAYERS.forEach((_, p) => updateExplored(s, p));
+    s.version = 3;
+  }
+  return s.version === STATE_VERSION ? s : null;
+}
+
+// ---------- mlha války ----------
+
+// Pole, která hráč právě vidí (Set klíčů). Bez mlhy vidí všechno.
+export function visibleTiles(state, player) {
+  const seen = new Set();
+  if (!state.fog || state.winner !== null) {
+    for (const k of Object.keys(state.tiles)) seen.add(k);
+    return seen;
+  }
+  const look = (q, r, radius) => {
+    for (let dq = -radius; dq <= radius; dq++) {
+      for (let dr = Math.max(-radius, -dq - radius); dr <= Math.min(radius, -dq + radius); dr++) {
+        const k = key(q + dq, r + dr);
+        if (state.tiles[k]) seen.add(k);
+      }
+    }
+  };
+  for (const u of state.units) {
+    if (u.owner !== player) continue;
+    const onHills = tileAt(state, u.q, u.r).terrain === 'hills';
+    look(u.q, u.r, UNIT_TYPES[u.type].sight + (onHills ? VISION.hillsBonus : 0));
+  }
+  for (const c of state.cities) if (c.owner === player) look(c.q, c.r, VISION.city);
+  return seen;
+}
+
+// Přidá aktuálně viditelná pole mezi prozkoumaná (state.explored[player] je seřazené pole klíčů).
+export function updateExplored(state, player) {
+  if (!state.explored) return;
+  const all = new Set(state.explored[player] || []);
+  for (const k of visibleTiles(state, player)) all.add(k);
+  state.explored[player] = [...all].sort();
+}
+
+// Prozkoumaná pole jako Set (pro rychlé dotazy při kreslení).
+export function exploredTiles(state, player) {
+  if (!state.fog) return new Set(Object.keys(state.tiles));
+  return new Set(state.explored ? state.explored[player] : []);
+}
+
+// ---------- události pro animace ----------
+// Akce zapisují do state.events, co se stalo (JSON). UI si je vybere přes drainEvents()
+// a přehraje je na kopii stavu z doby před akcí pomocí applyEvent().
+
+function emit(state, ev) {
+  (state.events ||= []).push(ev);
+}
+
+export function drainEvents(state) {
+  const evs = state.events || [];
+  state.events = [];
+  return evs;
+}
+
+export function applyEvent(state, ev) {
+  if (ev.type === 'move') {
+    const u = getUnit(state, ev.unitId);
+    const end = ev.path[ev.path.length - 1];
+    if (u) { u.q = end.q; u.r = end.r; }
+  } else if (ev.type === 'attack') {
+    const a = getUnit(state, ev.attackerId);
+    const d = getUnit(state, ev.defenderId);
+    if (d) d.hp -= ev.damage;
+    if (a) a.hp -= ev.counter;
+    if (ev.killed) removeUnit(state, ev.defenderId);
+    if (ev.died) removeUnit(state, ev.attackerId);
+  } else if (ev.type === 'spawn') {
+    state.units.push({ ...ev.unit });
+  } else if (ev.type === 'capture') {
+    const c = state.cities.find((x) => x.id === ev.cityId);
+    if (c) c.owner = ev.owner;
+  }
 }
 
 export function cloneState(state) {
@@ -186,14 +284,18 @@ export function spawnUnit(state, type, owner, q, r) {
     hasAttacked: true,
   };
   state.units.push(unit);
+  emit(state, { type: 'spawn', unit: { ...unit } });
+  updateExplored(state, owner);
   return unit;
 }
 
 export function moveUnit(state, unitId, q, r) {
   const unit = getUnit(state, unitId);
   if (!unit || unit.owner !== state.current || state.winner !== null) return false;
+  const path = pathTo(state, unit, q, r);
+  if (!path) return false;
   const cost = reachable(state, unit).get(key(q, r));
-  if (cost === undefined) return false;
+  emit(state, { type: 'move', unitId: unit.id, path });
   unit.q = q;
   unit.r = r;
   unit.movesLeft = Math.max(0, unit.movesLeft - cost);
@@ -202,9 +304,11 @@ export function moveUnit(state, unitId, q, r) {
   if (city && city.owner !== unit.owner) {
     const prev = city.owner;
     city.owner = unit.owner;
+    emit(state, { type: 'capture', cityId: city.id, owner: unit.owner });
     addLog(state, `${PLAYERS[unit.owner].name}: dobyto město ${city.name}`);
     if (prev !== null) checkWinner(state);
   }
+  updateExplored(state, unit.owner);
   return true;
 }
 
@@ -220,11 +324,15 @@ export function attack(state, attackerId, defenderId) {
   a.moved = true;
   const aName = UNIT_TYPES[a.type].name;
   const dName = UNIT_TYPES[d.type].name;
+  const ev = { type: 'attack', attackerId: a.id, defenderId: d.id, damage: res.damage, counter: 0, killed: d.hp <= 0, died: false };
+  emit(state, ev);
   if (d.hp <= 0) {
     removeUnit(state, d.id);
     addLog(state, `${PLAYERS[a.owner].name}: ${aName} zničil jednotku ${dName}`);
   } else {
     a.hp -= res.counter;
+    ev.counter = res.counter;
+    ev.died = a.hp <= 0;
     addLog(state, `${PLAYERS[a.owner].name}: ${aName} útočí na ${dName} (−${res.damage}, protiúder −${res.counter})`);
     if (a.hp <= 0) {
       removeUnit(state, a.id);

@@ -9,15 +9,18 @@ export const TERRAIN = {
 };
 
 export const UNIT_TYPES = {
-  warrior:  { name: 'Válečník',  symbol: 'V', hp: 10, atk: 4, def: 3, move: 2, range: 1, cost: 10 },
-  archer:   { name: 'Lučištník', symbol: 'L', hp: 8,  atk: 3, def: 2, move: 2, range: 2, cost: 12 },
-  horseman: { name: 'Jezdec',    symbol: 'J', hp: 10, atk: 5, def: 2, move: 4, range: 1, cost: 15 },
+  warrior:  { name: 'Válečník',  symbol: 'V', hp: 10, atk: 4, def: 3, move: 2, range: 1, cost: 10, sight: 2 },
+  archer:   { name: 'Lučištník', symbol: 'L', hp: 8,  atk: 3, def: 2, move: 2, range: 2, cost: 12, sight: 2 },
+  horseman: { name: 'Jezdec',    symbol: 'J', hp: 10, atk: 5, def: 2, move: 4, range: 1, cost: 15, sight: 3 },
 };
 
 export const PLAYERS = [
   { name: 'Ty',  color: '#2f6fd6', light: '#9cc0ff', isAI: false },
   { name: 'AI',  color: '#d23c3c', light: '#ffa3a3', isAI: true },
 ];
+
+// Mlha války: dohled měst a bonus z kopců.
+export const VISION = { city: 2, hillsBonus: 1 };
 
 export const NEUTRAL_COLOR = '#e8e2d0';
 
