@@ -27,6 +27,14 @@ export const BUILDINGS = {
 };
 export const BUILDING_EFFECTS = { wallsDefense: 0.5, marketIncome: 2, barracksDiscount: 3 };
 
+// Zkušenosti: XP za útok (+ za zničení) a za přežitý útok. Hodnost zvyšuje útok i obranu.
+export const RANKS = [
+  { name: 'Rekrut',  xp: 0, symbol: '' },
+  { name: 'Veterán', xp: 3, symbol: '★' },
+  { name: 'Elita',   xp: 7, symbol: '★★' },
+];
+export const XP = { attack: 1, kill: 1, defend: 1, rankBonus: 0.15, promotionHeal: 3 };
+
 // Obtížnost ovlivňuje jen AI hráče.
 // seesAll: AI ignoruje mlhu války; incomeBonus: zlato navíc za kolo; startGold: zlato navíc na začátku;
 // caution: jak moc AI váhá s útokem (vyšší = opatrnější, hraje hůř).

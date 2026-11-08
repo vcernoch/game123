@@ -2,6 +2,15 @@
 
 Nejnovější záznam nahoře. Formát: datum – co se udělalo – stav testů – otázky pro Vladimíra.
 
+## 2026-11-08 – Zkušenosti a povýšení
+- `RANKS` a `XP` v `rules.js`: Rekrut → Veterán (3 XP) → Elita (7 XP), každá hodnost +15 % útoku i obrany (i u protiúderu), povýšení vyléčí 3 životy.
+- XP: útok +1, zničení cíle +1 navíc, přežitý útok +1 (obránce). `rankOf()`, `rankMult()` a interní `gainXp()` v `game.js`.
+- Událost útoku nově nese výsledné životy a XP obou stran, takže přehrání (`applyEvent`) sedí přesně i s povýšením. Test přehrávání teď porovnává i XP.
+- UI: zlaté hvězdičky nad jednotkou, v panelu skutečný útok/obrana s bonusem a řádek „Veterán ★ · XP 4/7“; při povýšení vyskočí „★ povýšení“.
+- Struktura stavu: `state.version` 6 (`unit.xp`), migrace doplní 0.
+- Testy: +2 logické (XP za útok/obranu/zničení; prahy hodností, bonus k útoku i obraně, povýšení s vyléčením a zápisem do kroniky).
+- Stav: `npm run check` zelený (23 logických testů + smoke).
+
 ## 2026-11-08 – Budovy ve městech
 - `BUILDINGS` v `rules.js`: Hradby (20 zl., posádka +50 % obrany), Trh (25 zl., +2 zlata za kolo), Kasárna (20 zl., verbování o 3 zlaté levnější). Účinky jsou v `BUILDING_EFFECTS`, ať se dají ladit na jednom místě.
 - `build()`, `hasBuilding()`, `unitCost()`, `cityDefenseMult()` v `game.js`; příjem, obrana i cena verbování je berou v úvahu. Budovy při dobytí města zůstávají novému majiteli (dobývání se tak víc vyplácí).

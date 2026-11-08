@@ -1,6 +1,6 @@
 // Vykreslení na canvas. Žádná herní logika, jen kreslení stavu.
 import { hexToPixel, hexCorners, pixelToHex, key } from './hex.js';
-import { TERRAIN, UNIT_TYPES, PLAYERS, NEUTRAL_COLOR } from './rules.js';
+import { TERRAIN, UNIT_TYPES, PLAYERS, NEUTRAL_COLOR, RANKS } from './rules.js';
 
 export const HEX_SIZE = 32;
 const PAD = 8;
@@ -296,6 +296,17 @@ function drawUnit(ctx, u, x, y, selected, active) {
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(t.symbol, x, y + 4);
+  // hodnost: zlaté hvězdičky nad jednotkou
+  let rank = 0;
+  RANKS.forEach((r, i) => { if ((u.xp || 0) >= r.xp) rank = i; });
+  if (rank > 0) {
+    ctx.font = 'bold 10px system-ui, sans-serif';
+    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = 'rgba(0,0,0,0.75)';
+    ctx.strokeText(RANKS[rank].symbol, x, y - 13);
+    ctx.fillStyle = '#ffd34d';
+    ctx.fillText(RANKS[rank].symbol, x, y - 13);
+  }
   // HP lišta
   const frac = u.hp / t.hp;
   ctx.fillStyle = 'rgba(0,0,0,0.6)';

@@ -3,6 +3,7 @@ import {
   createGame, reachable, attackTargets, moveUnit, attack, buyUnit, endTurn,
   unitAt, cityAt, getUnit, incomeOf, previewAttack, tileAt, pathTo, nextActiveUnit, cityInfo,
   cloneState, drainEvents, migrateState, visibleTiles, exploredTiles, build, unitCost, hasBuilding,
+  rankOf, rankMult,
 } from './game.js';
 import { createAnimator } from './anim.js';
 import { decideTap } from './input.js';
@@ -10,7 +11,7 @@ import { GAME_VERSION, GAME_DATE } from './version.js';
 import { runAITurn } from './ai.js';
 import { render, canvasSize, pickHex } from './render.js';
 import { key } from './hex.js';
-import { UNIT_TYPES, TERRAIN, PLAYERS, DIFFICULTY, BUILDINGS } from './rules.js';
+import { UNIT_TYPES, TERRAIN, PLAYERS, DIFFICULTY, BUILDINGS, RANKS } from './rules.js';
 
 const SAVE_KEY = 'game123-save';
 const PREFS_KEY = 'game123-prefs';
@@ -67,6 +68,15 @@ function resize() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
 
+const fmt = (x) => (Math.round(x * 10) / 10).toLocaleString('cs-CZ');
+
+// "Veterán ★ · XP 4/7" – hodnost a kolik zbývá do další.
+function rankLine(u) {
+  const r = rankOf(u);
+  const next = RANKS[r + 1];
+  return `${RANKS[r].name} ${RANKS[r].symbol} · XP ${u.xp || 0}${next ? `/${next.xp}` : ''}`;
+}
+
 function selectedUnit() {
   return selectedId ? getUnit(state, selectedId) : null;
 }
@@ -107,8 +117,9 @@ function updateHud() {
   if (u) {
     const t = UNIT_TYPES[u.type];
     html += `<h3>${t.name} <span class="tag" style="background:${PLAYERS[u.owner].color}">${PLAYERS[u.owner].name}</span></h3>
-      <p>Životy ${u.hp}/${t.hp} · Útok ${t.atk} · Obrana ${t.def} · Dosah ${t.range}</p>
-      <p>Pohyb ${u.movesLeft}/${t.move}${u.hasAttacked ? ' · už útočil' : ''}</p>`;
+      <p>Životy ${u.hp}/${t.hp} · Útok ${fmt(t.atk * rankMult(u))} · Obrana ${fmt(t.def * rankMult(u))} · Dosah ${t.range}</p>
+      <p>Pohyb ${u.movesLeft}/${t.move}${u.hasAttacked ? ' · už útočil' : ''}</p>
+      <p>${rankLine(u)}</p>`;
   }
   if (city) {
     const owner = city.owner === null ? 'neutrální' : PLAYERS[city.owner].name;

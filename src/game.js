@@ -2,7 +2,7 @@
 import { key, neighbors, distance } from './hex.js';
 import { generateMap } from './map.js';
 import {
-  TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY, VISION, DIFFICULTY, BUILDINGS, BUILDING_EFFECTS,
+  TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY, VISION, DIFFICULTY, BUILDINGS, BUILDING_EFFECTS, RANKS, XP,
 } from './rules.js';
 
 export function createGame({
@@ -44,7 +44,7 @@ export function createGame({
   return state;
 }
 
-export const STATE_VERSION = 5;
+export const STATE_VERSION = 6;
 
 // Převede uložený stav starší verze na aktuální; neznámý formát vrátí null.
 export function migrateState(s) {
@@ -67,6 +67,10 @@ export function migrateState(s) {
   if (s.version === 4) {
     for (const c of s.cities) c.buildings = [];
     s.version = 5;
+  }
+  if (s.version === 5) {
+    for (const u of s.units) u.xp = 0;
+    s.version = 6;
   }
   return s.version === STATE_VERSION ? s : null;
 }
@@ -133,8 +137,14 @@ export function applyEvent(state, ev) {
   } else if (ev.type === 'attack') {
     const a = getUnit(state, ev.attackerId);
     const d = getUnit(state, ev.defenderId);
-    if (d) d.hp -= ev.damage;
-    if (a) a.hp -= ev.counter;
+    if (d) {
+      d.hp = ev.defenderHp ?? d.hp - ev.damage;
+      d.xp = ev.defenderXp ?? d.xp;
+    }
+    if (a) {
+      a.hp = ev.attackerHp ?? a.hp - ev.counter;
+      a.xp = ev.attackerXp ?? a.xp;
+    }
     if (ev.killed) removeUnit(state, ev.defenderId);
     if (ev.died) removeUnit(state, ev.attackerId);
   } else if (ev.type === 'spawn') {
@@ -280,9 +290,29 @@ export function attackTargets(state, unit) {
   return state.units.filter((u) => u.owner !== unit.owner && distance(unit, u) <= range);
 }
 
+// ---------- zkušenosti ----------
+
+export function rankOf(unit) {
+  let rank = 0;
+  RANKS.forEach((r, i) => { if ((unit.xp || 0) >= r.xp) rank = i; });
+  return rank;
+}
+
+export const rankMult = (unit) => 1 + XP.rankBonus * rankOf(unit);
+
+// Přidá zkušenosti; při povýšení jednotku trochu vyléčí. Vrací true, když došlo k povýšení.
+function gainXp(state, unit, amount) {
+  const before = rankOf(unit);
+  unit.xp = (unit.xp || 0) + amount;
+  if (rankOf(unit) <= before) return false;
+  unit.hp = Math.min(UNIT_TYPES[unit.type].hp, unit.hp + XP.promotionHeal);
+  addLog(state, `${PLAYERS[unit.owner].name}: ${UNIT_TYPES[unit.type].name} povýšen na ${RANKS[rankOf(unit)].name}`);
+  return true;
+}
+
 export function defenseValue(state, unit) {
   const t = tileAt(state, unit.q, unit.r);
-  let d = UNIT_TYPES[unit.type].def * (1 + TERRAIN[t.terrain].defBonus);
+  let d = UNIT_TYPES[unit.type].def * rankMult(unit) * (1 + TERRAIN[t.terrain].defBonus);
   const city = cityAt(state, unit.q, unit.r);
   if (city && city.owner === unit.owner) d *= cityDefenseMult(city);
   return d;
@@ -290,14 +320,14 @@ export function defenseValue(state, unit) {
 
 // Odhad boje bez náhody – používá ho UI i AI.
 export function previewAttack(state, attacker, defender) {
-  const atk = UNIT_TYPES[attacker.type].atk * hpFactor(attacker);
+  const atk = UNIT_TYPES[attacker.type].atk * rankMult(attacker) * hpFactor(attacker);
   const def = defenseValue(state, defender);
   const damage = Math.max(1, Math.round((4 * atk) / def));
   const defenderHp = Math.max(0, defender.hp - damage);
   let counter = 0;
   const dist = distance(attacker, defender);
   if (defenderHp > 0 && UNIT_TYPES[defender.type].range >= dist) {
-    const cAtk = UNIT_TYPES[defender.type].atk * (defenderHp / UNIT_TYPES[defender.type].hp);
+    const cAtk = UNIT_TYPES[defender.type].atk * rankMult(defender) * (defenderHp / UNIT_TYPES[defender.type].hp);
     const cDef = defenseValue(state, attacker);
     counter = Math.max(1, Math.round((3 * cAtk) / cDef));
   }
@@ -321,6 +351,7 @@ export function spawnUnit(state, type, owner, q, r) {
     hp: t.hp,
     movesLeft: 0,
     hasAttacked: true,
+    xp: 0,
   };
   state.units.push(unit);
   emit(state, { type: 'spawn', unit: { ...unit } });
@@ -368,6 +399,7 @@ export function attack(state, attackerId, defenderId) {
   if (d.hp <= 0) {
     removeUnit(state, d.id);
     addLog(state, `${PLAYERS[a.owner].name}: ${aName} zničil jednotku ${dName}`);
+    ev.promoted = gainXp(state, a, XP.attack + XP.kill);
   } else {
     a.hp -= res.counter;
     ev.counter = res.counter;
@@ -376,8 +408,16 @@ export function attack(state, attackerId, defenderId) {
     if (a.hp <= 0) {
       removeUnit(state, a.id);
       addLog(state, `${aName} padl v boji`);
+    } else {
+      ev.promoted = gainXp(state, a, XP.attack);
     }
+    ev.defenderPromoted = gainXp(state, d, XP.defend);
   }
+  // výsledné hodnoty, aby přehrání události bylo přesné i s povýšením
+  ev.attackerHp = a.hp;
+  ev.attackerXp = a.xp;
+  ev.defenderHp = d.hp;
+  ev.defenderXp = d.xp;
   checkWinner(state);
   return true;
 }

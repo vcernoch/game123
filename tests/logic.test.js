@@ -4,7 +4,7 @@ import {
   createGame, reachable, moveUnit, attack, buyUnit, endTurn, unitAt, isPassable,
   previewAttack, cloneState, pathTo, nextActiveUnit, tileAt, cityInfo, incomeOf, defenseValue,
   drainEvents, applyEvent, migrateState, STATE_VERSION,
-  visibleTiles, exploredTiles, build, unitCost,
+  visibleTiles, exploredTiles, build, unitCost, rankOf,
 } from '../src/game.js';
 import { runAITurn, goalsFor, buildSomething } from '../src/ai.js';
 import { decideTap } from '../src/input.js';
@@ -12,7 +12,7 @@ import { readFileSync } from 'node:fs';
 import { GAME_VERSION, GAME_DATE } from '../src/version.js';
 import { pathExists } from '../src/map.js';
 import { distance, key, neighbors } from '../src/hex.js';
-import { UNIT_TYPES, TERRAIN, BUILDINGS, BUILDING_EFFECTS } from '../src/rules.js';
+import { UNIT_TYPES, TERRAIN, BUILDINGS, BUILDING_EFFECTS, RANKS, XP } from '../src/rules.js';
 
 test('mapa je deterministická a startovní města jsou propojená', () => {
   for (const seed of [1, 2, 3, 42, 999]) {
@@ -169,7 +169,7 @@ test('informace o městě souhlasí s příjmem a obranou', () => {
 
 // shrnutí, které musí po přehrání událostí sedět
 const snapshot = (s) => ({
-  units: s.units.map((u) => [u.id, u.type, u.owner, u.q, u.r, u.hp]).sort((a, b) => a[0] - b[0]),
+  units: s.units.map((u) => [u.id, u.type, u.owner, u.q, u.r, u.hp, u.xp]).sort((a, b) => a[0] - b[0]),
   cities: s.cities.map((c) => [c.id, c.owner]),
 });
 
@@ -381,4 +381,52 @@ test('budovy: AI staví z přebytku a stará hra dostane prázdné budovy', () =
   const m = migrateState(old);
   assert.equal(m.version, STATE_VERSION);
   assert.ok(m.cities.every((c) => Array.isArray(c.buildings)));
+  assert.ok(m.units.every((u) => u.xp === 0));
+});
+
+// Postaví souboj: naše jednotka typu `type` a nepřítel `enemyType` vedle ní na pláni.
+function duel(seed, type = 'warrior', enemyType = 'warrior') {
+  const s = createGame({ seed, fog: false });
+  s.units = [];
+  const free = Object.values(s.tiles).filter((t) => t.terrain === 'plains' && !s.cities.some((c) => c.q === t.q && c.r === t.r));
+  const a = free.find((t) => neighbors(t.q, t.r).some((n) => free.some((f) => f.q === n.q && f.r === n.r)));
+  const b = free.find((f) => distance(f, a) === 1);
+  const me = { id: 900, type, owner: 0, q: a.q, r: a.r, hp: UNIT_TYPES[type].hp, movesLeft: 2, hasAttacked: false, xp: 0 };
+  const foe = { id: 901, type: enemyType, owner: 1, q: b.q, r: b.r, hp: UNIT_TYPES[enemyType].hp, movesLeft: 0, hasAttacked: true, xp: 0 };
+  s.units.push(me, foe);
+  return { s, me, foe };
+}
+
+test('zkušenosti: útok a obrana dávají XP, zničení víc', () => {
+  const { s, me, foe } = duel(3);
+  attack(s, me.id, foe.id);
+  assert.equal(me.xp, XP.attack);
+  assert.equal(foe.xp, XP.defend);
+  const d2 = duel(3);
+  d2.foe.hp = 1;
+  attack(d2.s, d2.me.id, d2.foe.id);
+  assert.equal(d2.me.xp, XP.attack + XP.kill);
+});
+
+test('zkušenosti: povýšení zvýší sílu a vyléčí, hodnosti podle prahů', () => {
+  assert.equal(rankOf({ xp: 0 }), 0);
+  assert.equal(rankOf({ xp: RANKS[1].xp }), 1);
+  assert.equal(rankOf({ xp: RANKS[2].xp + 5 }), 2);
+  assert.equal(rankOf({}), 0);
+  const { s, me, foe } = duel(4);
+  const base = previewAttack(s, me, foe);
+  const baseDef = defenseValue(s, me);
+  me.xp = RANKS[2].xp;
+  const elite = previewAttack(s, me, foe);
+  assert.ok(elite.damage >= base.damage);
+  assert.ok(Math.abs(defenseValue(s, me) - baseDef * (1 + 2 * XP.rankBonus)) < 1e-9);
+  // povýšení během útoku: těsně pod prahem + oslabený
+  const p = duel(4);
+  p.me.xp = RANKS[1].xp - XP.attack;
+  p.me.hp = 4;
+  p.foe.hp = 1;
+  attack(p.s, p.me.id, p.foe.id);
+  assert.equal(rankOf(p.me), 1);
+  assert.equal(p.me.hp, 4 + XP.promotionHeal);
+  assert.ok(p.s.log.some((l) => l.msg.includes('povýšen')));
 });
