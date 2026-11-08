@@ -2,6 +2,12 @@
 
 Nejnovější záznam nahoře. Formát: datum – co se udělalo – stav testů – otázky pro Vladimíra.
 
+## 2026-11-08 – Shrnutí dlouhého běhu → v0.4.0
+- **Otázka pro Vladimíra:** Další úkol v roadmapě je „Více AI soupeřů“. Je to velká přestavba (všude se počítá se dvěma hráči) a mění pravidla vítězství: místo „AI přijde o všechna města“ by platilo „všichni soupeři přijdou o všechna města“. Mají AI bojovat i mezi sebou, nebo jen proti tobě? Do tvé odpovědi na tom nepracuji (RULES.md: změny pravidel vítězství).
+- Na žádost o „hodně delší běh“ jsem udělal 10 úkolů místo obvyklých max. 3, každý zvlášť otestovaný a commitnutý: obtížnost AI, dotykové ovládání, budovy, zkušenosti, kopiník a katapult, silnice, lepší AI, frakce, hlavní menu s velikostí mapy, zvuky, statistiky. Fáze 1 a 2 jsou hotové, ve fázi 3 zbývá víc AI soupeřů a kampaň.
+- Verze 0.4.0 (`state.version` 9). Uložené hry ze všech předchozích verzí se převedou (testy migrace pro každý krok).
+- Stav: `npm run check` zelený (35 logických testů + smoke s 10 screenshoty v `artifacts/`).
+
 ## 2026-11-08 – Statistiky a graf síly
 - `state.history`: na začátku každého kola (a při konci hry) se zapíše síla armád, počet měst a zlato obou stran. `armyPower()` = cena jednotek vážená životy a hodností.
 - `state.stats`: zničené a ztracené jednotky, dobytá města.
