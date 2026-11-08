@@ -25,6 +25,9 @@ try {
   await page.waitForFunction(() => window.__game);
   await page.evaluate(() => window.__game.newGame(12345));
   await page.evaluate(() => window.__game.setAnimSpeed(0.25));
+  const shownVersion = await page.textContent('#version');
+  const expected = await page.evaluate(() => window.__game.version);
+  if (shownVersion !== `v${expected}`) throw new Error(`verze v záhlaví nesedí: ${shownVersion}`);
 
   // klik na hráčovu jednotku a na pole, kam může jít
   const box = await page.locator('#board').boundingBox();
