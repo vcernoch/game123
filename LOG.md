@@ -2,6 +2,15 @@
 
 Nejnovější záznam nahoře. Formát: datum – co se udělalo – stav testů – otázky pro Vladimíra.
 
+## 2026-11-08 – Kopiník a katapult
+- Kopiník (12 zl., útok 3, obrana 4): `bonusVs: { horseman: 1 }` – proti jezdci dvojnásobná síla v útoku, obraně i protiúderu.
+- Katapult (20 zl., útok 6, obrana 1, pohyb 1, dostřel 2, 7 životů): `siege: 0.5` – +50 % proti jednotkám ve městech a ignoruje hradby (ne základní bonus města).
+- Boj: nové `vsMult()` a interní `attackPower()`; `defenseValue(state, unit, attacker)` bere útočníka v úvahu. Bez útočníka vrací totéž co dřív (tooltip, `cityInfo`).
+- AI verbuje podle cílového poměru armády (`pickRecruit`): víc kopiníků, když vidí nepřátelské jezdce, katapulty od 8. kola.
+- UI: popis schopnosti v panelu jednotky a v tooltipu tlačítka verbování.
+- Testy: +3 logické (kopiník vs. jezdec v útoku i obraně a bez bonusu proti válečníkovi; katapult proti posádce s hradbami vs. lučištník; AI na jezdce odpovídá kopiníky a v simulacích verbuje oba nové typy).
+- Stav: `npm run check` zelený (26 logických testů + smoke).
+
 ## 2026-11-08 – Zkušenosti a povýšení
 - `RANKS` a `XP` v `rules.js`: Rekrut → Veterán (3 XP) → Elita (7 XP), každá hodnost +15 % útoku i obrany (i u protiúderu), povýšení vyléčí 3 životy.
 - XP: útok +1, zničení cíle +1 navíc, přežitý útok +1 (obránce). `rankOf()`, `rankMult()` a interní `gainXp()` v `game.js`.

@@ -12,6 +12,12 @@ export const UNIT_TYPES = {
   warrior:  { name: 'Válečník',  symbol: 'V', hp: 10, atk: 4, def: 3, move: 2, range: 1, cost: 10, sight: 2 },
   archer:   { name: 'Lučištník', symbol: 'L', hp: 8,  atk: 3, def: 2, move: 2, range: 2, cost: 12, sight: 2 },
   horseman: { name: 'Jezdec',    symbol: 'J', hp: 10, atk: 5, def: 2, move: 4, range: 1, cost: 15, sight: 3 },
+  // bonusVs: násobek síly navíc proti danému typu (útok i obrana)
+  spearman: { name: 'Kopiník',   symbol: 'K', hp: 10, atk: 3, def: 4, move: 2, range: 1, cost: 12, sight: 2,
+    bonusVs: { horseman: 1 }, desc: 'dvojnásobná síla proti jezdcům' },
+  // siege: bonus proti jednotkám ve městech a ignoruje hradby
+  catapult: { name: 'Katapult',  symbol: 'O', hp: 7,  atk: 6, def: 1, move: 1, range: 2, cost: 20, sight: 2,
+    siege: 0.5, desc: '+50 % proti posádkám měst, ignoruje hradby' },
 };
 
 export const PLAYERS = [

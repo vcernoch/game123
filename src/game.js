@@ -310,25 +310,43 @@ function gainXp(state, unit, amount) {
   return true;
 }
 
-export function defenseValue(state, unit) {
+// Násobek síly jednotky proti konkrétnímu protivníkovi (kopiník proti jezdci…).
+export function vsMult(unit, other) {
+  const bonus = other && UNIT_TYPES[unit.type].bonusVs ? UNIT_TYPES[unit.type].bonusVs[other.type] || 0 : 0;
+  return 1 + bonus;
+}
+
+// Obrana jednotky; attacker (nepovinný) určuje bonusy proti typu a obléhání.
+export function defenseValue(state, unit, attacker = null) {
   const t = tileAt(state, unit.q, unit.r);
-  let d = UNIT_TYPES[unit.type].def * rankMult(unit) * (1 + TERRAIN[t.terrain].defBonus);
+  let d = UNIT_TYPES[unit.type].def * rankMult(unit) * (1 + TERRAIN[t.terrain].defBonus) * vsMult(unit, attacker);
   const city = cityAt(state, unit.q, unit.r);
-  if (city && city.owner === unit.owner) d *= cityDefenseMult(city);
+  if (city && city.owner === unit.owner) {
+    const siege = attacker && UNIT_TYPES[attacker.type].siege;
+    d *= siege ? 1 + CITY_DEF_BONUS : cityDefenseMult(city); // obléhací stroj hradby ignoruje
+  }
   return d;
+}
+
+// Útočná síla včetně hodnosti, bonusu proti typu a obléhání města.
+function attackPower(state, unit, target) {
+  let atk = UNIT_TYPES[unit.type].atk * rankMult(unit) * vsMult(unit, target);
+  const siege = UNIT_TYPES[unit.type].siege;
+  if (siege && target && cityAt(state, target.q, target.r)) atk *= 1 + siege;
+  return atk;
 }
 
 // Odhad boje bez náhody – používá ho UI i AI.
 export function previewAttack(state, attacker, defender) {
-  const atk = UNIT_TYPES[attacker.type].atk * rankMult(attacker) * hpFactor(attacker);
-  const def = defenseValue(state, defender);
+  const atk = attackPower(state, attacker, defender) * hpFactor(attacker);
+  const def = defenseValue(state, defender, attacker);
   const damage = Math.max(1, Math.round((4 * atk) / def));
   const defenderHp = Math.max(0, defender.hp - damage);
   let counter = 0;
   const dist = distance(attacker, defender);
   if (defenderHp > 0 && UNIT_TYPES[defender.type].range >= dist) {
-    const cAtk = UNIT_TYPES[defender.type].atk * rankMult(defender) * (defenderHp / UNIT_TYPES[defender.type].hp);
-    const cDef = defenseValue(state, attacker);
+    const cAtk = attackPower(state, defender, attacker) * (defenderHp / UNIT_TYPES[defender.type].hp);
+    const cDef = defenseValue(state, attacker, defender);
     counter = Math.max(1, Math.round((3 * cAtk) / cDef));
   }
   return { damage, counter, kills: defenderHp === 0, dies: attacker.hp - counter <= 0 };

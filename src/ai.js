@@ -129,14 +129,31 @@ function evalPos(state, unit, q, r, goals, range, know) {
   return score;
 }
 
+// Jakou jednotku AI chce: doplňuje armádu k cílovému poměru typů.
+// Vidí-li nepřátelské jezdce, chce víc kopiníků; katapulty až od 8. kola.
+export function pickRecruit(state, me, city) {
+  const know = aiKnowledge(state, me);
+  const enemyHorse = state.units.filter((u) => u.owner !== me && u.type === 'horseman' && know.sees(u.q, u.r)).length;
+  const ratio = { warrior: 3, archer: 2, horseman: 2, spearman: 1 + enemyHorse, catapult: state.turn >= 8 ? 1 : 0 };
+  const count = {};
+  for (const u of state.units) if (u.owner === me) count[u.type] = (count[u.type] || 0) + 1;
+  let best = null;
+  let bestNeed = Infinity;
+  let bestWant = 0;
+  for (const [type, want] of Object.entries(ratio)) {
+    if (!want || state.gold[me] < unitCost(city, type)) continue;
+    const need = (count[type] || 0) / want;
+    // při shodě vyhrává typ, kterého chceme víc
+    if (need < bestNeed || (need === bestNeed && want > bestWant)) { bestNeed = need; best = type; bestWant = want; }
+  }
+  return best;
+}
+
 function recruit(state, me) {
-  const order = ['warrior', 'archer', 'horseman'];
-  const myUnits = state.units.filter((u) => u.owner === me).length;
   for (const city of state.cities.filter((c) => c.owner === me)) {
     if (unitAt(state, city.q, city.r)) continue;
-    const pick = order[(state.turn + myUnits + city.id) % order.length];
-    const type = state.gold[me] >= unitCost(city, pick) ? pick : 'warrior';
-    buyUnit(state, city.id, type);
+    const type = pickRecruit(state, me, city);
+    if (type) buyUnit(state, city.id, type);
   }
 }
 

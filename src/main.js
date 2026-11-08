@@ -119,7 +119,7 @@ function updateHud() {
     html += `<h3>${t.name} <span class="tag" style="background:${PLAYERS[u.owner].color}">${PLAYERS[u.owner].name}</span></h3>
       <p>Životy ${u.hp}/${t.hp} · Útok ${fmt(t.atk * rankMult(u))} · Obrana ${fmt(t.def * rankMult(u))} · Dosah ${t.range}</p>
       <p>Pohyb ${u.movesLeft}/${t.move}${u.hasAttacked ? ' · už útočil' : ''}</p>
-      <p>${rankLine(u)}</p>`;
+      <p>${rankLine(u)}</p>${t.desc ? `<p class="hint">${t.desc}</p>` : ''}`;
   }
   if (city) {
     const owner = city.owner === null ? 'neutrální' : PLAYERS[city.owner].name;
@@ -134,7 +134,7 @@ function updateHud() {
       for (const [type, t] of Object.entries(UNIT_TYPES)) {
         const cost = unitCost(city, type);
         const dis = blocked || state.gold[0] < cost ? 'disabled' : '';
-        html += `<button data-buy="${type}" ${dis}>${t.name} <small>${cost} zl.</small></button>`;
+        html += `<button data-buy="${type}" ${dis} title="${t.desc || ''}">${t.name} <small>${cost} zl.</small></button>`;
       }
       html += '</div>';
       if (blocked) html += '<p class="hint">Město je obsazené – nejdřív z něj odejdi jednotkou.</p>';

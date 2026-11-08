@@ -6,7 +6,7 @@ import {
   drainEvents, applyEvent, migrateState, STATE_VERSION,
   visibleTiles, exploredTiles, build, unitCost, rankOf,
 } from '../src/game.js';
-import { runAITurn, goalsFor, buildSomething } from '../src/ai.js';
+import { runAITurn, goalsFor, buildSomething, pickRecruit } from '../src/ai.js';
 import { decideTap } from '../src/input.js';
 import { readFileSync } from 'node:fs';
 import { GAME_VERSION, GAME_DATE } from '../src/version.js';
@@ -429,4 +429,63 @@ test('zkušenosti: povýšení zvýší sílu a vyléčí, hodnosti podle prahů
   assert.equal(rankOf(p.me), 1);
   assert.equal(p.me.hp, 4 + XP.promotionHeal);
   assert.ok(p.s.log.some((l) => l.msg.includes('povýšen')));
+});
+
+test('kopiník je silný proti jezdcům v útoku i v obraně', () => {
+  const asWarrior = duel(6, 'warrior', 'horseman');
+  const asSpear = duel(6, 'spearman', 'horseman');
+  const w = previewAttack(asWarrior.s, asWarrior.me, asWarrior.foe);
+  const k = previewAttack(asSpear.s, asSpear.me, asSpear.foe);
+  assert.ok(k.damage > w.damage, `kopiník ${k.damage} > válečník ${w.damage}`);
+  // jezdec útočí na kopiníka a dostane silnější protiúder než od válečníka
+  const hw = previewAttack(asWarrior.s, asWarrior.foe, asWarrior.me);
+  const hk = previewAttack(asSpear.s, asSpear.foe, asSpear.me);
+  assert.ok(hk.damage < hw.damage, 'kopiník se proti jezdci lépe brání');
+  assert.ok(hk.counter > hw.counter, 'a silněji vrací úder');
+  // proti válečníkovi bonus nemá
+  const plain = duel(6, 'spearman', 'warrior');
+  assert.equal(defenseValue(plain.s, plain.me, plain.foe), defenseValue(plain.s, plain.me));
+});
+
+test('katapult je silný proti posádce města a ignoruje hradby', () => {
+  const { s, me, foe } = duel(8, 'catapult', 'warrior');
+  const field = previewAttack(s, me, foe);
+  // dáme nepřítele do města s hradbami
+  const city = s.cities.find((c) => c.owner === 1);
+  foe.q = city.q;
+  foe.r = city.r;
+  city.buildings = ['walls'];
+  // katapult na dostřel 2
+  const spot = Object.values(s.tiles).find((t) => distance(t, city) === 2 && isPassable(s, t.q, t.r) && !unitAt(s, t.q, t.r));
+  me.q = spot.q;
+  me.r = spot.r;
+  const catVsCity = previewAttack(s, me, foe);
+  const archer = { ...me, id: 902, type: 'archer', hp: UNIT_TYPES.archer.hp };
+  s.units.push(archer);
+  const archVsCity = previewAttack(s, archer, foe);
+  assert.ok(defenseValue(s, foe, me) < defenseValue(s, foe, archer), 'hradby proti katapultu neplatí');
+  assert.ok(catVsCity.damage > archVsCity.damage * 1.5, `katapult ${catVsCity.damage} vs lučištník ${archVsCity.damage}`);
+  assert.ok(catVsCity.damage >= field.damage * 0.8);
+});
+
+test('AI verbuje i nové jednotky a na jezdce odpovídá kopiníky', () => {
+  const s = createGame({ seed: 2, fog: false });
+  const cap = s.cities.find((c) => c.owner === 1 && c.capital);
+  s.current = 1;
+  s.gold[1] = 100;
+  for (let i = 0; i < 3; i++) {
+    const u = s.units.find((x) => x.owner === 0);
+    s.units.push({ ...u, id: 800 + i, type: 'horseman' });
+  }
+  assert.equal(pickRecruit(s, 1, cap), 'spearman');
+  const seen = new Set();
+  for (const seed of [1, 2, 3]) {
+    const g = createGame({ seed });
+    for (let i = 0; i < 80 && g.winner === null; i++) {
+      runAITurn(g);
+      endTurn(g);
+      for (const u of g.units) seen.add(u.type);
+    }
+  }
+  assert.ok(seen.has('spearman') && seen.has('catapult'), [...seen].join(','));
 });
