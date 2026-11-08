@@ -2,6 +2,16 @@
 
 Nejnovější záznam nahoře. Formát: datum – co se udělalo – stav testů – otázky pro Vladimíra.
 
+## 2026-11-08 – Budovy ve městech
+- `BUILDINGS` v `rules.js`: Hradby (20 zl., posádka +50 % obrany), Trh (25 zl., +2 zlata za kolo), Kasárna (20 zl., verbování o 3 zlaté levnější). Účinky jsou v `BUILDING_EFFECTS`, ať se dají ladit na jednom místě.
+- `build()`, `hasBuilding()`, `unitCost()`, `cityDefenseMult()` v `game.js`; příjem, obrana i cena verbování je berou v úvahu. Budovy při dobytí města zůstávají novému majiteli (dobývání se tak víc vyplácí).
+- AI staví z přebytku zlata (rezerva 12 na jednotky): ohrožené město dostane hradby, jinak trh a kasárna, hlavní město napřed.
+- UI: v panelu města sekce „Verbovat“ a „Stavět“ s cenou a popisem, postavené budovy jako štítky; na mapě kamenný lem (hradby), mince (trh) a praporek (kasárna).
+- Drobnost: zprávy v kronice „naverbován X (město)“ místo nesklonného „v Nepřátelská pevnost“.
+- Struktura stavu: `state.version` 5 (`city.buildings`), migrace doplní prázdné budovy.
+- Testy: +2 logické (cena, zákaz dvojí stavby a stavby v cizím městě, trh zvýší příjem, hradby zvýší obranu a souhlasí s `cityInfo`, kasárna zlevní verbování; AI staví z přebytku; migrace). Smoke test postaví trh tlačítkem v panelu (`artifacts/screenshot-city-panel.png`).
+- Stav: `npm run check` zelený (21 logických testů + smoke).
+
 ## 2026-11-08 – Ovládání dotykem
 - Nový `src/input.js` s čistou funkcí `decideTap()`: co znamená klik/klepnutí (výběr, pohyb, útok, náhled). Myš jedná hned, dotyk (pointerType touch/pen) napřed ukáže trasu nebo odhad útoku v panelu a provede akci až po druhém klepnutí na stejné pole.
 - Na úzkých displejích je tlačítko „Přiblížit mapu“: mapa má pak 820 px a posouvá se uvnitř rámečku (stránka se do šířky neposouvá, ověřuje smoke test). Políčko má pak na telefonu ~56 px místo ~27 px.

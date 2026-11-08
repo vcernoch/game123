@@ -19,7 +19,7 @@ Odškrtávej `[x]` po dokončení. Nové nápady přidávej na konec příslušn
 - [x] Ovládání dotykem na mobilu (větší zásahová plocha, potvrzení útoku)
 
 ## Fáze 2 – hloubka
-- [ ] Budovy ve městech (hradby, trh, kasárna)
+- [x] Budovy ve městech (hradby, trh, kasárna)
 - [ ] Zkušenosti jednotek a povýšení
 - [ ] Nové jednotky: obléhací stroj, kopiník (bonus proti jezdcům)
 - [ ] Silnice nebo řeky ovlivňující pohyb

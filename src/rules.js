@@ -19,6 +19,14 @@ export const PLAYERS = [
   { name: 'AI',  color: '#d23c3c', light: '#ffa3a3', isAI: true },
 ];
 
+// Budovy ve městech. Každou lze ve městě postavit jednou; při dobytí města zůstávají.
+export const BUILDINGS = {
+  walls:    { name: 'Hradby',  cost: 20, symbol: '▣', desc: 'posádka +50 % obrany' },
+  market:   { name: 'Trh',     cost: 25, symbol: '¤', desc: '+2 zlata za kolo' },
+  barracks: { name: 'Kasárna', cost: 20, symbol: '⚑', desc: 'verbování o 3 zlaté levnější' },
+};
+export const BUILDING_EFFECTS = { wallsDefense: 0.5, marketIncome: 2, barracksDiscount: 3 };
+
 // Obtížnost ovlivňuje jen AI hráče.
 // seesAll: AI ignoruje mlhu války; incomeBonus: zlato navíc za kolo; startGold: zlato navíc na začátku;
 // caution: jak moc AI váhá s útokem (vyšší = opatrnější, hraje hůř).

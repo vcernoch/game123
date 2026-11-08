@@ -2,9 +2,9 @@
 import { distance, key } from './hex.js';
 import {
   reachable, attackTargets, previewAttack, moveUnit, attack, buyUnit,
-  unitAt, getUnit, tileAt, difficultyOf, visibleTiles, exploredTiles,
+  unitAt, getUnit, tileAt, difficultyOf, visibleTiles, exploredTiles, build, hasBuilding, unitCost,
 } from './game.js';
-import { UNIT_TYPES, TERRAIN } from './rules.js';
+import { UNIT_TYPES, TERRAIN, BUILDINGS } from './rules.js';
 
 // Co AI ví o mapě. Na těžké obtížnosti vidí všechno, jinak jen to, co prozkoumala a vidí.
 export function aiKnowledge(state, me) {
@@ -28,6 +28,25 @@ export function runAITurn(state) {
     if (after) tryBestAttack(state, after);
   }
   recruit(state, me);
+  buildSomething(state, me);
+}
+
+// Stavby z přebytku zlata: ohrožené město dostane hradby, jinak trh a kasárna (hlavní město napřed).
+const RESERVE = 12;
+export function buildSomething(state, me) {
+  const know = aiKnowledge(state, me);
+  const mine = state.cities.filter((c) => c.owner === me).sort((a, b) => b.capital - a.capital);
+  for (const city of mine) {
+    const threatened = state.units.some((u) => u.owner !== me && know.sees(u.q, u.r) && distance(u, city) <= 3);
+    if (threatened && !hasBuilding(city, 'walls') && state.gold[me] >= BUILDINGS.walls.cost) {
+      build(state, city.id, 'walls');
+    }
+  }
+  for (const b of ['market', 'barracks']) {
+    for (const city of mine) {
+      if (!hasBuilding(city, b) && state.gold[me] >= BUILDINGS[b].cost + RESERVE) build(state, city.id, b);
+    }
+  }
 }
 
 function scoreAttack(state, unit, target) {
@@ -116,7 +135,7 @@ function recruit(state, me) {
   for (const city of state.cities.filter((c) => c.owner === me)) {
     if (unitAt(state, city.q, city.r)) continue;
     const pick = order[(state.turn + myUnits + city.id) % order.length];
-    const type = state.gold[me] >= UNIT_TYPES[pick].cost ? pick : 'warrior';
+    const type = state.gold[me] >= unitCost(city, pick) ? pick : 'warrior';
     buyUnit(state, city.id, type);
   }
 }

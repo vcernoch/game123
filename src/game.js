@@ -1,13 +1,16 @@
 // Čistá herní logika bez DOM. Stav je obyčejný JSON objekt (dá se uložit).
 import { key, neighbors, distance } from './hex.js';
 import { generateMap } from './map.js';
-import { TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY, VISION, DIFFICULTY } from './rules.js';
+import {
+  TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY, VISION, DIFFICULTY, BUILDINGS, BUILDING_EFFECTS,
+} from './rules.js';
 
 export function createGame({
   seed = 1, cols = 14, rows = 10, neutralCities = 4, fog = true, difficulty = 'normal',
 } = {}) {
   if (!DIFFICULTY[difficulty]) difficulty = 'normal';
   const { tiles, cities, starts } = generateMap(seed, cols, rows, neutralCities);
+  for (const c of cities) c.buildings = [];
   const state = {
     version: STATE_VERSION,
     seed,
@@ -41,7 +44,7 @@ export function createGame({
   return state;
 }
 
-export const STATE_VERSION = 4;
+export const STATE_VERSION = 5;
 
 // Převede uložený stav starší verze na aktuální; neznámý formát vrátí null.
 export function migrateState(s) {
@@ -60,6 +63,10 @@ export function migrateState(s) {
   if (s.version === 3) {
     s.difficulty = 'normal';
     s.version = 4;
+  }
+  if (s.version === 4) {
+    for (const c of s.cities) c.buildings = [];
+    s.version = 5;
   }
   return s.version === STATE_VERSION ? s : null;
 }
@@ -135,6 +142,9 @@ export function applyEvent(state, ev) {
   } else if (ev.type === 'capture') {
     const c = state.cities.find((x) => x.id === ev.cityId);
     if (c) c.owner = ev.owner;
+  } else if (ev.type === 'build') {
+    const c = state.cities.find((x) => x.id === ev.cityId);
+    if (c && !hasBuilding(c, ev.building)) c.buildings = [...(c.buildings || []), ev.building];
   }
 }
 
@@ -160,8 +170,22 @@ export function isFree(state, q, r) {
 
 export const CITY_DEF_BONUS = 0.25;
 
+export const hasBuilding = (city, b) => !!city.buildings && city.buildings.includes(b);
+
 export function cityIncome(city) {
-  return city.capital ? ECONOMY.capitalIncome : ECONOMY.cityIncome;
+  const base = city.capital ? ECONOMY.capitalIncome : ECONOMY.cityIncome;
+  return base + (hasBuilding(city, 'market') ? BUILDING_EFFECTS.marketIncome : 0);
+}
+
+// Násobitel obrany posádky ve vlastním městě (město + případné hradby).
+export function cityDefenseMult(city) {
+  return (1 + CITY_DEF_BONUS) * (hasBuilding(city, 'walls') ? 1 + BUILDING_EFFECTS.wallsDefense : 1);
+}
+
+// Cena jednotky při verbování v daném městě (kasárna zlevňují).
+export function unitCost(city, type) {
+  const discount = hasBuilding(city, 'barracks') ? BUILDING_EFFECTS.barracksDiscount : 0;
+  return Math.max(1, UNIT_TYPES[type].cost - discount);
 }
 
 export function incomeOf(state, player) {
@@ -178,7 +202,7 @@ export function difficultyOf(state, player) {
 // Souhrn pro tooltip města: příjem, bonus obrany posádky (terén + město) a léčení.
 export function cityInfo(state, city) {
   const t = TERRAIN[tileAt(state, city.q, city.r).terrain];
-  const defMult = (1 + t.defBonus) * (1 + CITY_DEF_BONUS);
+  const defMult = (1 + t.defBonus) * cityDefenseMult(city);
   const garrison = unitAt(state, city.q, city.r) || null;
   return {
     income: cityIncome(city),
@@ -260,7 +284,7 @@ export function defenseValue(state, unit) {
   const t = tileAt(state, unit.q, unit.r);
   let d = UNIT_TYPES[unit.type].def * (1 + TERRAIN[t.terrain].defBonus);
   const city = cityAt(state, unit.q, unit.r);
-  if (city && city.owner === unit.owner) d *= 1 + CITY_DEF_BONUS;
+  if (city && city.owner === unit.owner) d *= cityDefenseMult(city);
   return d;
 }
 
@@ -362,10 +386,24 @@ export function buyUnit(state, cityId, type) {
   const city = state.cities.find((c) => c.id === cityId);
   const t = UNIT_TYPES[type];
   if (!city || !t || city.owner !== state.current || state.winner !== null) return false;
-  if (state.gold[state.current] < t.cost || unitAt(state, city.q, city.r)) return false;
-  state.gold[state.current] -= t.cost;
+  const cost = unitCost(city, type);
+  if (state.gold[state.current] < cost || unitAt(state, city.q, city.r)) return false;
+  state.gold[state.current] -= cost;
   spawnUnit(state, type, state.current, city.q, city.r);
-  addLog(state, `${PLAYERS[state.current].name}: naverbován ${t.name} v ${city.name}`);
+  addLog(state, `${PLAYERS[state.current].name}: naverbován ${t.name} (${city.name})`);
+  return true;
+}
+
+// Postaví budovu ve vlastním městě. Vrací true/false podle úspěchu.
+export function build(state, cityId, building) {
+  const city = state.cities.find((c) => c.id === cityId);
+  const b = BUILDINGS[building];
+  if (!city || !b || city.owner !== state.current || state.winner !== null) return false;
+  if (hasBuilding(city, building) || state.gold[state.current] < b.cost) return false;
+  state.gold[state.current] -= b.cost;
+  city.buildings = [...(city.buildings || []), building];
+  emit(state, { type: 'build', cityId, building });
+  addLog(state, `${PLAYERS[state.current].name}: dokončena stavba ${b.name} (${city.name})`);
   return true;
 }
 

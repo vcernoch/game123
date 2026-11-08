@@ -4,15 +4,15 @@ import {
   createGame, reachable, moveUnit, attack, buyUnit, endTurn, unitAt, isPassable,
   previewAttack, cloneState, pathTo, nextActiveUnit, tileAt, cityInfo, incomeOf, defenseValue,
   drainEvents, applyEvent, migrateState, STATE_VERSION,
-  visibleTiles, exploredTiles,
+  visibleTiles, exploredTiles, build, unitCost,
 } from '../src/game.js';
-import { runAITurn, goalsFor } from '../src/ai.js';
+import { runAITurn, goalsFor, buildSomething } from '../src/ai.js';
 import { decideTap } from '../src/input.js';
 import { readFileSync } from 'node:fs';
 import { GAME_VERSION, GAME_DATE } from '../src/version.js';
 import { pathExists } from '../src/map.js';
 import { distance, key, neighbors } from '../src/hex.js';
-import { UNIT_TYPES, TERRAIN } from '../src/rules.js';
+import { UNIT_TYPES, TERRAIN, BUILDINGS, BUILDING_EFFECTS } from '../src/rules.js';
 
 test('mapa je deterministická a startovní města jsou propojená', () => {
   for (const seed of [1, 2, 3, 42, 999]) {
@@ -332,4 +332,53 @@ test('dotyk: útok potřebuje potvrzení a skrytou jednotku v mlze nejde vybrat'
   assert.equal(first.targetId, enemy.id);
   const second = decideTap(s, { selectedId: u.id, confirm: true, pending: spot }, spot.q, spot.r);
   assert.deepEqual(second, { type: 'attack', unitId: u.id, targetId: enemy.id });
+});
+
+test('budovy: stojí zlato, nejdou postavit dvakrát a mají účinek', () => {
+  const s = createGame({ seed: 3 });
+  const cap = s.cities.find((c) => c.owner === 0 && c.capital);
+  const neutral = s.cities.find((c) => c.owner === null);
+  s.gold[0] = 100;
+  const incomeBefore = incomeOf(s, 0);
+  assert.ok(build(s, cap.id, 'market'));
+  assert.equal(s.gold[0], 100 - BUILDINGS.market.cost);
+  assert.ok(!build(s, cap.id, 'market'), 'druhý trh ne');
+  assert.ok(!build(s, neutral.id, 'walls'), 'cizí město ne');
+  assert.equal(incomeOf(s, 0), incomeBefore + BUILDING_EFFECTS.marketIncome);
+
+  const u = unitAt(s, cap.q, cap.r);
+  const defBefore = defenseValue(s, u);
+  const pctBefore = cityInfo(s, cap).defensePct;
+  assert.ok(build(s, cap.id, 'walls'));
+  assert.ok(Math.abs(defenseValue(s, u) - defBefore * (1 + BUILDING_EFFECTS.wallsDefense)) < 1e-9);
+  assert.ok(cityInfo(s, cap).defensePct > pctBefore);
+  const mult = defenseValue(s, u) / UNIT_TYPES[u.type].def;
+  assert.equal(Math.round((mult - 1) * 100), cityInfo(s, cap).defensePct);
+
+  assert.ok(build(s, cap.id, 'barracks'));
+  assert.equal(unitCost(cap, 'warrior'), UNIT_TYPES.warrior.cost - BUILDING_EFFECTS.barracksDiscount);
+  // verbování v kasárnách stojí méně
+  const moveAway = [...reachable(s, u).keys()][0].split(',').map(Number);
+  moveUnit(s, u.id, moveAway[0], moveAway[1]);
+  const g = s.gold[0];
+  assert.ok(buyUnit(s, cap.id, 'warrior'));
+  assert.equal(s.gold[0], g - unitCost(cap, 'warrior'));
+  s.gold[0] = 0;
+  assert.ok(!build(s, cap.id, 'nesmysl'));
+});
+
+test('budovy: AI staví z přebytku a stará hra dostane prázdné budovy', () => {
+  const s = createGame({ seed: 5 });
+  s.current = 1;
+  s.gold[1] = 200;
+  buildSomething(s, 1);
+  const aiCap = s.cities.find((c) => c.owner === 1 && c.capital);
+  assert.ok(aiCap.buildings.includes('market'));
+  assert.ok(s.gold[1] >= 0);
+  const old = createGame({ seed: 5 });
+  old.version = 4;
+  for (const c of old.cities) delete c.buildings;
+  const m = migrateState(old);
+  assert.equal(m.version, STATE_VERSION);
+  assert.ok(m.cities.every((c) => Array.isArray(c.buildings)));
 });

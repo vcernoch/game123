@@ -239,7 +239,45 @@ function drawCity(ctx, city) {
     ctx.fill();
     ctx.stroke();
   }
+  drawBuildings(ctx, city, c.x, c.y);
   ctx.restore();
+}
+
+// Malé značky budov: hradby = kamenný lem, trh = mince, kasárna = praporek.
+function drawBuildings(ctx, city, x, y) {
+  const has = (b) => city.buildings && city.buildings.includes(b);
+  if (has('walls')) {
+    hexPath(ctx, x, y, HEX_SIZE - 8);
+    ctx.setLineDash([4, 3]);
+    ctx.strokeStyle = '#d9d4c7';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  if (has('market')) {
+    ctx.beginPath();
+    ctx.arc(x - 19, y + 9, 4.5, 0, Math.PI * 2);
+    ctx.fillStyle = '#f2c94c';
+    ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+    ctx.lineWidth = 1;
+    ctx.fill();
+    ctx.stroke();
+  }
+  if (has('barracks')) {
+    ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(x + 17, y + 14);
+    ctx.lineTo(x + 17, y + 2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x + 17, y + 2);
+    ctx.lineTo(x + 25, y + 5);
+    ctx.lineTo(x + 17, y + 8);
+    ctx.closePath();
+    ctx.fillStyle = '#e04848';
+    ctx.fill();
+  }
 }
 
 function drawUnit(ctx, u, x, y, selected, active) {

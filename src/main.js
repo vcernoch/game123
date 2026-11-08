@@ -2,7 +2,7 @@
 import {
   createGame, reachable, attackTargets, moveUnit, attack, buyUnit, endTurn,
   unitAt, cityAt, getUnit, incomeOf, previewAttack, tileAt, pathTo, nextActiveUnit, cityInfo,
-  cloneState, drainEvents, migrateState, visibleTiles, exploredTiles,
+  cloneState, drainEvents, migrateState, visibleTiles, exploredTiles, build, unitCost, hasBuilding,
 } from './game.js';
 import { createAnimator } from './anim.js';
 import { decideTap } from './input.js';
@@ -10,7 +10,7 @@ import { GAME_VERSION, GAME_DATE } from './version.js';
 import { runAITurn } from './ai.js';
 import { render, canvasSize, pickHex } from './render.js';
 import { key } from './hex.js';
-import { UNIT_TYPES, TERRAIN, PLAYERS, DIFFICULTY } from './rules.js';
+import { UNIT_TYPES, TERRAIN, PLAYERS, DIFFICULTY, BUILDINGS } from './rules.js';
 
 const SAVE_KEY = 'game123-save';
 const PREFS_KEY = 'game123-prefs';
@@ -115,15 +115,27 @@ function updateHud() {
     const ci = cityInfo(state, city);
     html += `<h3>${city.name}</h3><p>Vlastník: ${owner}${city.capital ? ' · hlavní město' : ''}</p>
       <p>Příjem +${ci.income} zl./kolo · Obrana posádky +${ci.defensePct} % · Léčení +${ci.heal}</p>`;
+    const built = (city.buildings || []).map((b) => `<span class="building">${BUILDINGS[b].symbol} ${BUILDINGS[b].name}</span>`);
+    if (built.length) html += `<p>${built.join(' ')}</p>`;
     if (city.owner === 0 && state.current === 0 && !busy()) {
       const blocked = !!unitAt(state, city.q, city.r);
-      html += '<div class="buy">';
+      html += '<h4>Verbovat</h4><div class="buy">';
       for (const [type, t] of Object.entries(UNIT_TYPES)) {
-        const dis = blocked || state.gold[0] < t.cost ? 'disabled' : '';
-        html += `<button data-buy="${type}" ${dis}>${t.name} <small>${t.cost} zl.</small></button>`;
+        const cost = unitCost(city, type);
+        const dis = blocked || state.gold[0] < cost ? 'disabled' : '';
+        html += `<button data-buy="${type}" ${dis}>${t.name} <small>${cost} zl.</small></button>`;
       }
       html += '</div>';
       if (blocked) html += '<p class="hint">Město je obsazené – nejdřív z něj odejdi jednotkou.</p>';
+      const todo = Object.entries(BUILDINGS).filter(([b]) => !hasBuilding(city, b));
+      if (todo.length) {
+        html += '<h4>Stavět</h4><div class="buy">';
+        for (const [b, info] of todo) {
+          const dis = state.gold[0] < info.cost ? 'disabled' : '';
+          html += `<button data-build="${b}" class="secondary" ${dis}><span>${info.symbol} ${info.name}</span><small>${info.cost} zl.</small><small class="desc">${info.desc}</small></button>`;
+        }
+        html += '</div>';
+      }
     }
   }
   if (!u && !city && hover && !exploredTiles(state, 0).has(key(hover.q, hover.r))) {
@@ -243,7 +255,8 @@ function showTooltip(ev, hex) {
     const ci = cityInfo(state, city);
     const owner = city.owner === null ? 'neutrální' : PLAYERS[city.owner].name;
     const gar = ci.garrison ? UNIT_TYPES[ci.garrison.type].name : 'bez posádky';
-    tip.textContent = `${city.name} (${owner}): +${ci.income} zl./kolo · obrana +${ci.defensePct} % · ${gar}`;
+    const bs = (city.buildings || []).map((b) => BUILDINGS[b].name).join(', ');
+    tip.textContent = `${city.name} (${owner}): +${ci.income} zl./kolo · obrana +${ci.defensePct} % · ${gar}${bs ? ` · ${bs}` : ''}`;
     placeTip(tip, ev);
   } else {
     tip.hidden = true;
@@ -338,6 +351,11 @@ $('end-turn').addEventListener('click', doEndTurn);
 $('new-game').addEventListener('click', newGame);
 $('next-unit').addEventListener('click', selectNextUnit);
 $('info').addEventListener('click', (ev) => {
+  const bBtn = ev.target.closest('button[data-build]');
+  if (bBtn && selectedCityId && !busy()) {
+    if (build(state, selectedCityId, bBtn.dataset.build)) { drainEvents(state); afterAction(); }
+    return;
+  }
   const btn = ev.target.closest('button[data-buy]');
   if (!btn || !selectedCityId) return;
   if (!busy() && buyUnit(state, selectedCityId, btn.dataset.buy)) afterAction();

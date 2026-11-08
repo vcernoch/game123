@@ -59,7 +59,10 @@ aside p { margin: 4px 0; }
 .hint { color: var(--muted); }
 .tag { font-size: 11px; padding: 1px 6px; border-radius: 4px; color: #fff; vertical-align: middle; }
 .buy { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
-.buy button { display: flex; justify-content: space-between; }
+.buy button { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 0 8px; text-align: left; }
+.buy .desc { flex-basis: 100%; font-weight: 400; color: var(--muted); }
+aside h4 { margin: 10px 0 0; font-size: 13px; color: var(--muted); font-weight: 600; }
+.building { display: inline-block; font-size: 12px; padding: 1px 6px; margin: 2px 2px 0 0; border-radius: 4px; background: #3c434f; }
 #log { list-style: none; margin: 0; padding: 0; font-size: 13px; color: var(--muted); }
 #log li { padding: 2px 0; }
 #banner {
