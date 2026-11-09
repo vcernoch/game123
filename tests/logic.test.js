@@ -11,6 +11,7 @@ import {
 } from '../src/game.js';
 import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
+  dangerMap, dangerPenalty, moveTowardsGoal, DANGER,
 } from '../src/ai.js';
 import { decideTap } from '../src/input.js';
 import { SHORTCUTS, keyAction, recruitKey } from '../src/keys.js';
@@ -1478,4 +1479,46 @@ test('threat overlay: tiles visible enemies could attack next turn', () => {
   const explored = exploredTiles(f, 0);
   for (const k of ft.keys()) assert.ok(explored.has(k));
   assert.equal(ft.size, 0, 'at the start the enemy is out of sight');
+});
+
+test('AI danger: archers keep out of reach, melee units avoid pile-ons, the map follows losses', () => {
+  const s = createGame({ seed: 3, fog: false });
+  for (const t of Object.values(s.tiles)) { t.terrain = 'plains'; delete t.road; delete t.rivers; delete t.resource; }
+  s.factions = [null, null];
+  s.zoc = false;
+  const w = (id, q, r) => ({ id, type: 'warrior', owner: 0, q, r, hp: 10, movesLeft: 2, hasAttacked: false, xp: 0 });
+  s.units = [w(1, 4, 4), w(2, 4, 5), w(3, 4, 3),
+    { id: 4, type: 'archer', owner: 1, q: 9, r: 4, hp: 8, movesLeft: 2, hasAttacked: false, xp: 0 }];
+  s.current = 1;
+  const archer = getUnit(s, 4);
+  // penalties: an archer fears even one attacker, a melee unit only a second one; wounded more; own city none
+  assert.equal(dangerPenalty(s, archer, 9, 4, 0), 0);
+  assert.equal(dangerPenalty(s, archer, 9, 4, 1), DANGER.ranged);
+  const warrior = { ...w(5, 9, 4), owner: 1 };
+  assert.equal(dangerPenalty(s, warrior, 9, 4, 1), 0);
+  assert.equal(dangerPenalty(s, warrior, 9, 4, 3), 2 * DANGER.melee);
+  assert.ok(dangerPenalty(s, { ...warrior, hp: 5 }, 9, 4, 3) > dangerPenalty(s, warrior, 9, 4, 3));
+  const home = s.cities.find((c) => c.owner === 1);
+  assert.equal(dangerPenalty(s, archer, home.q, home.r, 3), 0);
+  // the danger map is the threat map from the AI's side
+  const danger = dangerMap(s, 1);
+  assert.deepEqual([...danger.get()], [...threatTiles(s, 1)]);
+  assert.equal(danger.get().get(key(7, 4)), 2);
+  assert.equal(danger.get().get(key(6, 4)), 3);
+  // without danger the archer walks into reach of two warriors, with it it stays on a safe tile
+  const blind = cloneState(s);
+  moveTowardsGoal(blind, getUnit(blind, 4));
+  const b = getUnit(blind, 4);
+  assert.ok((danger.get().get(key(b.q, b.r)) || 0) > 0, 'the old behaviour walks into danger');
+  const wise = cloneState(s);
+  moveTowardsGoal(wise, getUnit(wise, 4), dangerMap(wise, 1).get());
+  const a = getUnit(wise, 4);
+  assert.ok(a.q !== 9 || a.r !== 4, 'it still moves');
+  assert.equal(danger.get().get(key(a.q, a.r)) || 0, 0, 'and ends out of reach');
+  // a fallen enemy is noticed: the map is recomputed
+  s.units = s.units.filter((u) => u.id !== 1 && u.id !== 2);
+  assert.equal(danger.get().get(key(6, 4)), 1);
+  // fog: the AI on Normal fears only enemies it can see
+  const f = createGame({ seed: 3, fog: true });
+  assert.equal(dangerMap(f, 1).get().size, 0, 'at the start the player is out of sight');
 });

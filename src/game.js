@@ -475,12 +475,16 @@ export function zocTiles(state, player) {
 // Enemy threat for the threat overlay: Map key -> number of enemy units (visible to the player) that
 // could attack the tile next turn – walking with full movement, then shooting/striking within range.
 // Only explored passable tiles are returned, so the overlay doesn't reveal unknown land.
-export function threatTiles(state, player) {
+// `know` ({ sees(q, r), knows(q, r) }) replaces the player's fog view – the AI passes its own knowledge.
+export function threatTiles(state, player, know = null) {
   const out = new Map();
-  const visible = visibleTiles(state, player);
-  const explored = exploredTiles(state, player);
+  if (!know) {
+    const visible = visibleTiles(state, player);
+    const explored = exploredTiles(state, player);
+    know = { sees: (q, r) => visible.has(key(q, r)), knows: (q, r) => explored.has(key(q, r)) };
+  }
   for (const e of state.units) {
-    if (e.owner === player || !visible.has(key(e.q, e.r))) continue;
+    if (e.owner === player || !know.sees(e.q, e.r)) continue;
     const ghost = { ...e, movesLeft: unitMove(state, e) };
     const spots = [key(e.q, e.r), ...searchMoves(state, ghost).result.keys()];
     const range = UNIT_TYPES[e.type].range;
@@ -489,8 +493,7 @@ export function threatTiles(state, player) {
       const [q, r] = k.split(',').map(Number);
       for (let dq = -range; dq <= range; dq++) {
         for (let dr = Math.max(-range, -dq - range); dr <= Math.min(range, -dq + range); dr++) {
-          const t = key(q + dq, r + dr);
-          if (explored.has(t) && isPassable(state, q + dq, r + dr)) hit.add(t);
+          if (know.knows(q + dq, r + dr) && isPassable(state, q + dq, r + dr)) hit.add(key(q + dq, r + dr));
         }
       }
     }

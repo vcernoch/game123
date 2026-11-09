@@ -3,6 +3,7 @@ import { distance, key } from './hex.js';
 import {
   reachable, attackTargets, previewAttack, moveUnit, attack, buyUnit,
   unitAt, getUnit, tileAt, fortify, difficultyOf, visibleTiles, exploredTiles, build, hasBuilding, unitCost, buildingCost, factionOf,
+  threatTiles, cityAt,
 } from './game.js';
 import { UNIT_TYPES, TERRAIN } from './rules.js';
 
@@ -19,6 +20,7 @@ export function runAITurn(state) {
   recruit(state, me);
   const know = aiKnowledge(state, me);
   const garrisons = assignGarrisons(state, me, know);
+  const danger = dangerMap(state, me, know);
   // archers and catapults go first so melee units can finish weakened targets (focus fire)
   const ids = state.units
     .filter((u) => u.owner === me)
@@ -31,11 +33,11 @@ export function runAITurn(state) {
     if (garrisons.has(id)) {
       holdCity(state, unit, garrisons.get(id));
     } else if (isWounded(unit) && enemiesNear(state, unit, know, 3).length) {
-      retreat(state, unit, know);
+      retreat(state, unit, know, danger.get());
     } else {
-      if (planStrike(state, unit, know)) continue;
+      if (planStrike(state, unit, know, danger.get())) continue;
       if (tryBestAttack(state, unit)) continue;
-      moveTowardsGoal(state, unit);
+      moveTowardsGoal(state, unit, danger.get());
       const after = getUnit(state, id);
       if (after) tryBestAttack(state, after);
     }
@@ -46,7 +48,7 @@ export function runAITurn(state) {
 
 // Finds the best "move to a tile and attack" combination. The attacker's position affects the counterattack
 // (terrain) and range, so the attack is tentatively evaluated from every reachable tile.
-export function planStrike(state, unit, know = aiKnowledge(state, unit.owner)) {
+export function planStrike(state, unit, know = aiKnowledge(state, unit.owner), danger = new Map()) {
   const range = UNIT_TYPES[unit.type].range;
   const targets = state.units.filter((u) => u.owner !== unit.owner && know.sees(u.q, u.r));
   if (!targets.length || unit.hasAttacked) return false;
@@ -59,7 +61,8 @@ export function planStrike(state, unit, know = aiKnowledge(state, unit.owner)) {
     if (!near.length) continue;
     unit.q = q; unit.r = r; // tentatively – restored right away
     for (const t of near) {
-      const s = scoreAttack(state, unit, t) + TERRAIN[tileAt(state, q, r).terrain].defBonus;
+      const s = scoreAttack(state, unit, t) + TERRAIN[tileAt(state, q, r).terrain].defBonus
+        - DANGER.strike * dangerPenalty(state, unit, q, r, danger.get(k) || 0);
       if (s > 0 && (!best || s > best.s)) best = { s, q, r, t };
     }
     unit.q = home.q; unit.r = home.r;
@@ -117,8 +120,40 @@ function holdCity(state, unit, city) {
   if (u && !tryBestAttack(state, u)) fortify(state, u.id); // nothing to hit – dig in (only works if it hasn't moved)
 }
 
+// Danger: how many visible enemies could strike each tile next turn (threatTiles from the AI's point of view).
+// Computed lazily and recomputed only after an enemy unit falls, so a turn costs one or a few searches.
+export function dangerMap(state, me, know = aiKnowledge(state, me)) {
+  let cached = null;
+  let enemies = -1;
+  return {
+    get() {
+      const n = state.units.filter((u) => u.owner !== me).length;
+      if (!cached || n !== enemies) {
+        cached = threatTiles(state, me, { sees: know.sees, knows: () => true });
+        enemies = n;
+      }
+      return cached;
+    },
+  };
+}
+
+// How much the unit should fear ending its move on a tile that `attackers` enemies can reach.
+// Ranged units and siege engines are fragile up front, wounded units more so; an own city protects.
+export function dangerPenalty(state, unit, q, r, attackers) {
+  if (!attackers) return 0;
+  const type = UNIT_TYPES[unit.type];
+  const city = cityAt(state, q, r);
+  if (city && city.owner === unit.owner) return 0;
+  const fragile = type.range > 1 ? DANGER.ranged : DANGER.melee;
+  const hurt = 1 + (1 - unit.hp / type.hp);
+  // one attacker is a fair fight for melee units; each extra one is a pile-on
+  const extra = type.range > 1 ? attackers : attackers - 1;
+  return extra > 0 ? extra * fragile * hurt : 0;
+}
+export const DANGER = { ranged: 1.2, melee: 0.6, strike: 1 };
+
 // A wounded unit retreats to an own city, or as far from enemies as possible. It attacks only when it's safe.
-function retreat(state, unit, know) {
+function retreat(state, unit, know, danger = new Map()) {
   const here = state.cities.find((c) => c.q === unit.q && c.r === unit.r && c.owner === unit.owner);
   if (!here) {
     const options = reachable(state, unit);
@@ -132,6 +167,7 @@ function retreat(state, unit, know) {
       const minDist = Math.min(...enemies.map((e) => distance(e, { q, r })), 9);
       let s = minDist + TERRAIN[tileAt(state, q, r).terrain].defBonus * 2;
       if (city) s += 10; // an own city heals and protects
+      s -= (danger.get(k) || 0) * 1.5;
       if (s > bestScore) { bestScore = s; bestKey = k; }
     }
     if (bestKey) {
@@ -217,7 +253,7 @@ export function goalsFor(state, unit, know = aiKnowledge(state, unit.owner)) {
   return goals;
 }
 
-function moveTowardsGoal(state, unit) {
+export function moveTowardsGoal(state, unit, danger = new Map()) {
   const options = reachable(state, unit);
   if (!options.size) return;
   const know = aiKnowledge(state, unit.owner);
@@ -225,10 +261,12 @@ function moveTowardsGoal(state, unit) {
   if (!goals.length) return;
   const range = UNIT_TYPES[unit.type].range;
   let bestKey = null;
-  let bestScore = evalPos(state, unit, unit.q, unit.r, goals, range, know);
+  const score = (q, r) => evalPos(state, unit, q, r, goals, range, know)
+    - dangerPenalty(state, unit, q, r, danger.get(key(q, r)) || 0);
+  let bestScore = score(unit.q, unit.r);
   for (const k of options.keys()) {
     const [q, r] = k.split(',').map(Number);
-    const s = evalPos(state, unit, q, r, goals, range, know);
+    const s = score(q, r);
     if (s > bestScore) {
       bestScore = s;
       bestKey = k;

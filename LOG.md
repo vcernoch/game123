@@ -2,6 +2,14 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-09 – AI weighs danger
+- `dangerMap(state, me, know)` in `ai.js`: the threat map (`threatTiles`) seen from the AI's side – how many visible enemies could strike each tile next turn. Computed lazily once per AI turn and recomputed only after an enemy unit falls. `threatTiles` now takes an optional `know` ({ sees, knows }) so the AI can use its own knowledge (Hard sees everything, Normal/Easy respect the fog); the overlay still uses the player's view.
+- `dangerPenalty` (weights in `DANGER`): archers and catapults fear any attacker, melee units only a second and further one (a pile-on), wounded units more, and a unit in an own city fears nothing. Used when the AI advances (`moveTowardsGoal`), retreats and picks the tile it strikes from (`planStrike`).
+- Measured with a temporary AI-vs-AI script (new vs. previous AI, both sides of every seed, Normal, fog on): Medium 108 : 90 (100 seeds), Small 65 : 54 (60 seeds), Large 29 : 31 (30 seeds). A modest gain; more important for a human player: AI archers no longer walk up to be cut down.
+- No state structure change.
+- Tests: +1 logic (penalty values, danger map = threat map from the AI side, recomputed after a loss, an archer stays out of reach where the old logic walked in, a Normal AI fears no unseen enemy).
+- Status: `npm run check` green (58 logic tests + smoke).
+
 ## 2026-11-09 – Threat overlay → v0.12.0
 - **Still open for Vladimír:** more AI opponents and scenarios with their own objectives wait for your "more AI yes" / "scenarios yes". `dev` is now several versions ahead of `main` (v0.9.0–v0.12.0) – please merge it.
 - `threatTiles(state, player)` in `game.js`: for every enemy unit the player can see, the tiles it could attack next turn (walk with full movement by the normal rules incl. terrain, rivers and our zone of control, then strike within range). Result = number of attackers per tile; only explored passable tiles, so nothing hidden is revealed.
