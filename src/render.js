@@ -1,6 +1,6 @@
 // Vykreslení na canvas. Žádná herní logika, jen kreslení stavu.
-import { hexToPixel, hexCorners, pixelToHex, key } from './hex.js';
-import { TERRAIN, UNIT_TYPES, PLAYERS, NEUTRAL_COLOR } from './rules.js';
+import { hexToPixel, hexCorners, pixelToHex, key, neighbors, DIRS } from './hex.js';
+import { TERRAIN, UNIT_TYPES, PLAYERS, NEUTRAL_COLOR, RANKS } from './rules.js';
 
 export const HEX_SIZE = 32;
 const PAD = 8;
@@ -50,6 +50,9 @@ export function render(ctx, state, view = {}) {
       ctx.fillStyle = TERRAIN[t.terrain].color;
       ctx.fill();
       drawTerrainDetail(ctx, t.terrain, c.x, c.y);
+      if (t.road) drawRoad(ctx, state, t, c);
+      // detail terénu kreslí vlastní cesty – obrys hexu je potřeba založit znovu
+      hexPath(ctx, c.x, c.y, HEX_SIZE - 1);
       if (!seen(t.q, t.r)) {
         ctx.fillStyle = 'rgba(12,14,22,0.5)';
         ctx.fill();
@@ -66,6 +69,8 @@ export function render(ctx, state, view = {}) {
     ctx.lineWidth = 1;
     ctx.stroke();
   }
+
+  drawRivers(ctx, state, known, seen);
 
   if (view.hover && state.tiles[key(view.hover.q, view.hover.r)]) {
     const c = tileCenter(view.hover.q, view.hover.r);
@@ -89,7 +94,7 @@ export function render(ctx, state, view = {}) {
       const at = moving.has(u.id) ? pickHex(c.x, c.y) : u;
       if (!seen(at.q, at.r)) continue;
     }
-    drawUnit(ctx, u, c.x, c.y, u.id === view.selectedId, state.current === u.owner);
+    drawUnit(ctx, u, c.x, c.y, u.id === view.selectedId, state.current === u.owner && state.winner === null);
     if (view.targets && view.targets.has(u.id)) {
       ctx.beginPath();
       ctx.arc(c.x, c.y, HEX_SIZE * 0.72, 0, Math.PI * 2);
@@ -159,6 +164,80 @@ function drawPath(ctx, path) {
     ctx.fill();
     ctx.stroke();
   }
+  ctx.restore();
+}
+
+// Silnice: z každého pole se silnicí půlka cesty ke každému sousedovi se silnicí.
+function drawRoad(ctx, state, t, c) {
+  const ends = [];
+  for (const n of neighbors(t.q, t.r)) {
+    const nt = state.tiles[key(n.q, n.r)];
+    if (!nt || !nt.road) continue;
+    const nc = tileCenter(n.q, n.r);
+    ends.push({ x: (c.x + nc.x) / 2, y: (c.y + nc.y) / 2 });
+  }
+  ctx.save();
+  ctx.lineCap = 'round';
+  for (const [color, width] of [['#6b4f2a', 6], ['#c9a66b', 3]]) {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.beginPath();
+    for (const e of ends) {
+      ctx.moveTo(c.x, c.y);
+      ctx.lineTo(e.x, e.y);
+    }
+    if (!ends.length) ctx.arc(c.x, c.y, width / 2, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// Řeky po hranách hexů. Každou hranu kreslíme jednou (z pole s menším klíčem nebo
+// když soused leží mimo mapu). Most = silnice na obou stranách hrany.
+function drawRivers(ctx, state, known, seen) {
+  ctx.save();
+  ctx.lineCap = 'round';
+  for (const t of Object.values(state.tiles)) {
+    if (!t.rivers) continue;
+    const c = tileCenter(t.q, t.r);
+    const corners = hexCorners(c.x, c.y, HEX_SIZE);
+    for (const d of t.rivers) {
+      const n = { q: t.q + DIRS[d][0], r: t.r + DIRS[d][1] };
+      const nk = key(n.q, n.r);
+      const nt = state.tiles[nk];
+      if (nt && nk < key(t.q, t.r)) continue;
+      if (!known(t.q, t.r) && !(nt && known(n.q, n.r))) continue;
+      const lit = seen(t.q, t.r) || (nt && seen(n.q, n.r));
+      // směr d míří pod úhlem −60·d°, hrana leží mezi rohy (6−d)%6 a (7−d)%6
+      const p1 = corners[(6 - d) % 6];
+      const p2 = corners[(7 - d) % 6];
+      ctx.globalAlpha = lit ? 1 : 0.55;
+      for (const [color, width] of [['#1f4f86', 6], ['#5fa8e8', 3.5]]) {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = width;
+        ctx.beginPath();
+        ctx.moveTo(p1.x, p1.y);
+        ctx.lineTo(p2.x, p2.y);
+        ctx.stroke();
+      }
+      if (t.road && nt && nt.road) drawBridge(ctx, p1, p2);
+    }
+  }
+  ctx.restore();
+}
+
+function drawBridge(ctx, p1, p2) {
+  const mx = (p1.x + p2.x) / 2;
+  const my = (p1.y + p2.y) / 2;
+  const ang = Math.atan2(p2.y - p1.y, p2.x - p1.x);
+  ctx.save();
+  ctx.translate(mx, my);
+  ctx.rotate(ang);
+  ctx.fillStyle = '#8a6a3c';
+  ctx.strokeStyle = '#4a3418';
+  ctx.lineWidth = 1;
+  ctx.fillRect(-5, -7, 10, 14);
+  ctx.strokeRect(-5, -7, 10, 14);
   ctx.restore();
 }
 
@@ -237,7 +316,45 @@ function drawCity(ctx, city) {
     ctx.fill();
     ctx.stroke();
   }
+  drawBuildings(ctx, city, c.x, c.y);
   ctx.restore();
+}
+
+// Malé značky budov: hradby = kamenný lem, trh = mince, kasárna = praporek.
+function drawBuildings(ctx, city, x, y) {
+  const has = (b) => city.buildings && city.buildings.includes(b);
+  if (has('walls')) {
+    hexPath(ctx, x, y, HEX_SIZE - 8);
+    ctx.setLineDash([4, 3]);
+    ctx.strokeStyle = '#d9d4c7';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  if (has('market')) {
+    ctx.beginPath();
+    ctx.arc(x - 19, y + 9, 4.5, 0, Math.PI * 2);
+    ctx.fillStyle = '#f2c94c';
+    ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+    ctx.lineWidth = 1;
+    ctx.fill();
+    ctx.stroke();
+  }
+  if (has('barracks')) {
+    ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(x + 17, y + 14);
+    ctx.lineTo(x + 17, y + 2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x + 17, y + 2);
+    ctx.lineTo(x + 25, y + 5);
+    ctx.lineTo(x + 17, y + 8);
+    ctx.closePath();
+    ctx.fillStyle = '#e04848';
+    ctx.fill();
+  }
 }
 
 function drawUnit(ctx, u, x, y, selected, active) {
@@ -256,6 +373,17 @@ function drawUnit(ctx, u, x, y, selected, active) {
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(t.symbol, x, y + 4);
+  // hodnost: zlaté hvězdičky nad jednotkou
+  let rank = 0;
+  RANKS.forEach((r, i) => { if ((u.xp || 0) >= r.xp) rank = i; });
+  if (rank > 0) {
+    ctx.font = 'bold 10px system-ui, sans-serif';
+    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = 'rgba(0,0,0,0.75)';
+    ctx.strokeText(RANKS[rank].symbol, x, y - 13);
+    ctx.fillStyle = '#ffd34d';
+    ctx.fillText(RANKS[rank].symbol, x, y - 13);
+  }
   // HP lišta
   const frac = u.hp / t.hp;
   ctx.fillStyle = 'rgba(0,0,0,0.6)';

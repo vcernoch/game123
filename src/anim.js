@@ -14,7 +14,8 @@ const ease = (t) => (t < 0.5 ? 2 * t * t : 1 - 2 * (1 - t) * (1 - t));
 
 // redraw: překreslí jen plátno (HUD se během animace nepřepisuje, aby nemizela tlačítka).
 // isVisible(state, q, r): jestli hráč u obrazovky pole vidí – co je v mlze, se neanimuje.
-export function createAnimator(redraw, isVisible = () => true) {
+// onShow(ev): zavolá se pro každou viditelnou událost, když začne její animace (zvuky).
+export function createAnimator(redraw, isVisible = () => true, onShow = () => {}) {
   const a = {
     display: null,        // stav, který se právě kreslí (null = skutečný stav)
     unitPos: new Map(),   // id jednotky -> {x, y} během pohybu
@@ -84,11 +85,14 @@ export function createAnimator(redraw, isVisible = () => true) {
         addFloater(cd, ev.killed ? `−${ev.damage} ✖` : `−${ev.damage}`, '#ff6b5b');
         if (ev.counter) addFloater(ca, `−${ev.counter}`, '#ffb347');
       };
+      const promo = (pos) => addFloater({ x: pos.x, y: pos.y - 16 }, '★ povýšení', '#ffd34d');
       await tween(ATTACK_MS, (t) => {
         a.unitPos.set(ev.attackerId, lerp(ca, cd, Math.sin(Math.PI * t) * 0.4));
         if (t >= 0.5 && !hit) onHit();
       });
       if (!hit) onHit();
+      if (ev.promoted && !ev.died) promo(ca);
+      if (ev.defenderPromoted && !ev.killed) promo(cd);
     } else if (ev.type === 'capture') {
       const c = st.cities.find((x) => x.id === ev.cityId);
       if (c) addFloater(tileCenter(c.q, c.r), 'Dobyto!', '#ffe27a');
@@ -108,7 +112,10 @@ export function createAnimator(redraw, isVisible = () => true) {
       const shown = eventVisible(a.display, ev);
       // nová jednotka a dobytí se nejdřív ukážou, pak se chvíli čeká
       if (ev.type === 'spawn' || ev.type === 'capture') applyEvent(a.display, ev);
-      if (shown) await animate(ev);
+      if (shown) {
+        onShow(ev);
+        await animate(ev);
+      }
       if (ev.type !== 'spawn' && ev.type !== 'capture') applyEvent(a.display, ev);
       a.unitPos.clear();
     }

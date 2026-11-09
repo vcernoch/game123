@@ -9,7 +9,7 @@
 </head>
 <body>
   <header>
-    <h1>Hexová říše <small id="version" title=""></small></h1>
+    <h1>Hexová říše <small id="version" title=""></small> <button id="sound" class="icon-btn" aria-pressed="true" aria-label="Zvuk">♪</button></h1>
     <div class="stats">
       <span>Kolo <b id="turn">1</b></span>
       <span>Zlato <b id="gold">0</b> <small id="income"></small></span>
@@ -21,24 +21,56 @@
       <button id="end-turn">Ukončit tah</button>
     </div>
   </header>
-  <div id="banner" hidden></div>
+  <div id="banner" hidden><span id="banner-text"></span> <button id="banner-new" class="secondary">Nová hra</button></div>
+  <div id="notice" role="status" hidden></div>
   <main>
+    <button id="zoom" class="secondary zoom-btn" aria-pressed="false">Přiblížit mapu</button>
     <div class="board-wrap"><canvas id="board"></canvas></div>
     <aside>
       <section id="info"></section>
+      <details id="stats-panel">
+        <summary>Statistiky</summary>
+        <div id="stats"></div>
+      </details>
       <section>
         <h3>Kronika</h3>
         <ul id="log"></ul>
       </section>
       <details>
         <summary>Jak hrát</summary>
-        <p>Klikni na svou modrou jednotku, pak na zvýrazněné pole pro pohyb nebo na nepřítele se žlutým kroužkem pro útok.
-          Vstupem do města ho dobudeš. Ve vlastním městě, kde nestojí jednotka, můžeš verbovat.
-          Vidíš jen okolí svých jednotek a měst (jezdci a jednotky na kopcích dohlédnou dál), prozkoumaná krajina zůstává na mapě. Vyhraješ, když AI přijde o všechna města. Najetím na pole uvidíš trasu pohybu. Tab = další jednotka s pohybem, Enter = konec tahu, Esc = zrušit výběr nebo přeskočit animaci (stačí i klik do mapy).</p>
+        <p>Klikni na svou modrou jednotku, pak na zvýrazněné pole pro pohyb nebo na nepřítele se žlutým kroužkem pro útok. Na dotykovém displeji první klepnutí ukáže trasu nebo odhad boje a druhé ji potvrdí; tlačítkem „Přiblížit mapu“ dostaneš větší políčka.
+          Vstupem do města ho dobudeš. Ve vlastním městě, kde nestojí jednotka, můžeš verbovat, a kdykoli v něm stavět hradby, trh nebo kasárna.
+          Vidíš jen okolí svých jednotek a měst (jezdci a jednotky na kopcích dohlédnou dál), prozkoumaná krajina zůstává na mapě. Po silnicích (hnědé cesty mezi městy) se jednotky pohybují dvakrát rychleji. Překročit řeku (modré čáry na hranách polí) stojí bod pohybu navíc – po mostě ne – a jednotka napadená zblízka přes řeku se brání o 25 % lépe. Občas tě na začátku tahu potká náhodná událost: bohatá úroda přinese zlato, mor ubere životy jednotkám ve městě a kolem něj, vzpoura připraví město bez posádky o daně. Kopiník je silný proti jezdcům, katapult rozbíjí posádky měst a nevadí mu hradby. Jednotky sbírají zkušenosti v boji a povyšují na Veterána (★) a Elitu (★★) – každá hodnost přidá 15 % útoku i obrany. Vyhraješ, když AI přijde o všechna města. Najetím na pole uvidíš trasu pohybu. Tab = další jednotka s pohybem, Enter = konec tahu, Esc = zrušit výběr nebo přeskočit animaci (stačí i klik do mapy).</p>
       </details>
     </aside>
   </main>
   <div id="tooltip" hidden></div>
+  <dialog id="new-game-dialog">
+    <form method="dialog">
+      <h2>Nová hra</h2>
+      <fieldset>
+        <legend>Obtížnost AI</legend>
+        <label><input type="radio" name="difficulty" value="easy"> <b>Snadná</b> <small>AI má méně zlata, váhá s útokem a nevidí přes mlhu</small></label>
+        <label><input type="radio" name="difficulty" value="normal" checked> <b>Normální</b> <small>férová AI, která taky musí průzkumničit</small></label>
+        <label><input type="radio" name="difficulty" value="hard"> <b>Těžká</b> <small>AI vidí celou mapu a má zlato navíc</small></label>
+      </fieldset>
+      <fieldset>
+        <legend>Velikost mapy</legend>
+        <div id="size-options"></div>
+      </fieldset>
+      <fieldset>
+        <legend>Tvoje frakce</legend>
+        <div id="faction-options"></div>
+      </fieldset>
+      <label class="check"><input type="checkbox" name="fog" checked> Mlha války</label>
+      <label class="check"><input type="checkbox" name="happenings" checked> Náhodné události (úroda, mor, vzpoura)</label>
+      <p class="hint" id="new-game-warning">Rozehraná hra se ztratí.</p>
+      <div class="dialog-actions">
+        <button value="cancel" class="secondary" formnovalidate>Zrušit</button>
+        <button value="start" id="start-game">Začít hru</button>
+      </div>
+    </form>
+  </dialog>
   <script type="module" src="src/main.js"></script>
 </body>
 </html>

@@ -22,6 +22,8 @@ header {
   border-bottom: 1px solid #000;
 }
 h1 { margin: 0; font-size: 20px; color: var(--accent); letter-spacing: 0.5px; }
+.icon-btn { font-size: 14px; padding: 2px 8px; margin-left: 4px; background: #3c434f; color: var(--text); vertical-align: middle; }
+.icon-btn[aria-pressed="false"] { color: var(--muted); }
 h1 small { font-size: 12px; font-weight: 500; color: var(--muted); letter-spacing: 0; margin-left: 4px; }
 .stats { display: flex; gap: 18px; }
 .stats small { color: #8fd48f; }
@@ -44,7 +46,9 @@ main {
   gap: 16px;
   padding: 16px;
 }
-.board-wrap { min-width: 0; }
+.board-wrap { min-width: 0; position: relative; }
+.zoom-btn { display: none; }
+.confirm { color: var(--accent); font-weight: 600; }
 canvas { width: 100%; max-width: 900px; height: auto; display: block; border-radius: 8px; background: #2a5f8f; }
 aside section, aside details {
   background: var(--panel);
@@ -57,9 +61,13 @@ aside p { margin: 4px 0; }
 .hint { color: var(--muted); }
 .tag { font-size: 11px; padding: 1px 6px; border-radius: 4px; color: #fff; vertical-align: middle; }
 .buy { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
-.buy button { display: flex; justify-content: space-between; }
+.buy button { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 0 8px; text-align: left; }
+.buy .desc { flex-basis: 100%; font-weight: 400; color: var(--muted); }
+aside h4 { margin: 10px 0 0; font-size: 13px; color: var(--muted); font-weight: 600; }
+.building { display: inline-block; font-size: 12px; padding: 1px 6px; margin: 2px 2px 0 0; border-radius: 4px; background: #3c434f; }
 #log { list-style: none; margin: 0; padding: 0; font-size: 13px; color: var(--muted); }
 #log li { padding: 2px 0; }
+#log li.hidden-act { font-style: italic; opacity: 0.7; }
 #banner {
   padding: 12px 16px;
   text-align: center;
@@ -76,7 +84,42 @@ aside p { margin: 4px 0; }
   font-size: 13px;
 }
 summary { cursor: pointer; font-weight: 600; }
+.chart { width: 100%; height: auto; margin-top: 4px; font: 11px system-ui, sans-serif; }
+.chart text { fill: var(--muted); }
+.chart .axis { stroke: #4a515d; stroke-width: 1; }
+.stats-table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 6px; }
+.stats-table th, .stats-table td { padding: 3px 4px; text-align: right; }
+.stats-table th:first-child, .stats-table td:first-child { text-align: left; color: var(--muted); font-weight: 400; }
+#banner button { margin-left: 8px; }
+#notice {
+  padding: 8px 16px;
+  text-align: center;
+  background: var(--panel);
+  border-bottom: 1px solid #000;
+}
+#notice.good { color: #b9e08a; }
+#notice.bad { color: #ffb4a3; }
+dialog {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid #000;
+  border-radius: 10px;
+  padding: 18px;
+  width: min(420px, calc(100vw - 32px));
+}
+dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
+dialog h2 { margin: 0 0 10px; font-size: 18px; color: var(--accent); }
+fieldset { border: 1px solid #3c434f; border-radius: 8px; margin: 0 0 12px; padding: 8px 10px; }
+legend { color: var(--muted); padding: 0 4px; }
+fieldset label { display: block; padding: 6px 0; cursor: pointer; }
+fieldset small, .check small { display: block; color: var(--muted); margin-left: 24px; }
+.check { display: block; cursor: pointer; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
 @media (max-width: 760px) {
   main { grid-template-columns: 1fr; padding: 16px; }
   .actions { margin-left: 0; }
+  /* přiblížená mapa: větší hexy pro prsty, posun uvnitř rámečku (stránka se do šířky neposouvá) */
+  .zoom-btn { display: block; width: 100%; }
+  .board-wrap.zoomed { overflow: auto; max-height: 75vh; border-radius: 8px; -webkit-overflow-scrolling: touch; }
+  .board-wrap.zoomed canvas { width: var(--zoom-w, 820px); max-width: none; }
 }
