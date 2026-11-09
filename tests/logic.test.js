@@ -6,7 +6,7 @@ import {
   drainEvents, applyEvent, migrateState, STATE_VERSION,
   visibleTiles, exploredTiles, build, unitCost, rankOf, stepCost, getUnit,
   buildingCost, unitMove, factionOf, armyPower, riverBetween, riverDefense,
-  rollHappening, applyHappening, cityIncome, logFor, isUndoableMove,
+  rollHappening, applyHappening, cityIncome, logFor, isUndoableMove, canFortify, fortify,
 } from '../src/game.js';
 import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
@@ -19,7 +19,7 @@ import { GAME_VERSION, GAME_DATE } from '../src/version.js';
 import { pathExists, generateMap, dirTo } from '../src/map.js';
 import { distance, key, neighbors } from '../src/hex.js';
 import {
-  UNIT_TYPES, TERRAIN, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS,
+  FORTIFY, UNIT_TYPES, TERRAIN, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS,
 } from '../src/rules.js';
 
 test('map is deterministic and starting cities are connected', () => {
@@ -177,7 +177,7 @@ test('city info matches income and defense', () => {
 
 // summary that must match after replaying events
 const snapshot = (s) => ({
-  units: s.units.map((u) => [u.id, u.type, u.owner, u.q, u.r, u.hp, u.xp]).sort((a, b) => a[0] - b[0]),
+  units: s.units.map((u) => [u.id, u.type, u.owner, u.q, u.r, u.hp, u.xp, !!u.fortified]).sort((a, b) => a[0] - b[0]),
   cities: s.cities.map((c) => [c.id, c.owner]),
 });
 
@@ -191,7 +191,7 @@ test('replaying AI turn events gives the same state as the real turn', () => {
       runAITurn(s);
       const evs = drainEvents(s);
       for (const ev of evs) applyEvent(before, ev);
-      assert.deepEqual(snapshot(before), snapshot(s), `seed ${seed}, krok ${i}`);
+      assert.deepEqual(snapshot(before), snapshot(s), `seed ${seed}, step ${i}`);
       if (evs.some((e) => e.type === 'attack')) checkedAttack = true;
       assert.doesNotThrow(() => JSON.stringify(evs));
       endTurn(s);
@@ -988,4 +988,62 @@ test('undo move: only a move that revealed nothing', () => {
   const pb = cloneState(p.s);
   assert.ok(attack(p.s, p.me.id, p.foe.id));
   assert.equal(isUndoableMove(pb, p.s, p.s.events, 0), false);
+});
+
+test('fortify: +defense until the unit moves or attacks, Tab skips it', () => {
+  const { s, me, foe } = duel(6);
+  const base = defenseValue(s, me, foe);
+  const before = previewAttack(s, foe, me).damage;
+  assert.ok(canFortify(s, me));
+  assert.ok(fortify(s, me.id));
+  assert.equal(me.movesLeft, 0);
+  assert.ok(me.hasAttacked, 'fortifying ends the unit\'s turn');
+  assert.ok(!fortify(s, me.id), 'cannot fortify twice');
+  assert.ok(Math.abs(defenseValue(s, me, foe) - base * (1 + FORTIFY.defBonus)) < 1e-9);
+  assert.ok(previewAttack(s, foe, me).damage <= before);
+  assert.deepEqual(drainEvents(s).map((e) => e.type), ['fortify']);
+  // the fortification lasts into the next turns
+  endTurn(s);
+  endTurn(s);
+  assert.ok(me.fortified);
+  assert.equal(nextActiveUnit(s, 0, null)?.id === me.id, false, 'Tab skips fortified units');
+  // moving breaks it
+  const to = [...reachable(s, me).keys()][0].split(',').map(Number);
+  assert.ok(moveUnit(s, me.id, to[0], to[1]));
+  assert.ok(!me.fortified);
+  assert.ok(!canFortify(s, me), 'a unit that moved this turn cannot fortify');
+  // attacking breaks it too (and the attacker does not keep the bonus for the counter)
+  const d2 = duel(6);
+  d2.me.fortified = true;
+  assert.ok(attack(d2.s, d2.me.id, d2.foe.id));
+  assert.ok(!d2.me.fortified);
+  // only the current player's units; replaying the event sets the flag
+  const d3 = duel(6);
+  assert.ok(!canFortify(d3.s, d3.foe));
+  const copy = cloneState(d3.s);
+  fortify(d3.s, d3.me.id);
+  for (const ev of drainEvents(d3.s)) applyEvent(copy, ev);
+  assert.ok(getUnit(copy, d3.me.id).fortified);
+  // JSON round-trip and migration
+  assert.ok(JSON.parse(JSON.stringify(d3.s)).units.find((u) => u.id === d3.me.id).fortified);
+  const old = createGame({ seed: 2 });
+  old.version = 12;
+  assert.equal(migrateState(old).version, STATE_VERSION);
+});
+
+test('fortify: an AI garrison with nothing to attack digs in', () => {
+  const s = createGame({ seed: 11, fog: false });
+  const cap = s.cities.find((c) => c.owner === 1 && c.capital);
+  s.units = s.units.filter((u) => u.owner !== 1 || (u.q === cap.q && u.r === cap.r));
+  if (!unitAt(s, cap.q, cap.r)) s.units.push({ id: 500, type: 'warrior', owner: 1, q: cap.q, r: cap.r, hp: 10, movesLeft: 2, hasAttacked: false, xp: 0 });
+  const g = unitAt(s, cap.q, cap.r);
+  // an enemy two tiles away triggers the garrison but is out of reach of an attack
+  const far = Object.values(s.tiles).find((t) => distance(t, cap) === 2 && isPassable(s, t.q, t.r) && !unitAt(s, t.q, t.r));
+  s.units.push({ id: 501, type: 'warrior', owner: 0, q: far.q, r: far.r, hp: 10, movesLeft: 0, hasAttacked: true, xp: 0 });
+  s.current = 1;
+  g.movesLeft = 2; g.hasAttacked = false; g.moved = false;
+  runAITurn(s);
+  const after = getUnit(s, g.id);
+  assert.ok(after && after.q === cap.q && after.r === cap.r);
+  assert.ok(after.fortified, 'the garrison fortified');
 });

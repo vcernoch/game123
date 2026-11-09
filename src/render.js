@@ -357,6 +357,21 @@ function drawBuildings(ctx, city, x, y) {
   }
 }
 
+function drawShield(ctx, x, y) {
+  ctx.beginPath();
+  ctx.moveTo(x - 5, y - 5);
+  ctx.lineTo(x + 5, y - 5);
+  ctx.lineTo(x + 5, y);
+  ctx.quadraticCurveTo(x + 4, y + 4, x, y + 6);
+  ctx.quadraticCurveTo(x - 4, y + 4, x - 5, y);
+  ctx.closePath();
+  ctx.fillStyle = '#d9e4f2';
+  ctx.fill();
+  ctx.lineWidth = 1.2;
+  ctx.strokeStyle = 'rgba(0,0,0,0.75)';
+  ctx.stroke();
+}
+
 function drawUnit(ctx, u, x, y, selected, active) {
   const t = UNIT_TYPES[u.type];
   const p = PLAYERS[u.owner];
@@ -384,6 +399,8 @@ function drawUnit(ctx, u, x, y, selected, active) {
     ctx.fillStyle = '#ffd34d';
     ctx.fillText(RANKS[rank].symbol, x, y - 13);
   }
+  // fortified: a small shield at the bottom right
+  if (u.fortified) drawShield(ctx, x + 11, y + 10);
   // HP bar
   const frac = u.hp / t.hp;
   ctx.fillStyle = 'rgba(0,0,0,0.6)';

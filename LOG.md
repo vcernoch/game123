@@ -2,6 +2,15 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-09 – Fortify
+- `fortify()` / `canFortify()` in `game.js`, `FORTIFY` in `rules.js`: a unit of the current player that hasn't moved or attacked this turn can dig in. It ends its turn and gets +25 % defense (`defenseValue`) until it moves or attacks; the bonus lasts across turns. Attacking drops the fortification *before* the fight, so it never helps the attacker's counter defense.
+- Tab (`nextActiveUnit`) skips fortified units, like sleeping units in other strategy games; clicking still selects them.
+- AI: a garrison with nothing to attack fortifies (`holdCity`). Measured with a temporary script (not in the repo), AI with fortify vs. AI without, 100 seeds × both sides: 103 of 199 decided games – neutral, kept for its flavour and so the player sees the AI holding cities.
+- UI: "⛨ Fortify" button in the unit panel and key F (then the next unit is selected), small shield next to fortified units, panel line "Fortified …", floater "⛨ fortified" when an AI fortify is visible, synthesized sound `fortify`. Fortifying in the fog is not animated or heard. Help text updated.
+- State: `state.version` 13 (optional `unit.fortified`), old saves migrate without change.
+- Tests: +2 logic (bonus value, ends the turn, persists, broken by moving and attacking, Tab skips, only current player, event replay, migration; AI garrison digs in). The replay snapshot now includes `fortified`. Smoke test fortifies via the button and the F key (`artifacts/screenshot-fortify.png`).
+- Status: `npm run check` green (43 logic tests + smoke).
+
 ## 2026-11-09 – Project translated to English (v0.8.0)
 - At Vladimír's request the whole project is now in English: in-game texts (UI, help, chronicle, unit/terrain/faction/building names, city names), code comments, test names and messages, and all docs (`CLAUDE.md`, `RULES.md`, `ROADMAP.md`, `LOG.md` incl. history, `README.md`). From now on commits, log entries and reports are in English too.
 - Game renamed to **Hex Realm**. Unit symbols on the map are now English initials (W/A/H/S/C). Numbers are formatted with `en-US` (decimal dot).

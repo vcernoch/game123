@@ -11,6 +11,7 @@ export function soundFor(ev, viewer = 0) {
     }
     case 'capture': return ev.owner === viewer ? 'capture' : 'lose';
     case 'build': return 'build';
+    case 'fortify': return 'fortify';
     case 'spawn': return 'recruit';
     case 'happening': {
       const good = ev.kind === 'harvest' || ev.suppressed;
@@ -40,6 +41,8 @@ const SOUNDS = {
             { f: 659, d: 0.25, v: 0.25, w: 'triangle', t: 0.24 }],
   lose:    [{ f: 330, d: 0.18, v: 0.25, w: 'triangle' }, { f: 247, d: 0.3, v: 0.25, w: 'triangle', t: 0.18 }],
   build:   [{ noise: true, d: 0.04, v: 0.3, f: 2500 }, { noise: true, d: 0.04, v: 0.3, f: 2500, t: 0.12 }],
+  // a low wooden thud, twice – stakes driven into the ground
+  fortify: [{ f: 140, d: 0.08, v: 0.3, w: 'triangle', slide: 90 }, { f: 140, d: 0.08, v: 0.3, w: 'triangle', slide: 90, t: 0.1 }],
   recruit: [{ f: 220, d: 0.18, v: 0.2, w: 'sawtooth', slide: 330 }],
   boon:    [{ f: 784, d: 0.1, v: 0.18, w: 'triangle' }, { f: 1047, d: 0.2, v: 0.18, w: 'triangle', t: 0.1 }],
   bane:    [{ f: 196, d: 0.25, v: 0.22, w: 'sawtooth', slide: 150 }, { noise: true, d: 0.2, v: 0.12, f: 400, t: 0.05 }],

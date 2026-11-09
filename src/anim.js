@@ -99,6 +99,10 @@ export function createAnimator(redraw, isVisible = () => true, onShow = () => {}
       await tween(PAUSE_MS * 2, () => {});
     } else if (ev.type === 'spawn') {
       await tween(PAUSE_MS, () => {});
+    } else if (ev.type === 'fortify') {
+      const u = getUnit(st, ev.unitId);
+      if (u) addFloater(tileCenter(u.q, u.r), '⛨ fortified', '#cfe3ff');
+      await tween(PAUSE_MS, () => {});
     }
   }
 
@@ -132,6 +136,7 @@ export function createAnimator(redraw, isVisible = () => true, onShow = () => {}
     if (ev.type === 'attack') return see(getUnit(st, ev.attackerId)) || see(getUnit(st, ev.defenderId));
     if (ev.type === 'capture') return see(st.cities.find((c) => c.id === ev.cityId));
     if (ev.type === 'spawn') return see(ev.unit);
+    if (ev.type === 'fortify') return see(getUnit(st, ev.unitId));
     return true;
   }
 

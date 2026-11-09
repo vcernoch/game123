@@ -167,6 +167,20 @@ try {
     if (await page.evaluate(() => window.__game.canUndo())) throw new Error('an entry remained on the stack after undo');
   }
 
+  // fortify: the undone unit hasn't acted, so it can dig in via the panel button; F fortifies the next one
+  await page.click('#info button[data-fortify]');
+  const fort = await page.evaluate((id) => {
+    const st = window.__game.getState();
+    return { first: !!st.units.find((u) => u.id === id).fortified, next: window.__game.selectedId() };
+  }, undoMove.id);
+  if (!fort.first) throw new Error('the fortify button did not fortify the unit');
+  if (fort.next !== null) {
+    await page.keyboard.press('f');
+    const ok = await page.evaluate((id) => !!window.__game.getState().units.find((u) => u.id === id).fortified, fort.next);
+    if (!ok) throw new Error('the F key did not fortify the next unit');
+  }
+  await page.screenshot({ path: 'artifacts/screenshot-fortify.png' });
+
   // building: in a fresh game select the capital and build a market via the panel button
   await page.evaluate(() => { window.__game.newGame(12345); window.__game.getState().gold[0] = 99; });
   const capPt = await page.evaluate(async () => {

@@ -3,7 +3,7 @@ import { key, neighbors, distance } from './hex.js';
 import { generateMap, hasRiverEdge } from './map.js';
 import {
   TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY, VISION, DIFFICULTY, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, ROAD_COST, RIVER,
-  FACTIONS, NO_FACTION, MAP_SIZES, HAPPENINGS,
+  FACTIONS, NO_FACTION, MAP_SIZES, HAPPENINGS, FORTIFY,
 } from './rules.js';
 import { createRng } from './rng.js';
 
@@ -94,7 +94,7 @@ function countStat(state, name, player) {
   state.stats[name][player]++;
 }
 
-export const STATE_VERSION = 12;
+export const STATE_VERSION = 13;
 
 // Converts a saved state of an older version to the current one; returns null for an unknown format.
 export function migrateState(s) {
@@ -146,6 +146,10 @@ export function migrateState(s) {
   if (s.version === 11) {
     // chronicle entries without `seen` are public, so old entries stay visible to everyone
     s.version = 12;
+  }
+  if (s.version === 12) {
+    // fortify arrived in version 13 – a missing `fortified` means not fortified
+    s.version = 13;
   }
   return s.version === STATE_VERSION ? s : null;
 }
@@ -208,7 +212,7 @@ export function applyEvent(state, ev) {
   if (ev.type === 'move') {
     const u = getUnit(state, ev.unitId);
     const end = ev.path[ev.path.length - 1];
-    if (u) { u.q = end.q; u.r = end.r; }
+    if (u) { u.q = end.q; u.r = end.r; delete u.fortified; }
   } else if (ev.type === 'attack') {
     const a = getUnit(state, ev.attackerId);
     const d = getUnit(state, ev.defenderId);
@@ -217,11 +221,15 @@ export function applyEvent(state, ev) {
       d.xp = ev.defenderXp ?? d.xp;
     }
     if (a) {
+      delete a.fortified;
       a.hp = ev.attackerHp ?? a.hp - ev.counter;
       a.xp = ev.attackerXp ?? a.xp;
     }
     if (ev.killed) removeUnit(state, ev.defenderId);
     if (ev.died) removeUnit(state, ev.attackerId);
+  } else if (ev.type === 'fortify') {
+    const u = getUnit(state, ev.unitId);
+    if (u) u.fortified = true;
   } else if (ev.type === 'spawn') {
     state.units.push({ ...ev.unit });
   } else if (ev.type === 'capture') {
@@ -410,7 +418,8 @@ export function pathTo(state, unit, q, r) {
 // The next own unit that can still move or attack (for the Tab key).
 // Cycles by id after unit afterId; returns null if there is none.
 export function nextActiveUnit(state, player, afterId = null) {
-  const canAct = (u) => u.movesLeft > 0 || attackTargets(state, u).length > 0;
+  // fortified units are left alone (like sleeping units); they can still be selected by clicking
+  const canAct = (u) => !u.fortified && (u.movesLeft > 0 || attackTargets(state, u).length > 0);
   const mine = state.units.filter((u) => u.owner === player && canAct(u)).sort((a, b) => a.id - b.id);
   if (!mine.length) return null;
   return mine.find((u) => afterId === null || u.id > afterId) || mine[0];
@@ -431,6 +440,23 @@ export function isUndoableMove(before, after, events, viewer) {
     const c = cityAt(after, t.q, t.r);
     if ((u && u.owner !== viewer) || (c && c.owner !== viewer)) return false;
   }
+  return true;
+}
+
+// Can the unit fortify now? Only an own unit of the current player that hasn't moved or attacked this turn.
+export function canFortify(state, unit) {
+  return !!unit && unit.owner === state.current && state.winner === null
+    && !unit.fortified && !unit.moved && !unit.hasAttacked;
+}
+
+// Fortifies the unit: it ends its turn and gets +FORTIFY.defBonus defense until it moves or attacks.
+export function fortify(state, unitId) {
+  const unit = getUnit(state, unitId);
+  if (!canFortify(state, unit)) return false;
+  unit.fortified = true;
+  unit.movesLeft = 0;
+  unit.hasAttacked = true;
+  emit(state, { type: 'fortify', unitId: unit.id });
   return true;
 }
 
@@ -472,6 +498,7 @@ export function vsMult(unit, other) {
 export function defenseValue(state, unit, attacker = null) {
   const t = tileAt(state, unit.q, unit.r);
   let d = UNIT_TYPES[unit.type].def * rankMult(unit) * (1 + terrainDefense(state, unit, t)) * vsMult(unit, attacker);
+  if (unit.fortified) d *= 1 + FORTIFY.defBonus;
   const city = cityAt(state, unit.q, unit.r);
   if (city && city.owner === unit.owner) {
     const siege = attacker && UNIT_TYPES[attacker.type].siege;
@@ -540,6 +567,7 @@ export function moveUnit(state, unitId, q, r) {
   unit.r = r;
   unit.movesLeft = Math.max(0, unit.movesLeft - cost);
   unit.moved = true;
+  delete unit.fortified;
   const city = cityAt(state, q, r);
   if (city && city.owner !== unit.owner) {
     const prev = city.owner;
@@ -562,6 +590,7 @@ export function attack(state, attackerId, defenderId) {
   const d = getUnit(state, defenderId);
   if (!a || !d || a.owner !== state.current || state.winner !== null) return false;
   if (!attackTargets(state, a).includes(d)) return false;
+  delete a.fortified; // attacking leaves the fortification before the fight
   const res = previewAttack(state, a, d);
   d.hp -= res.damage;
   a.hasAttacked = true;

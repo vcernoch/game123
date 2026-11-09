@@ -2,7 +2,7 @@
 import {
   createGame, reachable, attackTargets, moveUnit, attack, buyUnit, endTurn,
   unitAt, cityAt, getUnit, incomeOf, previewAttack, tileAt, pathTo, nextActiveUnit, cityInfo,
-  cloneState, drainEvents, migrateState, logFor, isUndoableMove, visibleTiles, exploredTiles, build, unitCost, hasBuilding,
+  cloneState, drainEvents, migrateState, logFor, isUndoableMove, canFortify, fortify, visibleTiles, exploredTiles, build, unitCost, hasBuilding,
   rankOf, rankMult, buildingCost, unitMove, factionOf, riverDefense,
 } from './game.js';
 import { createAnimator } from './anim.js';
@@ -14,7 +14,7 @@ import { runAITurn } from './ai.js';
 import { render, canvasSize, pickHex } from './render.js';
 import { key } from './hex.js';
 import {
-  UNIT_TYPES, TERRAIN, PLAYERS, DIFFICULTY, BUILDINGS, RANKS, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS,
+  UNIT_TYPES, TERRAIN, PLAYERS, DIFFICULTY, BUILDINGS, RANKS, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FORTIFY,
 } from './rules.js';
 
 const SAVE_KEY = 'game123-save';
@@ -132,8 +132,12 @@ function updateHud() {
     const t = UNIT_TYPES[u.type];
     html += `<h3>${t.name} <span class="tag" style="background:${PLAYERS[u.owner].color}">${PLAYERS[u.owner].name}</span></h3>
       <p>HP ${u.hp}/${t.hp} · Attack ${fmt(t.atk * rankMult(u))} · Defense ${fmt(t.def * rankMult(u))} · Range ${t.range}</p>
-      <p>Move ${fmt(u.movesLeft)}/${unitMove(state, u)}${u.hasAttacked ? ' · already attacked' : ''}</p>
+      <p>Move ${fmt(u.movesLeft)}/${unitMove(state, u)}${u.fortified ? '' : u.hasAttacked ? ' · already attacked' : ''}</p>
       <p>${rankLine(u)}</p>${t.desc ? `<p class="hint">${t.desc}</p>` : ''}`;
+    if (u.fortified) html += `<p class="fortified">⛨ Fortified: +${Math.round(FORTIFY.defBonus * 100)} % defense until it moves or attacks</p>`;
+    if (u.owner === 0 && !busy() && canFortify(state, u)) {
+      html += `<button data-fortify class="secondary wide-btn" title="Dig in: +${Math.round(FORTIFY.defBonus * 100)} % defense, ends the unit's turn (F)">⛨ Fortify</button>`;
+    }
   }
   if (city) {
     const owner = city.owner === null ? 'neutral' : PLAYERS[city.owner].name;
@@ -474,6 +478,7 @@ $('stats-panel').addEventListener('toggle', () => { statsKey = ''; updateStats()
 $('next-unit').addEventListener('click', selectNextUnit);
 $('info').addEventListener('click', (ev) => {
   if (ev.target.closest('button[data-undo]')) { undoMove(); return; }
+  if (ev.target.closest('button[data-fortify]')) { fortifySelected(); return; }
   const bBtn = ev.target.closest('button[data-build]');
   if (bBtn && selectedCityId && !busy()) {
     if (build(state, selectedCityId, bBtn.dataset.build)) { undoStack = []; drainEvents(state); sound.play('build'); afterAction(); }
@@ -488,6 +493,7 @@ window.addEventListener('keydown', (ev) => {
   if (ev.key === 'Enter' || ev.key === 'e') doEndTurn();
   if (ev.key === 'Tab') { ev.preventDefault(); selectNextUnit(); }
   if (ev.key === 'z' || ev.key === 'Z') { ev.preventDefault(); undoMove(); }
+  if (ev.key === 'f' || ev.key === 'F') { ev.preventDefault(); fortifySelected(); }
   if (ev.key === 'Escape') {
     if (busy()) { anim.skip(); return; }
     selectedId = null; selectedCityId = null; pending = null; draw();
@@ -504,6 +510,17 @@ function selectNextUnit() {
   const city = next && cityAt(state, next.q, next.r);
   selectedCityId = city ? city.id : null;
   draw();
+}
+
+// Fortifies the selected unit (F / button in the panel) and moves on to the next unit that can act.
+function fortifySelected() {
+  if (busy() || state.winner !== null) return;
+  const u = selectedUnit();
+  if (!u || u.owner !== 0 || !fortify(state, u.id)) return;
+  undoStack = [];
+  afterAction(null); // no animation needed – the shield appears right away
+  sound.play('fortify');
+  selectNextUnit();
 }
 
 // Undoes the last undoable move (Z key / panel button); the unit stays selected.

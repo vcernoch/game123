@@ -2,7 +2,7 @@
 import { distance, key } from './hex.js';
 import {
   reachable, attackTargets, previewAttack, moveUnit, attack, buyUnit,
-  unitAt, getUnit, tileAt, difficultyOf, visibleTiles, exploredTiles, build, hasBuilding, unitCost, buildingCost, factionOf,
+  unitAt, getUnit, tileAt, fortify, difficultyOf, visibleTiles, exploredTiles, build, hasBuilding, unitCost, buildingCost, factionOf,
 } from './game.js';
 import { UNIT_TYPES, TERRAIN } from './rules.js';
 
@@ -114,7 +114,7 @@ export function assignGarrisons(state, me, know = aiKnowledge(state, me)) {
 function holdCity(state, unit, city) {
   if (unit.q !== city.q || unit.r !== city.r) moveUnit(state, unit.id, city.q, city.r);
   const u = getUnit(state, unit.id);
-  if (u) tryBestAttack(state, u);
+  if (u && !tryBestAttack(state, u)) fortify(state, u.id); // nothing to hit – dig in (only works if it hasn't moved)
 }
 
 // A wounded unit retreats to an own city, or as far from enemies as possible. It attacks only when it's safe.
