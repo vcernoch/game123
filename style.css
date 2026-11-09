@@ -112,11 +112,17 @@ dialog {
 }
 dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
 dialog h2 { margin: 0 0 10px; font-size: 18px; color: var(--accent); }
-fieldset { border: 1px solid #3c434f; border-radius: 8px; margin: 0 0 12px; padding: 8px 10px; }
+fieldset { border: 1px solid #3c434f; border-radius: 8px; margin: 0 0 12px; padding: 8px 10px; min-width: 0; }
 legend { color: var(--muted); padding: 0 4px; }
 fieldset label { display: block; padding: 6px 0; cursor: pointer; }
 fieldset small, .check small { display: block; color: var(--muted); margin-left: 24px; }
 .check { display: block; cursor: pointer; }
+.seed-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 4px 0; }
+.seed-row label { flex: none; }
+.seed-row input { flex: 1 1 90px; min-width: 0; width: 90px; padding: 6px 8px; border-radius: 6px; border: 1px solid #3c434f; background: #14171c; color: var(--text); font: inherit; }
+.seed-row input:invalid { border-color: #d23c3c; }
+.seed-row button { flex: none; }
+fieldset .seed-row + small { margin-left: 0; }
 .dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 12px; }
 .dialog-actions button[value="load"] { order: -1; margin-right: auto; }
 @media (max-width: 760px) {

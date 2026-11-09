@@ -2,6 +2,16 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-09 – Map number and "Same map again" → v0.13.0
+- **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` is now v0.13.0, several versions ahead of `main` (v0.8.0) – please merge it.
+- Every game already had a seed; now it is visible as the **map number**: the side panel says "Map 123456789 · Difficulty: …". The new game dialog has a "Map" box: an optional map number (empty = random; invalid input is caught by the browser's form check, `pattern` 1–9 digits) and a "This map: N" button that fills in the current one. The same number on the same size always gives the same map, so maps can be shared.
+- The game-over banner has **↻ Same map again**: restarts the identical starting game (map, size, factions, difficulty, fog, events).
+- `parseSeed(text)` and `restartOptions(state)` in `game.js` (pure). `startNewGame` now keeps a given seed. A save from before factions existed restarts with the current rules (factions picked as for a new game).
+- No state structure change. Help text updated.
+- Tests: +1 logic (parsing incl. bad inputs; a game played for 6 turns restarts as exactly the fresh game on all sizes; defaults; pre-faction save). Smoke test: "This map" fills the number, an invalid number keeps the dialog open, 4242 starts map 4242, and "Same map again" after the played-out game gives turn 1 of map 7 with the same tiles and the map number in the panel.
+- Status: `npm run check` green (60 logic tests + smoke).
+- Run summary: phase 7 (own improvements) done – danger-aware AI, scout, map number. Version 0.13.0.
+
 ## 2026-11-09 – Scout
 - New unit **Scout** (`Sc`, 8 gold): HP 6, attack 1, defense 1, move 3, sight 4. It can't capture: `noCapture` in `UNIT_TYPES`, `cityForbidden()` in `game.js` keeps it out of every foreign (enemy or neutral) city – `searchMoves` doesn't step into or through one, `planRoute` neither, so reach, paths, move orders and the threat overlay all follow automatically. Its own cities are fine.
 - It is the 6th unit, so recruit keys 1–5 stay the same and key 6 recruits a scout (the shortcut table and the buttons are generated from `rules.js`). Help text updated.

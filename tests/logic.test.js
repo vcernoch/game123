@@ -7,7 +7,7 @@ import {
   visibleTiles, exploredTiles, build, unitCost, rankOf, stepCost, getUnit,
   buildingCost, unitMove, factionOf, armyPower, riverBetween, riverDefense,
   rollHappening, applyHappening, cityIncome, logFor, isUndoableMove, canFortify, fortify, activeUnits, territoryMap, territoryOwner, planRoute, setOrder, runOrders, cancelOrder, cityHeal, citySight, cityResources, unitSummary, zocTiles,
-  exportGame, importGame, saveFileName, stateProblem, SAVE_FORMAT, threatTiles,
+  exportGame, importGame, saveFileName, stateProblem, SAVE_FORMAT, threatTiles, parseSeed, restartOptions, MAX_SEED,
 } from '../src/game.js';
 import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
@@ -1573,4 +1573,30 @@ test('scout: sees far, never enters a foreign city, the AI sends one exploring o
   assert.notEqual(pickRecruit(big, 1, capital), 'scout', 'one is enough');
   const hard = createGame({ seed: 5, size: 'large', difficulty: 'hard' });
   assert.equal(unexploredLand(hard, aiKnowledge(hard, 1)), 0);
+});
+
+test('map number: typed numbers are parsed, a restart gives exactly the same starting game', () => {
+  assert.deepEqual(parseSeed(''), { seed: null, ok: true });
+  assert.deepEqual(parseSeed('   '), { seed: null, ok: true });
+  assert.deepEqual(parseSeed(' 4242 '), { seed: 4242, ok: true });
+  assert.deepEqual(parseSeed('007'), { seed: 7, ok: true });
+  assert.deepEqual(parseSeed(String(MAX_SEED)), { seed: MAX_SEED, ok: true });
+  for (const bad of ['abc', '-5', '1.5', '1e3', '1234567890', '12 34']) assert.equal(parseSeed(bad).ok, false, bad);
+  // the same number on the same size is the same map
+  assert.deepEqual(createGame({ seed: 4242, size: 'small' }).tiles, createGame({ seed: 4242, size: 'small' }).tiles);
+  // restart: a game played for a while restarts as the identical fresh game, on every size and setting
+  for (const size of Object.keys(MAP_SIZES)) {
+    const opts = { seed: 31337, size, difficulty: 'hard', fog: false, happenings: false, faction: 'forest' };
+    const fresh = createGame(opts);
+    const played = createGame(opts);
+    for (let i = 0; i < 6 && played.winner === null; i++) { runAITurn(played); endTurn(played); }
+    assert.ok(played.turn > 1);
+    assert.deepEqual(createGame(restartOptions(played)), fresh, size);
+  }
+  const defaults = createGame({ seed: 9 });
+  assert.deepEqual(createGame(restartOptions(defaults)), defaults);
+  // a save from before factions restarts with the current rules (factions picked as for a new game)
+  const old = createGame({ seed: 9 });
+  old.factions = undefined;
+  assert.deepEqual(createGame(restartOptions(old)).factions, defaults.factions);
 });

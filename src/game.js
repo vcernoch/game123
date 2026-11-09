@@ -60,6 +60,37 @@ export function createGame({
   return state;
 }
 
+// ---------- map numbers ----------
+
+export const MAX_SEED = 999999999;
+
+// Map number typed by the player: '' = random (null), digits = that map, anything else = invalid.
+// Returns { seed: number|null, ok: boolean }.
+export function parseSeed(text) {
+  const t = String(text ?? '').trim();
+  if (!t) return { seed: null, ok: true };
+  if (!/^\d{1,9}$/.test(t)) return { seed: null, ok: false };
+  return { seed: Number(t), ok: true };
+}
+
+// Options for createGame that start the same game again: same map, sides, difficulty and rules.
+export function restartOptions(state) {
+  const options = {
+    seed: state.seed,
+    cols: state.cols,
+    rows: state.rows,
+    neutralCities: state.cities.length - PLAYERS.length,
+    fog: state.fog !== false,
+    happenings: !!state.happenings,
+    difficulty: state.difficulty || 'normal',
+  };
+  if (state.factions && state.factions[0]) {
+    options.faction = state.factions[0];
+    options.aiFaction = state.factions[1];
+  }
+  return options;
+}
+
 // ---------- statistics ----------
 
 function emptyStats() {

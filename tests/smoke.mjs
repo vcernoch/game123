@@ -315,14 +315,22 @@ try {
   await page.waitForSelector('#new-game-dialog[open]');
   await page.check('input[name="difficulty"][value="hard"]');
   await page.uncheck('input[name="fog"]');
+  // map number: an invalid one keeps the dialog open, "Current map" fills in this game's number
+  const curSeed = await page.evaluate(() => window.__game.getState().seed);
+  await page.click('#seed-current');
+  if ((await page.inputValue('#seed-input')) !== String(curSeed)) throw new Error('"Current map" did not fill the map number');
+  await page.fill('#seed-input', 'abc');
+  await page.click('#start-game');
+  if (!(await page.evaluate(() => document.getElementById('new-game-dialog').open))) throw new Error('invalid map number was accepted');
+  await page.fill('#seed-input', '4242');
   await page.screenshot({ path: 'artifacts/screenshot-dialog.png' });
   await page.click('#start-game');
   await page.waitForFunction(() => window.__game.getState().difficulty === 'hard', null, { timeout: 2000 }).catch(() => {});
   const opts = await page.evaluate(() => {
     const s = window.__game.getState();
-    return { d: s.difficulty, fog: s.fog, open: document.getElementById('new-game-dialog').open };
+    return { d: s.difficulty, fog: s.fog, seed: s.seed, open: document.getElementById('new-game-dialog').open };
   });
-  if (opts.d !== 'hard' || opts.fog !== false || opts.open) throw new Error(`new game dialog: ${JSON.stringify(opts)}`);
+  if (opts.d !== 'hard' || opts.fog !== false || opts.seed !== 4242 || opts.open) throw new Error(`new game dialog: ${JSON.stringify(opts)}`);
 
   // game over: small map played out by the AI for both players, then the statistics screen
   await page.evaluate(async () => {
@@ -350,6 +358,18 @@ try {
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
   if (overflow) throw new Error('horizontal scroll on mobile');
   await page.screenshot({ path: 'artifacts/screenshot-mobile.png', fullPage: true });
+
+  // "Same map again" on the game-over banner restarts the same map with the same settings
+  const endTiles = await page.evaluate(() => JSON.stringify(window.__game.getState().tiles));
+  await page.click('#banner-again');
+  const again = await page.evaluate(() => {
+    const s = window.__game.getState();
+    return { seed: s.seed, turn: s.turn, winner: s.winner, cols: s.cols, fog: s.fog, tiles: JSON.stringify(s.tiles), info: document.getElementById('info').textContent };
+  });
+  if (again.seed !== 7 || again.turn !== 1 || again.winner !== null || again.cols !== 10 || again.fog !== false || again.tiles !== endTiles) {
+    throw new Error(`same map again: ${JSON.stringify({ ...again, tiles: again.tiles === endTiles })}`);
+  }
+  if (!again.info.includes('Map 7')) throw new Error(`map number not shown: ${again.info}`);
 
   // touch phone: zoomed map, tap = preview, second tap = move
   const touchCtx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });

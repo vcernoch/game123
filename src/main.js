@@ -3,7 +3,7 @@ import {
   createGame, reachable, attackTargets, moveUnit, attack, buyUnit, endTurn,
   unitAt, cityAt, getUnit, incomeOf, previewAttack, tileAt, pathTo, nextActiveUnit, cityInfo,
   cloneState, drainEvents, migrateState, logFor, isUndoableMove, canFortify, fortify, activeUnits, territoryOwner, cityResources, unitSummary, planRoute, setOrder, runOrders, cancelOrder, visibleTiles, exploredTiles, build, unitCost, hasBuilding,
-  rankOf, rankMult, buildingCost, unitMove, factionOf, riverDefense, zocTiles, threatTiles, exportGame, importGame, saveFileName,
+  rankOf, rankMult, buildingCost, unitMove, factionOf, riverDefense, zocTiles, threatTiles, exportGame, importGame, saveFileName, parseSeed, restartOptions,
 } from './game.js';
 import { createAnimator } from './anim.js';
 import { decideTap } from './input.js';
@@ -237,7 +237,7 @@ function updateHud() {
   if (!html) {
     const diff = DIFFICULTY[state.difficulty] || DIFFICULTY.normal;
     html = `<p class="hint">Click your unit (blue) or a city.</p>
-      <p class="hint">Difficulty: ${diff.name}${state.fog ? '' : ' · no fog'}${state.happenings ? '' : ' · no random events'}</p>
+      <p class="hint">Map ${state.seed} · Difficulty: ${diff.name}${state.fog ? '' : ' · no fog'}${state.happenings ? '' : ' · no random events'}</p>
       ${state.factions && state.factions[0] ? `<p class="hint">You: ${factionOf(state, 0).name} · AI: ${factionOf(state, 1).name}</p>` : ''}`;
   }
   if (undoStack.length && !busy() && state.winner === null) {
@@ -541,11 +541,13 @@ function newGame({ firstVisit = false } = {}) {
   form.elements.faction.value = FACTIONS[prefs.faction] ? prefs.faction : 'kingdom';
   form.elements.size.value = MAP_SIZES[prefs.size] ? prefs.size : 'medium';
   $('new-game-warning').hidden = firstVisit || state.winner !== null;
+  form.elements.seed.value = '';
+  $('seed-current').textContent = `This map: ${state.seed}`;
   dlg.showModal();
 }
 
 function startNewGame(options) {
-  state = createGame({ seed: randomSeed(), ...options });
+  state = createGame({ ...options, seed: options.seed ?? randomSeed() });
   undoStack = [];
   showNotice([]);
   selectedId = null;
@@ -567,7 +569,7 @@ $('new-game-dialog').addEventListener('close', () => {
     size: form.elements.size.value,
   };
   savePrefs({ ...loadPrefs(), ...options });
-  startNewGame(options);
+  startNewGame({ ...options, seed: parseSeed(form.elements.seed.value).seed });
 });
 // "Load from file" in the new game dialog (it doubles as the main menu)
 $('new-game-dialog').addEventListener('close', () => {
@@ -660,6 +662,8 @@ canvas.addEventListener('mouseleave', () => { hover = null; $('tooltip').hidden 
 $('end-turn').addEventListener('click', () => doEndTurn());
 $('new-game').addEventListener('click', () => newGame());
 $('banner-new').addEventListener('click', () => newGame());
+$('banner-again').addEventListener('click', () => { if (!busy()) startNewGame(restartOptions(state)); });
+$('seed-current').addEventListener('click', () => { $('seed-input').value = String(state.seed); });
 $('stats-panel').addEventListener('toggle', () => { statsKey = ''; updateStats(); });
 $('next-unit').addEventListener('click', selectNextUnit);
 $('info').addEventListener('click', (ev) => {
