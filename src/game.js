@@ -3,7 +3,7 @@ import { key, neighbors, distance } from './hex.js';
 import { generateMap, hasRiverEdge } from './map.js';
 import {
   TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY, VISION, DIFFICULTY, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, ROAD_COST, RIVER,
-  FACTIONS, NO_FACTION, MAP_SIZES, HAPPENINGS, FORTIFY, TERRITORY,
+  FACTIONS, NO_FACTION, MAP_SIZES, HAPPENINGS, FORTIFY, TERRITORY, RESOURCES,
 } from './rules.js';
 import { createRng } from './rng.js';
 
@@ -94,7 +94,7 @@ function countStat(state, name, player) {
   state.stats[name][player]++;
 }
 
-export const STATE_VERSION = 14;
+export const STATE_VERSION = 15;
 
 // Converts a saved state of an older version to the current one; returns null for an unknown format.
 export function migrateState(s) {
@@ -154,6 +154,10 @@ export function migrateState(s) {
   if (s.version === 13) {
     // move orders arrived in version 14 – a missing `goto` means no order
     s.version = 14;
+  }
+  if (s.version === 14) {
+    // map resources arrived in version 15 – old maps simply have none
+    s.version = 15;
   }
   return s.version === STATE_VERSION ? s : null;
 }
@@ -329,7 +333,14 @@ export function cityIncome(city, state = null) {
   const faction = state && city.owner !== null ? factionOf(state, city.owner).cityIncome || 0 : 0;
   const market = hasBuilding(city, 'market') ? BUILDING_EFFECTS.marketIncome : 0;
   const temple = hasBuilding(city, 'temple') ? BUILDING_EFFECTS.templeIncome : 0;
-  return base + faction + market + temple;
+  const mines = state ? cityResources(state, city).filter((t) => t.resource === 'gold').length * RESOURCES.gold.income : 0;
+  return base + faction + market + temple + mines;
+}
+
+// Resource tiles in the city's territory.
+export function cityResources(state, city) {
+  const terr = territoryMap(state);
+  return Object.values(state.tiles).filter((t) => t.resource && terr.get(key(t.q, t.r)) === city.id);
 }
 
 // Healing per turn for a unit standing in its own city (an infirmary heals more).
@@ -352,6 +363,7 @@ export function unitCost(state, city, type) {
   let discount = hasBuilding(city, 'barracks') ? BUILDING_EFFECTS.barracksDiscount : 0;
   const fd = city.owner !== null ? factionOf(state, city.owner).unitDiscount : null;
   if (fd && fd[type]) discount += fd[type];
+  for (const t of cityResources(state, city)) discount += (RESOURCES[t.resource].discount || {})[type] || 0;
   return Math.max(1, UNIT_TYPES[type].cost - discount);
 }
 

@@ -6,7 +6,7 @@ import {
   drainEvents, applyEvent, migrateState, STATE_VERSION,
   visibleTiles, exploredTiles, build, unitCost, rankOf, stepCost, getUnit,
   buildingCost, unitMove, factionOf, armyPower, riverBetween, riverDefense,
-  rollHappening, applyHappening, cityIncome, logFor, isUndoableMove, canFortify, fortify, activeUnits, territoryMap, territoryOwner, planRoute, setOrder, runOrders, cancelOrder, cityHeal, citySight,
+  rollHappening, applyHappening, cityIncome, logFor, isUndoableMove, canFortify, fortify, activeUnits, territoryMap, territoryOwner, planRoute, setOrder, runOrders, cancelOrder, cityHeal, citySight, cityResources,
 } from '../src/game.js';
 import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
@@ -19,7 +19,7 @@ import { GAME_VERSION, GAME_DATE } from '../src/version.js';
 import { pathExists, generateMap, dirTo } from '../src/map.js';
 import { distance, key, neighbors } from '../src/hex.js';
 import {
-  FORTIFY, TERRITORY, ECONOMY, UNIT_TYPES, TERRAIN, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS,
+  RESOURCES, FORTIFY, TERRITORY, ECONOMY, UNIT_TYPES, TERRAIN, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS,
 } from '../src/rules.js';
 
 test('map is deterministic and starting cities are connected', () => {
@@ -1248,4 +1248,40 @@ test('new buildings: watchtower, infirmary, temple, academy', () => {
   other.buildings = [];
   assert.ok(buyUnit(s, other.id, 'warrior'));
   assert.equal(unitAt(s, other.q, other.r).xp, 0);
+});
+
+test('resources: placed fairly in territories, add income and cheaper horsemen', () => {
+  for (const size of ['small', 'medium', 'large']) {
+    for (const seed of [1, 5, 9, 33]) {
+      const s = createGame({ seed, size });
+      const res = Object.values(s.tiles).filter((t) => t.resource);
+      for (const t of res) {
+        assert.ok(RESOURCES[t.resource]);
+        assert.ok(isPassable(s, t.q, t.r));
+        assert.ok(!s.cities.some((c) => c.q === t.q && c.r === t.r));
+        assert.notEqual(territoryOwner(s, t.q, t.r), undefined, 'every resource lies in some territory');
+      }
+      // both capitals get exactly one of each
+      for (const cap of s.cities.filter((c) => c.capital)) {
+        const kinds = cityResources(s, cap).map((t) => t.resource).sort();
+        assert.deepEqual(kinds, ['gold', 'horses'], `${size}/${seed}`);
+      }
+      // deterministic for a given seed
+      assert.deepEqual(createGame({ seed, size }).tiles, s.tiles);
+    }
+  }
+  const s = createGame({ seed: 5 });
+  const cap = s.cities.find((c) => c.owner === 0 && c.capital);
+  const withMine = cityIncome(cap, s);
+  const mine = cityResources(s, cap).find((t) => t.resource === 'gold');
+  delete mine.resource;
+  assert.equal(cityIncome(cap, s), withMine - RESOURCES.gold.income);
+  const pasture = cityResources(s, cap).find((t) => t.resource === 'horses');
+  const cheap = unitCost(s, cap, 'horseman');
+  assert.equal(unitCost(s, cap, 'warrior'), UNIT_TYPES.warrior.cost, 'only horsemen get cheaper');
+  delete pasture.resource;
+  assert.equal(unitCost(s, cap, 'horseman'), cheap + RESOURCES.horses.discount.horseman);
+  const old = createGame({ seed: 2 });
+  old.version = 14;
+  assert.equal(migrateState(old).version, STATE_VERSION);
 });

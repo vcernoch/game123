@@ -1,6 +1,6 @@
 import { key, neighbors, offsetToAxial, distance, DIRS } from './hex.js';
 import { createRng } from './rng.js';
-import { TERRAIN, CITY_NAMES, RIVER } from './rules.js';
+import { TERRAIN, CITY_NAMES, RIVER, TERRITORY } from './rules.js';
 
 // Generates a map: a cols × rows rectangle in "odd-r" offset.
 // Returns { tiles, cities, starts } – without units.
@@ -100,7 +100,39 @@ function tryGenerate(seed, cols, rows, neutralCount) {
   buildRoads(tiles, cities);
   // rivers have their own RNG so they don't change the terrain and city layout for given seeds
   buildRivers(tiles, height, cols, rows, createRng(seed * 31 + 17));
+  placeResources(tiles, cities, createRng(seed * 53 + 5));
   return { tiles, cities, starts };
+}
+
+// Resources (own RNG, so terrain, cities, roads and rivers stay the same for given seeds).
+// For fairness both capitals get one gold mine and one horse pasture 2 tiles away; each neutral city
+// gets one random resource with a 2 in 3 chance. Gold prefers hills, horses prefer plains.
+function placeResources(tiles, cities, rng) {
+  const taken = (t) => t.resource || cities.some((c) => c.q === t.q && c.r === t.r);
+  const spots = (city, kind) => {
+    const all = Object.values(tiles).filter((t) => {
+      const d = distance(t, city);
+      return d >= 1 && d <= TERRITORY.radius && TERRAIN[t.terrain].passable && !taken(t)
+        && cities.every((c) => c === city || distance(t, c) > d); // clearly inside this city's territory
+    });
+    const liked = all.filter((t) => t.terrain === (kind === 'gold' ? 'hills' : 'plains'));
+    return liked.length ? liked : all;
+  };
+  const put = (city, kind, preferDist = null) => {
+    let options = spots(city, kind);
+    if (preferDist !== null && options.some((t) => distance(t, city) === preferDist)) {
+      options = options.filter((t) => distance(t, city) === preferDist);
+    }
+    if (options.length) rng.pick(options).resource = kind;
+  };
+  for (const city of cities) {
+    if (city.capital) {
+      put(city, 'gold', 2);
+      put(city, 'horses', 2);
+    } else if (rng.next() < 2 / 3) {
+      put(city, rng.next() < 0.5 ? 'gold' : 'horses');
+    }
+  }
 }
 
 // Roads: a minimum spanning tree between cities, each segment follows the cheapest path through terrain.

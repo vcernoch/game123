@@ -127,3 +127,4 @@ fieldset small, .check small { display: block; color: var(--muted); margin-left:
 .fortified { color: #cfe3ff; }
 #end-turn.armed { background: #e07a3a; color: #fff; }
 .order { color: #ffe27a; }
+.resource { color: #f2c94c; }

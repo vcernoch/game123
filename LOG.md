@@ -2,6 +2,16 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-09 – Map resources
+- `RESOURCES` in `rules.js`, `placeResources` in `map.js`, `cityResources()` in `game.js`. Two kinds on tiles near cities:
+  - **Gold mine** (gold nuggets): +2 gold per turn for the city whose territory it is in (`cityIncome`).
+  - **Horses** (horseshoe): horsemen recruited in that city are 4 gold cheaper (`unitCost`, stacks with barracks and the Horde bonus).
+- Placement has its own RNG, so terrain, cities, roads and rivers stay the same for all seeds. For fairness both capitals get exactly one gold mine and one pasture 2 tiles away; each neutral city gets one random resource with a 2 in 3 chance, always clearly inside its own territory. Gold prefers hills, horses plains. Resources follow the city, so capturing a city with a mine is worth more.
+- UI: marker in the upper right of the tile (only on explored tiles), hover text with the effect, the city panel lists the resources in its territory. Help text updated.
+- State: `state.version` 15 (tiles may have `resource`), old maps have none.
+- Tests: +1 logic (resources on passable non-city tiles inside some territory, capitals get one of each on all map sizes, determinism, income and horseman discount, migration).
+- Status: `npm run check` green (50 logic tests + smoke).
+
 ## 2026-11-09 – More buildings (v0.10.0)
 - At Vladimír's request, four new city buildings (`BUILDINGS` / `BUILDING_EFFECTS` in `rules.js`):
   - **Watchtower** (15 gold): the city sees 2 tiles farther (`citySight`).

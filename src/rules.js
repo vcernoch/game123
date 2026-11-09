@@ -108,6 +108,13 @@ export const MAP_SIZES = {
 // Water is never territory. A unit resting in its own territory (not in a city) heals `healIdle`.
 export const TERRITORY = { radius: 2, healIdle: 2 };
 
+// Map resources on tiles near cities. They only count inside a city's territory, for that city.
+// gold: extra income; horses: cheaper horsemen recruited in that city.
+export const RESOURCES = {
+  gold:   { name: 'Gold mine', income: 2, desc: '+2 gold per turn for the city whose territory it is in' },
+  horses: { name: 'Horses', discount: { horseman: 4 }, desc: 'horsemen recruited in the city 4 gold cheaper' },
+};
+
 // Fog of war: city sight range and the hills bonus.
 export const VISION = { city: 2, hillsBonus: 1 };
 

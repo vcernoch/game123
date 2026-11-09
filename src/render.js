@@ -52,6 +52,7 @@ export function render(ctx, state, view = {}) {
       ctx.fill();
       drawTerrainDetail(ctx, t.terrain, c.x, c.y);
       if (t.road) drawRoad(ctx, state, t, c);
+      if (t.resource) drawResource(ctx, t.resource, c.x + 13, c.y - 12);
       // terrain detail draws its own paths – the hex outline must be rebuilt
       hexPath(ctx, c.x, c.y, HEX_SIZE - 1);
       if (!seen(t.q, t.r)) {
@@ -187,6 +188,48 @@ function drawPath(ctx, path, turns = null, faint = false) {
       ctx.fill();
       ctx.stroke();
     }
+  }
+  ctx.restore();
+}
+
+// Resource marker in the upper right of the tile: gold nuggets or a horseshoe.
+function drawResource(ctx, kind, x, y) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(1.35, 1.35);
+  ctx.translate(-x, -y);
+  ctx.beginPath();
+  ctx.arc(x, y, 7, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(20,22,30,0.8)';
+  ctx.fill();
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = kind === 'gold' ? '#f2c94c' : '#e8e2d0';
+  ctx.stroke();
+  if (kind === 'gold') {
+    ctx.fillStyle = '#f2c94c';
+    ctx.strokeStyle = '#7a5a10';
+    ctx.lineWidth = 0.8;
+    for (const [dx, dy, r] of [[-2.5, 1.5, 2.6], [2.5, 1.8, 2.3], [0, -2, 2.4]]) {
+      ctx.beginPath();
+      ctx.moveTo(x + dx, y + dy - r);
+      ctx.lineTo(x + dx + r, y + dy + r * 0.7);
+      ctx.lineTo(x + dx - r, y + dy + r * 0.7);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    }
+  } else if (kind === 'horses') {
+    // horseshoe: a thick U opening downwards
+    ctx.strokeStyle = '#d9d4c7';
+    ctx.lineWidth = 2.4;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.arc(x, y + 0.5, 3.6, Math.PI * 0.95, Math.PI * 2.05);
+    ctx.moveTo(x - 3.6, y + 0.8);
+    ctx.lineTo(x - 3.2, y + 4);
+    ctx.moveTo(x + 3.6, y + 0.8);
+    ctx.lineTo(x + 3.2, y + 4);
+    ctx.stroke();
   }
   ctx.restore();
 }
