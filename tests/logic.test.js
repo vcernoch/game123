@@ -6,7 +6,7 @@ import {
   drainEvents, applyEvent, migrateState, STATE_VERSION,
   visibleTiles, exploredTiles, build, unitCost, rankOf, stepCost, getUnit,
   buildingCost, unitMove, factionOf, armyPower, riverBetween, riverDefense,
-  rollHappening, applyHappening, cityIncome, logFor,
+  rollHappening, applyHappening, cityIncome, logFor, isUndoableMove,
 } from '../src/game.js';
 import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
@@ -920,4 +920,72 @@ test('kronika: akce soupeře v mlze hráč nevidí, vlastní a viditelné ano', 
   const m = migrateState(old);
   assert.equal(m.version, STATE_VERSION);
   assert.equal(logFor(m, 0)[0].msg, 'AI: něco');
+});
+
+test('vrácení pohybu: jen pohyb, který nic neprozradil', () => {
+  // zkusí pohyb a vrátí, jestli jde vrátit (stav před pohybem zůstane netknutý)
+  const tryMove = (s, unit, q, r) => {
+    const before = cloneState(s);
+    assert.ok(moveUnit(s, unit.id, q, r));
+    const ok = isUndoableMove(before, s, s.events, 0);
+    drainEvents(s);
+    return { ok, before };
+  };
+  const s = createGame({ seed: 21 });
+  const u = s.units.find((x) => x.owner === 0 && x.type === 'warrior');
+  const explored = exploredTiles(s, 0);
+  const dests = [...reachable(s, u).keys()].map((k) => s.tiles[k]);
+  let safe = null;
+  let revealing = null;
+  for (const t of dests) {
+    const trial = cloneState(s);
+    const tu = getUnit(trial, u.id);
+    const { ok } = tryMove(trial, tu, t.q, t.r);
+    const grew = exploredTiles(trial, 0).size > explored.size;
+    if (grew) assert.equal(ok, false, 'pohyb, který prozkoumá nové pole, nejde vrátit');
+    if (ok && !safe) safe = t;
+    if (grew && !revealing) revealing = t;
+  }
+  assert.ok(safe, 'aspoň jeden pohyb uvnitř prozkoumaného území jde vrátit');
+  assert.ok(revealing, 'aspoň jeden pohyb odhalí nové pole');
+  const orig = JSON.parse(JSON.stringify(s));
+  const { ok, before } = tryMove(s, u, safe.q, safe.r);
+  assert.ok(ok);
+  assert.deepEqual(JSON.parse(JSON.stringify(before)), orig, 'stav před pohybem jde obnovit beze změny');
+
+  // nově viditelný nepřítel (i na už prozkoumaném poli) pohyb zamkne
+  const e = createGame({ seed: 21 });
+  e.explored[0] = Object.keys(e.tiles).sort();
+  const eu = e.units.find((x) => x.owner === 0 && x.type === 'warrior');
+  const vis0 = visibleTiles(e, 0);
+  let spot = null;
+  for (const k of reachable(e, eu).keys()) {
+    const t = e.tiles[k];
+    const trial = cloneState(e);
+    getUnit(trial, eu.id).q = t.q;
+    getUnit(trial, eu.id).r = t.r;
+    const extra = [...visibleTiles(trial, 0)].find((v) => !vis0.has(v) && isPassable(e, e.tiles[v].q, e.tiles[v].r)
+      && !unitAt(e, e.tiles[v].q, e.tiles[v].r) && !e.cities.some((c) => c.q === e.tiles[v].q && c.r === e.tiles[v].r));
+    if (extra) { spot = { dest: t, enemy: e.tiles[extra] }; break; }
+  }
+  assert.ok(spot);
+  const clean = cloneState(e);
+  assert.equal(tryMove(clean, getUnit(clean, eu.id), spot.dest.q, spot.dest.r).ok, true, 'bez nepřítele jde vrátit');
+  e.units.push({ id: 900, type: 'warrior', owner: 1, q: spot.enemy.q, r: spot.enemy.r, hp: 10, movesLeft: 0, hasAttacked: true, xp: 0 });
+  assert.equal(tryMove(e, eu, spot.dest.q, spot.dest.r).ok, false, 'odhalený nepřítel pohyb zamkne');
+
+  // dobytí města nejde vrátit
+  const c = createGame({ seed: 21, fog: false });
+  const city = c.cities.find((x) => x.owner === null);
+  const cu = c.units.find((x) => x.owner === 0);
+  const near = neighbors(city.q, city.r).find((n) => isPassable(c, n.q, n.r) && !unitAt(c, n.q, n.r));
+  cu.q = near.q;
+  cu.r = near.r;
+  cu.movesLeft = 5;
+  assert.equal(tryMove(c, cu, city.q, city.r).ok, false);
+  // jiná akce než pohyb (útok) se vrátit nedá
+  const p = duel(4);
+  const pb = cloneState(p.s);
+  assert.ok(attack(p.s, p.me.id, p.foe.id));
+  assert.equal(isUndoableMove(pb, p.s, p.s.events, 0), false);
 });

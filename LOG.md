@@ -2,6 +2,14 @@
 
 Nejnovější záznam nahoře. Formát: datum – co se udělalo – stav testů – otázky pro Vladimíra.
 
+## 2026-11-09 – Vrácení pohybu (v0.7.0)
+- **Otázka pro Vladimíra (trvá):** Na otázku k víc AI soupeřům / scénářům s vlastními cíli jsi odpověděl „bez preference“ – beru to tak, že souhlas zatím není, a dál na nich nepracuji. Stačí napsat „scénáře ano“ nebo „víc AI ano“.
+- Klávesa Z nebo tlačítko „↶ Vrátit pohyb“ v panelu vrátí poslední pohyb. Jde vrátit i několik pohybů po sobě, ale jen obyčejné pohyby, které hráči nic neprozradily (`isUndoableMove` v `game.js`): žádné dobytí ani jiná událost, žádné nově prozkoumané pole a na nově viditelných polích žádná cizí jednotka ani cizí město. Útok, verbování, stavba, odhalující pohyb a konec tahu zásobník vyprázdní.
+- Zásobník je jen v paměti (`main.js`), stav hry se nemění, `state.version` zůstává 12. Pozor na past: animace přehrává události přímo nad stavem „před akcí“, proto se do zásobníku ukládá jeho samostatná kopie (odhalil to smoke test).
+- Nápověda „Jak hrát“ doplněna.
+- Testy: +1 logický (odhalující pohyb nejde vrátit, pohyb uvnitř prozkoumaného území jde a stav před ním se obnoví beze změny, odhalený nepřítel pohyb zamkne, dobytí města a útok nejdou vrátit). Smoke test bez mlhy pohne jednotkou a vrátí ji tlačítkem i klávesou Z (`artifacts/screenshot-undo.png`).
+- Stav: `npm run check` zelený (41 logických testů + smoke).
+
 ## 2026-11-09 – Kronika respektuje mlhu války (v0.6.0)
 - **Otázka pro Vladimíra (trvá):** Zbylé body fáze 3 – víc AI soupeřů a kampaň/scénáře s vlastními cíli – mění pravidla vítězství, takže na ně bez tvého souhlasu nesahám (podrobnosti v záznamech níž). Zároveň je v `dev` od posledního sloučení hodně nového (v0.4.0–v0.6.0), prosím o sloučení do `main`.
 - Záznamy kroniky nesou `seen` = hráči, kteří akci viděli: původce, dotčený hráč (obránce, bývalý majitel dobytého města, majitel jednotky zasažené morem) a každý, kdo v tu chvíli vidí některé z dotčených polí. U boje se viditelnost počítá před ztrátou jednotek, takže hráč vždy ví o padlé jednotce.

@@ -123,3 +123,4 @@ fieldset small, .check small { display: block; color: var(--muted); margin-left:
   .board-wrap.zoomed { overflow: auto; max-height: 75vh; border-radius: 8px; -webkit-overflow-scrolling: touch; }
   .board-wrap.zoomed canvas { width: var(--zoom-w, 820px); max-width: none; }
 }
+.undo-btn { width: 100%; margin-top: 10px; }

@@ -2,7 +2,7 @@
 import {
   createGame, reachable, attackTargets, moveUnit, attack, buyUnit, endTurn,
   unitAt, cityAt, getUnit, incomeOf, previewAttack, tileAt, pathTo, nextActiveUnit, cityInfo,
-  cloneState, drainEvents, migrateState, logFor, visibleTiles, exploredTiles, build, unitCost, hasBuilding,
+  cloneState, drainEvents, migrateState, logFor, isUndoableMove, visibleTiles, exploredTiles, build, unitCost, hasBuilding,
   rankOf, rankMult, buildingCost, unitMove, factionOf, riverDefense,
 } from './game.js';
 import { createAnimator } from './anim.js';
@@ -31,6 +31,7 @@ let hover = null;
 let aiRunning = false;
 let pending = null;        // dotyk: cíl čekající na potvrzení druhým klepnutím
 let lastPointer = 'mouse'; // typ posledního ukazatele (mouse / touch / pen)
+let undoStack = [];        // stavy před vratitelnými pohyby v tomto tahu (jen v paměti)
 const sound = createSound();
 sound.enabled = loadPrefs().sound !== false;
 const anim = createAnimator(
@@ -192,6 +193,9 @@ function updateHud() {
       <p class="hint">Obtížnost: ${diff.name}${state.fog ? '' : ' · bez mlhy'}${state.happenings ? '' : ' · bez náhodných událostí'}</p>
       ${state.factions && state.factions[0] ? `<p class="hint">Ty: ${factionOf(state, 0).name} · AI: ${factionOf(state, 1).name}</p>` : ''}`;
   }
+  if (undoStack.length && !busy() && state.winner === null) {
+    html += '<button data-undo class="secondary undo-btn" title="Vrátit poslední pohyb (Z)">↶ Vrátit pohyb</button>';
+  }
   info.innerHTML = html;
 
   $('log').innerHTML = logFor(state, 0).slice(-8).reverse()
@@ -262,6 +266,7 @@ function onClick(ev) {
   if (act.type === 'attack') {
     const before = cloneState(state);
     attack(state, act.unitId, act.targetId);
+    undoStack = [];
     if (!getUnit(state, act.unitId)) selectedId = null;
     if (touch) hover = null;
     afterAction(before);
@@ -270,6 +275,9 @@ function onClick(ev) {
   if (act.type === 'move') {
     const before = cloneState(state);
     moveUnit(state, act.unitId, act.q, act.r);
+    // kopie: animace přehrává události přímo nad `before`, takže by ho posunula
+    if (isUndoableMove(before, state, state.events, 0)) undoStack.push(cloneState(before));
+    else undoStack = [];
     const c = cityAt(state, act.q, act.r);
     selectedCityId = c ? c.id : null;
     if (touch) hover = null;
@@ -342,6 +350,7 @@ function doEndTurn() {
   $('tooltip').hidden = true;
   pending = null;
   showNotice([]);
+  undoStack = [];
   endTurn(state);
   drainEvents(state);
   aiRunning = true;
@@ -406,6 +415,7 @@ function newGame({ firstVisit = false } = {}) {
 
 function startNewGame(options) {
   state = createGame({ seed: randomSeed(), ...options });
+  undoStack = [];
   showNotice([]);
   selectedId = null;
   selectedCityId = null;
@@ -463,19 +473,21 @@ $('banner-new').addEventListener('click', () => newGame());
 $('stats-panel').addEventListener('toggle', () => { statsKey = ''; updateStats(); });
 $('next-unit').addEventListener('click', selectNextUnit);
 $('info').addEventListener('click', (ev) => {
+  if (ev.target.closest('button[data-undo]')) { undoMove(); return; }
   const bBtn = ev.target.closest('button[data-build]');
   if (bBtn && selectedCityId && !busy()) {
-    if (build(state, selectedCityId, bBtn.dataset.build)) { drainEvents(state); sound.play('build'); afterAction(); }
+    if (build(state, selectedCityId, bBtn.dataset.build)) { undoStack = []; drainEvents(state); sound.play('build'); afterAction(); }
     return;
   }
   const btn = ev.target.closest('button[data-buy]');
   if (!btn || !selectedCityId) return;
-  if (!busy() && buyUnit(state, selectedCityId, btn.dataset.buy)) { sound.play('recruit'); afterAction(); }
+  if (!busy() && buyUnit(state, selectedCityId, btn.dataset.buy)) { undoStack = []; sound.play('recruit'); afterAction(); }
 });
 window.addEventListener('keydown', (ev) => {
   if ($('new-game-dialog').open) return; // klávesy patří dialogu
   if (ev.key === 'Enter' || ev.key === 'e') doEndTurn();
   if (ev.key === 'Tab') { ev.preventDefault(); selectNextUnit(); }
+  if (ev.key === 'z' || ev.key === 'Z') { ev.preventDefault(); undoMove(); }
   if (ev.key === 'Escape') {
     if (busy()) { anim.skip(); return; }
     selectedId = null; selectedCityId = null; pending = null; draw();
@@ -494,17 +506,34 @@ function selectNextUnit() {
   draw();
 }
 
+// Vrátí poslední vratitelný pohyb (klávesa Z / tlačítko v panelu); jednotka zůstane vybraná.
+function undoMove() {
+  if (busy() || !undoStack.length) return;
+  const movedId = selectedId;
+  state = undoStack.pop();
+  pending = null;
+  selectedId = getUnit(state, movedId) ? movedId : null;
+  const u = selectedUnit();
+  const c = u && cityAt(state, u.q, u.r);
+  selectedCityId = c ? c.id : null;
+  sound.play('click');
+  save();
+  draw();
+}
+
 // Háček pro automatické testy (Playwright).
 window.__game = {
   getState: () => state,
   endTurn: doEndTurn,
+  undo: undoMove,
+  canUndo: () => undoStack.length > 0,
   nextUnit: selectNextUnit,
   selectedId: () => selectedId,
   isBusy: busy,
   version: GAME_VERSION,
   setAnimSpeed: (x) => { anim.speed = x; },
   refresh: () => { resize(); draw(); },
-  newGame: (seed, options = {}) => { state = createGame({ seed, ...options }); showNotice([]); resize(); draw(); },
+  newGame: (seed, options = {}) => { state = createGame({ seed, ...options }); undoStack = []; showNotice([]); resize(); draw(); },
   showNotice: (events) => { showNotice(events); draw(); },
 };
 

@@ -416,6 +416,24 @@ export function nextActiveUnit(state, player, afterId = null) {
   return mine.find((u) => afterId === null || u.id > afterId) || mine[0];
 }
 
+// Dá se pohyb vrátit? before/after = stav před a po akci hráče `viewer`, events = co akce vyvolala.
+// Vrátit jde jen obyčejný pohyb, který hráči neprozradil nic nového: žádné dobytí ani povýšení,
+// žádné nově prozkoumané pole a na nově viditelných polích žádná cizí jednotka ani cizí město.
+export function isUndoableMove(before, after, events, viewer) {
+  if (after.winner !== null || before.current !== viewer || after.current !== viewer) return false;
+  if (events.length !== 1 || events[0].type !== 'move') return false;
+  if (exploredTiles(after, viewer).size !== exploredTiles(before, viewer).size) return false;
+  const wasVisible = visibleTiles(before, viewer);
+  for (const k of visibleTiles(after, viewer)) {
+    if (wasVisible.has(k)) continue;
+    const t = after.tiles[k];
+    const u = unitAt(after, t.q, t.r);
+    const c = cityAt(after, t.q, t.r);
+    if ((u && u.owner !== viewer) || (c && c.owner !== viewer)) return false;
+  }
+  return true;
+}
+
 export function attackTargets(state, unit) {
   if (unit.hasAttacked) return [];
   const range = UNIT_TYPES[unit.type].range;

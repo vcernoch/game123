@@ -35,6 +35,7 @@ Odškrtávej `[x]` po dokončení. Nové nápady přidávej na konec příslušn
 - [x] Řeky na hranách hexů: přechod stojí pohyb navíc, mosty na silnicích, bonus obránci (vlastní vylepšení)
 - [x] Náhodné události na začátku tahu: úroda, mor, vzpoura; dají se vypnout (vlastní vylepšení z Nápadů)
 - [x] Kronika skrývá akce AI, které hráč v mlze války neviděl (vlastní vylepšení z Nápadů)
+- [x] Vrácení pohybu (Z): pohyb, který neodhalil nic nového, jde vzít zpět (vlastní vylepšení)
 
 ## Nápady (neřazené)
 - Diplomacie s více AI

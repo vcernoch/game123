@@ -136,6 +136,37 @@ try {
     if (!at || at.q !== moved.q || at.r !== moved.r) throw new Error('jednotka se nepřesunula kliknutím');
   }
 
+  // vrácení pohybu: bez mlhy jde vrátit každý obyčejný pohyb – tlačítkem v panelu i klávesou Z
+  await page.evaluate(() => window.__game.newGame(777, { fog: false }));
+  const undoMove = await page.evaluate(async () => {
+    const g = await import('./src/game.js');
+    const rnd = await import('./src/render.js');
+    const st = window.__game.getState();
+    window.__game.nextUnit();
+    const u = g.getUnit(st, window.__game.selectedId());
+    const k = [...g.reachable(st, u).keys()].find((key) => {
+      const [q, r] = key.split(',').map(Number);
+      return !g.cityAt(st, q, r);
+    });
+    const [q, r] = k.split(',').map(Number);
+    const c = rnd.tileCenter(q, r);
+    const rect = document.getElementById('board').getBoundingClientRect();
+    const s = rect.width / rnd.canvasSize(st).w;
+    return { id: u.id, from: { q: u.q, r: u.r }, x: rect.left + c.x * s, y: rect.top + c.y * s };
+  });
+  const posOf = (id) => page.evaluate((i) => { const u = window.__game.getState().units.find((x) => x.id === i); return u && { q: u.q, r: u.r }; }, id);
+  for (const how of ['button', 'key']) {
+    await page.mouse.click(undoMove.x, undoMove.y);
+    await page.waitForFunction(() => !window.__game.isBusy(), null, { timeout: 5000 });
+    if (!(await page.evaluate(() => window.__game.canUndo()))) throw new Error('pohyb bez mlhy nejde vrátit');
+    if (how === 'button') await page.locator('#info').screenshot({ path: 'artifacts/screenshot-undo.png' });
+    if (how === 'button') await page.click('#info button[data-undo]');
+    else await page.keyboard.press('z');
+    const pos = await posOf(undoMove.id);
+    if (!pos || pos.q !== undoMove.from.q || pos.r !== undoMove.from.r) throw new Error(`vrácení pohybu (${how}) nevrátilo jednotku`);
+    if (await page.evaluate(() => window.__game.canUndo())) throw new Error('po vrácení zůstal záznam v zásobníku');
+  }
+
   // stavba: v čerstvé hře vyber hlavní město a postav trh tlačítkem v panelu
   await page.evaluate(() => { window.__game.newGame(12345); window.__game.getState().gold[0] = 99; });
   const capPt = await page.evaluate(async () => {
