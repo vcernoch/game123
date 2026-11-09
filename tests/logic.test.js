@@ -5,7 +5,7 @@ import {
   previewAttack, cloneState, pathTo, nextActiveUnit, tileAt, cityInfo, incomeOf, defenseValue,
   drainEvents, applyEvent, migrateState, STATE_VERSION,
   visibleTiles, exploredTiles, build, unitCost, rankOf, stepCost, getUnit,
-  buildingCost, unitMove, factionOf, armyPower,
+  buildingCost, unitMove, factionOf, armyPower, riverBetween, riverDefense,
 } from '../src/game.js';
 import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
@@ -15,10 +15,10 @@ import { chartSvg, summaryRows } from '../src/stats.js';
 import { soundFor, createLimiter, createSound, SOUND_NAMES } from '../src/sound.js';
 import { readFileSync } from 'node:fs';
 import { GAME_VERSION, GAME_DATE } from '../src/version.js';
-import { pathExists } from '../src/map.js';
+import { pathExists, generateMap, dirTo } from '../src/map.js';
 import { distance, key, neighbors } from '../src/hex.js';
 import {
-  UNIT_TYPES, TERRAIN, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, FACTIONS, MAP_SIZES,
+  UNIT_TYPES, TERRAIN, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, FACTIONS, MAP_SIZES, RIVER,
 } from '../src/rules.js';
 
 test('mapa je deterministická a startovní města jsou propojená', () => {
@@ -526,6 +526,68 @@ test('silnice spojují všechna města a zrychlují pohyb', () => {
   const old = createGame({ seed: 1 });
   old.version = 6;
   for (const t of Object.values(old.tiles)) delete t.road;
+  assert.equal(migrateState(old).version, STATE_VERSION);
+});
+
+test('řeky: tečou po hranách, jsou souměrné a nezmění rozložení mapy', () => {
+  for (const [size, cfg] of Object.entries(MAP_SIZES)) {
+    let total = 0;
+    for (const seed of [1, 2, 3, 9, 77]) {
+      const m = generateMap(seed, cfg.cols, cfg.rows, cfg.neutralCities);
+      for (const t of Object.values(m.tiles)) {
+        for (const d of t.rivers || []) {
+          total++;
+          assert.ok(d >= 0 && d < 6);
+          const n = m.tiles[key(t.q + [1, 1, 0, -1, -1, 0][d], t.r + [0, -1, -1, 0, 1, 1][d])];
+          if (!n) continue; // hrana na okraji mapy
+          assert.ok(n.rivers && n.rivers.includes(dirTo(n, t)), `${size}/${seed}: nesouměrná hrana`);
+          assert.ok(t.terrain !== 'water' && n.terrain !== 'water', 'řeka nevede po vodě');
+        }
+        assert.equal(new Set(t.rivers || []).size, (t.rivers || []).length, 'hrana dvakrát');
+      }
+      // stejný seed = stejné řeky
+      assert.deepEqual(generateMap(seed, cfg.cols, cfg.rows, cfg.neutralCities).tiles, m.tiles);
+    }
+    assert.ok(total / 2 >= RIVER.minLength * 5, `${size}: málo řek`);
+  }
+});
+
+test('řeky: přechod stojí pohyb navíc, most ne, obránce za řekou má bonus', () => {
+  const s = createGame({ seed: 1, fog: false });
+  const tiles = Object.values(s.tiles);
+  // bez řeky mezi a, b se cena nezmění; s řekou přibude crossCost
+  const a = tiles.find((t) => t.terrain === 'plains' && !t.road);
+  const b = neighbors(a.q, a.r).map((n) => s.tiles[key(n.q, n.r)]).find((t) => t && t.terrain === 'plains' && !t.road);
+  const plain = stepCost(s, a, b);
+  delete a.rivers; delete b.rivers;
+  a.rivers = [dirTo(a, b)];
+  b.rivers = [dirTo(b, a)];
+  assert.ok(riverBetween(s, a, b) && riverBetween(s, b, a));
+  assert.equal(stepCost(s, a, b), plain + RIVER.crossCost);
+  // most: silnice na obou stranách
+  a.road = true; b.road = true;
+  assert.ok(stepCost(s, a, b) < plain);
+  delete a.road; delete b.road;
+  // boj přes řeku: bonus má jen napadený, protiúder ne
+  s.units = [];
+  const me = { id: 900, type: 'warrior', owner: 0, q: a.q, r: a.r, hp: 10, movesLeft: 2, hasAttacked: false, xp: 0 };
+  const foe = { id: 901, type: 'warrior', owner: 1, q: b.q, r: b.r, hp: 10, movesLeft: 0, hasAttacked: true, xp: 0 };
+  s.units.push(me, foe);
+  const across = previewAttack(s, me, foe);
+  assert.equal(riverDefense(s, me, foe), RIVER.defBonus);
+  a.rivers = []; b.rivers = [];
+  const dry = previewAttack(s, me, foe);
+  assert.equal(riverDefense(s, me, foe), 0);
+  assert.ok(across.damage < dry.damage, `přes řeku ${across.damage} < bez ${dry.damage}`);
+  // dosah: přes řeku se na sousední pole dostane jen s dostatkem pohybu
+  a.rivers = [dirTo(a, b)]; b.rivers = [dirTo(b, a)];
+  s.units = [me];
+  me.movesLeft = 2;
+  assert.equal(reachable(s, me).get(key(b.q, b.r)), plain + RIVER.crossCost);
+  // stará hra (verze 9) se načte bez řek
+  const old = createGame({ seed: 1 });
+  old.version = 9;
+  for (const t of Object.values(old.tiles)) delete t.rivers;
   assert.equal(migrateState(old).version, STATE_VERSION);
 });
 

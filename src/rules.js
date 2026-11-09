@@ -67,6 +67,11 @@ export const DIFFICULTY = {
 // Silnice: krok z pole se silnicí na další pole se silnicí stojí jen tolik bodů pohybu.
 export const ROAD_COST = 0.5;
 
+// Řeky tečou po hranách hexů. Překročení řeky stojí pohyb navíc (most = silnice na obou stranách
+// je zdarma) a jednotka napadená přes řeku zblízka má bonus k obraně.
+// perTiles: jedna řeka na tolik polí mapy (malá 1, střední 2, velká 4); délka v hranách.
+export const RIVER = { crossCost: 1, defBonus: 0.25, minLength: 3, maxLength: 14, perTiles: 70 };
+
 // Velikosti mapy pro dialog nové hry.
 export const MAP_SIZES = {
   small:  { name: 'Malá',    cols: 10, rows: 8,  neutralCities: 2, desc: 'rychlá hra' },

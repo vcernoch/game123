@@ -31,10 +31,10 @@ Odškrtávej `[x]` po dokončení. Nové nápady přidávej na konec příslušn
 - [ ] Více AI soupeřů (kód teď počítá se dvěma hráči – větší přestavba, vč. vítězství a diplomacie)
 - [x] Zvukové efekty generované přes WebAudio
 - [x] Statistiky na konci hry (graf síly v čase)
-- [ ] Kampaň nebo scénáře s cíli
+- [ ] Kampaň nebo scénáře s cíli (čeká na Vladimíra – jiné cíle = změna pravidel vítězství, viz LOG.md)
+- [x] Řeky na hranách hexů: přechod stojí pohyb navíc, mosty na silnicích, bonus obránci (vlastní vylepšení)
 
 ## Nápady (neřazené)
 - Diplomacie s více AI
 - Náhodné události (mor, úroda, vzpoura)
 - Kronika by mohla skrývat akce AI, které hráč neviděl
-- Řeky na hranách hexů (pohyb navíc, bonus obránci) – doplněk k silnicím

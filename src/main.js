@@ -3,7 +3,7 @@ import {
   createGame, reachable, attackTargets, moveUnit, attack, buyUnit, endTurn,
   unitAt, cityAt, getUnit, incomeOf, previewAttack, tileAt, pathTo, nextActiveUnit, cityInfo,
   cloneState, drainEvents, migrateState, visibleTiles, exploredTiles, build, unitCost, hasBuilding,
-  rankOf, rankMult, buildingCost, unitMove, factionOf,
+  rankOf, rankMult, buildingCost, unitMove, factionOf, riverDefense,
 } from './game.js';
 import { createAnimator } from './anim.js';
 import { decideTap } from './input.js';
@@ -14,7 +14,7 @@ import { runAITurn } from './ai.js';
 import { render, canvasSize, pickHex } from './render.js';
 import { key } from './hex.js';
 import {
-  UNIT_TYPES, TERRAIN, PLAYERS, DIFFICULTY, BUILDINGS, RANKS, FACTIONS, MAP_SIZES,
+  UNIT_TYPES, TERRAIN, PLAYERS, DIFFICULTY, BUILDINGS, RANKS, FACTIONS, MAP_SIZES, RIVER,
 } from './rules.js';
 
 const SAVE_KEY = 'game123-save';
@@ -169,7 +169,8 @@ function updateHud() {
     const tile = tileAt(state, hover.q, hover.r);
     const t = TERRAIN[tile.terrain];
     const road = tile.road ? ' · silnice (po silnici pohyb ½)' : '';
-    html = `<p>${t.name}${t.passable ? ` · pohyb ${t.cost} · obrana +${Math.round(t.defBonus * 100)} %` : ' · neprůchodné'}${road}</p>`;
+    const river = tile.rivers && tile.rivers.length ? ` · řeka (přechod +${RIVER.crossCost} pohyb, obránce +${Math.round(RIVER.defBonus * 100)} %)` : '';
+    html = `<p>${t.name}${t.passable ? ` · pohyb ${t.cost} · obrana +${Math.round(t.defBonus * 100)} %` : ' · neprůchodné'}${road}${river}</p>`;
     const hc = cityAt(state, hover.q, hover.r);
     if (hc) {
       const ci = cityInfo(state, hc);
@@ -180,7 +181,7 @@ function updateHud() {
     const target = seenUnitAt(pending.q, pending.r);
     if (target && target.owner !== u.owner) {
       const pr = previewAttack(state, u, target);
-      html += `<p class="confirm">Útok: −${pr.damage}${pr.kills ? ' (zničí)' : ''}, protiúder −${pr.counter}.<br>Klepni na cíl znovu pro potvrzení.</p>`;
+      html += `<p class="confirm">Útok${riverDefense(state, u, target) ? ' přes řeku' : ''}: −${pr.damage}${pr.kills ? ' (zničí)' : ''}, protiúder −${pr.counter}.<br>Klepni na cíl znovu pro potvrzení.</p>`;
     } else {
       html += '<p class="confirm">Klepni na cíl znovu pro potvrzení pohybu.</p>';
     }
@@ -307,7 +308,7 @@ function showTooltip(ev, hex) {
   const target = hex && seenUnitAt(hex.q, hex.r);
   if (sel && target && sel.owner === state.current && attackTargets(state, sel).includes(target)) {
     const p = previewAttack(state, sel, target);
-    tip.textContent = `Útok: −${p.damage}${p.kills ? ' (zničí)' : ''}, protiúder −${p.counter}`;
+    tip.textContent = `Útok${riverDefense(state, sel, target) ? ' přes řeku' : ''}: −${p.damage}${p.kills ? ' (zničí)' : ''}, protiúder −${p.counter}`;
     placeTip(tip, ev);
   } else if (hex && cityAt(state, hex.q, hex.r) && exploredTiles(state, 0).has(key(hex.q, hex.r))) {
     const city = cityAt(state, hex.q, hex.r);

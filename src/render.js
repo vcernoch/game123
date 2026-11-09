@@ -1,5 +1,5 @@
 // Vykreslení na canvas. Žádná herní logika, jen kreslení stavu.
-import { hexToPixel, hexCorners, pixelToHex, key, neighbors } from './hex.js';
+import { hexToPixel, hexCorners, pixelToHex, key, neighbors, DIRS } from './hex.js';
 import { TERRAIN, UNIT_TYPES, PLAYERS, NEUTRAL_COLOR, RANKS } from './rules.js';
 
 export const HEX_SIZE = 32;
@@ -69,6 +69,8 @@ export function render(ctx, state, view = {}) {
     ctx.lineWidth = 1;
     ctx.stroke();
   }
+
+  drawRivers(ctx, state, known, seen);
 
   if (view.hover && state.tiles[key(view.hover.q, view.hover.r)]) {
     const c = tileCenter(view.hover.q, view.hover.r);
@@ -187,6 +189,55 @@ function drawRoad(ctx, state, t, c) {
     if (!ends.length) ctx.arc(c.x, c.y, width / 2, 0, Math.PI * 2);
     ctx.stroke();
   }
+  ctx.restore();
+}
+
+// Řeky po hranách hexů. Každou hranu kreslíme jednou (z pole s menším klíčem nebo
+// když soused leží mimo mapu). Most = silnice na obou stranách hrany.
+function drawRivers(ctx, state, known, seen) {
+  ctx.save();
+  ctx.lineCap = 'round';
+  for (const t of Object.values(state.tiles)) {
+    if (!t.rivers) continue;
+    const c = tileCenter(t.q, t.r);
+    const corners = hexCorners(c.x, c.y, HEX_SIZE);
+    for (const d of t.rivers) {
+      const n = { q: t.q + DIRS[d][0], r: t.r + DIRS[d][1] };
+      const nk = key(n.q, n.r);
+      const nt = state.tiles[nk];
+      if (nt && nk < key(t.q, t.r)) continue;
+      if (!known(t.q, t.r) && !(nt && known(n.q, n.r))) continue;
+      const lit = seen(t.q, t.r) || (nt && seen(n.q, n.r));
+      // směr d míří pod úhlem −60·d°, hrana leží mezi rohy (6−d)%6 a (7−d)%6
+      const p1 = corners[(6 - d) % 6];
+      const p2 = corners[(7 - d) % 6];
+      ctx.globalAlpha = lit ? 1 : 0.55;
+      for (const [color, width] of [['#1f4f86', 6], ['#5fa8e8', 3.5]]) {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = width;
+        ctx.beginPath();
+        ctx.moveTo(p1.x, p1.y);
+        ctx.lineTo(p2.x, p2.y);
+        ctx.stroke();
+      }
+      if (t.road && nt && nt.road) drawBridge(ctx, p1, p2);
+    }
+  }
+  ctx.restore();
+}
+
+function drawBridge(ctx, p1, p2) {
+  const mx = (p1.x + p2.x) / 2;
+  const my = (p1.y + p2.y) / 2;
+  const ang = Math.atan2(p2.y - p1.y, p2.x - p1.x);
+  ctx.save();
+  ctx.translate(mx, my);
+  ctx.rotate(ang);
+  ctx.fillStyle = '#8a6a3c';
+  ctx.strokeStyle = '#4a3418';
+  ctx.lineWidth = 1;
+  ctx.fillRect(-5, -7, 10, 14);
+  ctx.strokeRect(-5, -7, 10, 14);
   ctx.restore();
 }
 

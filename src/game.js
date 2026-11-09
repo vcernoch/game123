@@ -1,8 +1,8 @@
 // Čistá herní logika bez DOM. Stav je obyčejný JSON objekt (dá se uložit).
 import { key, neighbors, distance } from './hex.js';
-import { generateMap } from './map.js';
+import { generateMap, hasRiverEdge } from './map.js';
 import {
-  TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY, VISION, DIFFICULTY, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, ROAD_COST,
+  TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY, VISION, DIFFICULTY, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, ROAD_COST, RIVER,
   FACTIONS, NO_FACTION, MAP_SIZES,
 } from './rules.js';
 
@@ -92,7 +92,7 @@ function countStat(state, name, player) {
   state.stats[name][player]++;
 }
 
-export const STATE_VERSION = 9;
+export const STATE_VERSION = 10;
 
 // Převede uložený stav starší verze na aktuální; neznámý formát vrátí null.
 export function migrateState(s) {
@@ -132,6 +132,10 @@ export function migrateState(s) {
     s.history = []; // statistiky začnou od načtení
     s.stats = emptyStats();
     s.version = 9;
+  }
+  if (s.version === 9) {
+    // řeky přibyly ve verzi 10 – staré mapy je nemají (tile.rivers chybí = bez řek)
+    s.version = 10;
   }
   return s.version === STATE_VERSION ? s : null;
 }
@@ -316,12 +320,23 @@ export function cityInfo(state, city) {
 export function stepCost(state, from, to, unit = null) {
   const a = tileAt(state, from.q, from.r);
   const b = tileAt(state, to.q, to.r);
-  if (a && b && a.road && b.road) return ROAD_COST;
+  if (a && b && a.road && b.road) return ROAD_COST; // silnice přes řeku = most
+  const river = riverBetween(state, from, to) ? RIVER.crossCost : 0;
   if (unit && b.terrain === 'forest') {
     const fc = factionOf(state, unit.owner).forestCost;
-    if (fc) return fc;
+    if (fc) return fc + river;
   }
-  return TERRAIN[b.terrain].cost;
+  return TERRAIN[b.terrain].cost + river;
+}
+
+// Teče mezi sousedními poli a, b řeka?
+export function riverBetween(state, a, b) {
+  return hasRiverEdge(state.tiles, a, b);
+}
+
+// Bonus obránce napadeného zblízka přes řeku (0, když řeka mezi nimi neteče).
+export function riverDefense(state, attacker, defender) {
+  return distance(attacker, defender) === 1 && riverBetween(state, attacker, defender) ? RIVER.defBonus : 0;
 }
 
 // Prohledá dosažitelná pole (Dijkstra). Vrací ceny i předchůdce, aby šla složit trasa.
@@ -440,7 +455,7 @@ function attackPower(state, unit, target) {
 // Odhad boje bez náhody – používá ho UI i AI.
 export function previewAttack(state, attacker, defender) {
   const atk = attackPower(state, attacker, defender) * hpFactor(attacker);
-  const def = defenseValue(state, defender, attacker);
+  const def = defenseValue(state, defender, attacker) * (1 + riverDefense(state, attacker, defender));
   const damage = Math.max(1, Math.round((4 * atk) / def));
   const defenderHp = Math.max(0, defender.hp - damage);
   let counter = 0;

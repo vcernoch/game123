@@ -236,6 +236,26 @@ try {
   }
   await touchCtx.close();
 
+  // řeky: velká mapa bez mlhy, najetí na pole u řeky ukáže popis v panelu
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.evaluate(() => { window.__game.newGame(4242, { size: 'large', fog: false }); });
+  const riverTile = await page.evaluate(async () => {
+    const rnd = await import('./src/render.js');
+    const st = window.__game.getState();
+    const t = Object.values(st.tiles).find((x) => x.rivers && x.rivers.length
+      && !st.units.some((u) => u.q === x.q && u.r === x.r) && !st.cities.some((c) => c.q === x.q && c.r === x.r));
+    if (!t) return null;
+    const c = rnd.tileCenter(t.q, t.r);
+    const rect = document.getElementById('board').getBoundingClientRect();
+    const k = rect.width / rnd.canvasSize(st).w;
+    return { x: rect.left + c.x * k, y: rect.top + c.y * k };
+  });
+  if (!riverTile) throw new Error('řeky: velká mapa nemá žádnou řeku');
+  await page.mouse.move(riverTile.x, riverTile.y);
+  const riverInfo = await page.textContent('#info');
+  if (!riverInfo.includes('řeka')) throw new Error(`řeky: panel nepopisuje řeku (${riverInfo})`);
+  await page.screenshot({ path: 'artifacts/screenshot-rivers.png' });
+
   if (errors.length) throw new Error(errors.join('\n'));
   console.log(`SMOKE OK – kolo ${turn}, screenshoty v artifacts/`);
 } catch (e) {

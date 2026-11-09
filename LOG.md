@@ -2,6 +2,15 @@
 
 Nejnovější záznam nahoře. Formát: datum – co se udělalo – stav testů – otázky pro Vladimíra.
 
+## 2026-11-09 – Řeky (v0.5.0)
+- **Otázka pro Vladimíra:** Na otázku k víc AI soupeřům zatím nemám odpověď, tak na tom nepracuji. Další bod roadmapy „Kampaň nebo scénáře s cíli“ by zavedl jiné cíle než dobytí všech měst (např. „ubraň město 15 kol“), tedy změnu pravidel vítězství – smím přidat scénáře s vlastními cíli jako samostatný režim vedle klasické hry? Do odpovědi pracuji na vlastních vylepšeních (zapsaných v roadmapě).
+- Řeky tečou po hranách hexů (`tile.rivers` = směry k sousedům, uložené souměrně na obou polích). Generátor (`buildRivers` v `map.js`) pustí řeku z kopců/hor „z kopce“ podle výškového pole po hranách, dokud nedojde do vody, na okraj, do jiné řeky nebo na max. délku. Počet: 1 řeka na ~70 polí (malá 1, střední 2, velká 4). Řeky mají vlastní RNG, takže terén, města i silnice zůstaly pro všechny seedy stejné.
+- `RIVER` v `rules.js`: přechod +1 bod pohybu (`stepCost`), silnice na obou stranách = most bez přirážky. Jednotka napadená zblízka přes řeku má +25 % obrany (`riverDefense`, jen napadený, ne protiúder). AI to bere v úvahu automaticky přes `reachable` a `previewAttack`.
+- Kreslení: modrá dvojitá čára po hraně, na silnici dřevěný most; v mlze ztmavená. Panel u pole s řekou ukáže pravidla, náhled útoku píše „Útok přes řeku“. Nápověda „Jak hrát“ doplněna.
+- Struktura stavu: `state.version` 10, staré mapy se načtou bez řek.
+- Testy: +2 logické (řeky souměrné, ne po vodě, deterministické, dost jich na všech velikostech; cena přechodu, most, bonus obránce, dosah, migrace). Smoke test najede na velké mapě na pole s řekou, ověří popis a uloží `artifacts/screenshot-rivers.png`.
+- Stav: `npm run check` zelený (37 logických testů + smoke).
+
 ## 2026-11-08 – Shrnutí dlouhého běhu → v0.4.0
 - **Otázka pro Vladimíra:** Další úkol v roadmapě je „Více AI soupeřů“. Je to velká přestavba (všude se počítá se dvěma hráči) a mění pravidla vítězství: místo „AI přijde o všechna města“ by platilo „všichni soupeři přijdou o všechna města“. Mají AI bojovat i mezi sebou, nebo jen proti tobě? Do tvé odpovědi na tom nepracuji (RULES.md: změny pravidel vítězství).
 - Na žádost o „hodně delší běh“ jsem udělal 10 úkolů místo obvyklých max. 3, každý zvlášť otestovaný a commitnutý: obtížnost AI, dotykové ovládání, budovy, zkušenosti, kopiník a katapult, silnice, lepší AI, frakce, hlavní menu s velikostí mapy, zvuky, statistiky. Fáze 1 a 2 jsou hotové, ve fázi 3 zbývá víc AI soupeřů a kampaň.
