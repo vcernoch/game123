@@ -283,6 +283,28 @@ try {
   await page.keyboard.press('Escape');
   if (await page.evaluate(() => document.getElementById('keys-dialog').open)) throw new Error('Esc did not close the shortcuts');
 
+  // key 6 recruits a scout; its symbol is drawn and it never enters a foreign city
+  await page.evaluate(() => {
+    const st = window.__game.getState();
+    const c = st.cities.find((x) => x.owner === 0 && x.capital);
+    st.units = st.units.filter((u) => u.q !== c.q || u.r !== c.r);
+    window.__game.refresh();
+  });
+  await page.mouse.click(capPt.x, capPt.y);
+  await page.keyboard.press('6');
+  await page.waitForFunction(() => !window.__game.isBusy(), null, { timeout: 5000 });
+  const scout = await page.evaluate(() => {
+    const st = window.__game.getState();
+    const c = st.cities.find((x) => x.owner === 0 && x.capital);
+    const u = st.units.find((x) => x.q === c.q && x.r === c.r);
+    return u && u.type;
+  });
+  if (scout !== 'scout') throw new Error(`key 6 did not recruit a scout: ${scout}`);
+  const scoutTitle = await page.getAttribute('#info button[data-buy="scout"]', 'title');
+  if (!scoutTitle || !scoutTitle.includes('cannot capture cities')) throw new Error(`scout button title: ${scoutTitle}`);
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.screenshot({ path: 'artifacts/screenshot-scout.png' });
+
   // sound toggle
   await page.click('#sound');
   if ((await page.getAttribute('#sound', 'aria-pressed')) !== 'false') throw new Error('sound cannot be turned off');

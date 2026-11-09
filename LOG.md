@@ -2,6 +2,14 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-09 – Scout
+- New unit **Scout** (`Sc`, 8 gold): HP 6, attack 1, defense 1, move 3, sight 4. It can't capture: `noCapture` in `UNIT_TYPES`, `cityForbidden()` in `game.js` keeps it out of every foreign (enemy or neutral) city – `searchMoves` doesn't step into or through one, `planRoute` neither, so reach, paths, move orders and the threat overlay all follow automatically. Its own cities are fine.
+- It is the 6th unit, so recruit keys 1–5 stay the same and key 6 recruits a scout (the shortcut table and the buttons are generated from `rules.js`). Help text updated.
+- AI: wants exactly one scout while more than `SCOUT_WHEN_UNKNOWN` (100) passable tiles are still unexplored – in practice on Large maps on Easy/Normal, never on Hard (it sees everything). A scout's goals are only unexplored tiles; the danger logic treats it as fragile like an archer. Measured (new vs. previous AI, both sides of every seed): Medium 97 : 97 (100 seeds), Large 41 : 37 (40 seeds). A version that also scouted on Medium (share-based threshold) was slightly worse there (93 : 103), so it was dropped.
+- No state structure change (a new unit type only).
+- Tests: +1 logic (move 3 and sight 4, no entry or passage through a neutral city while a warrior still captures, own city allowed, the AI wants one scout on a large unknown map and only explores with it, not a second one, Hard knows everything). Smoke test recruits a scout with key 6 and checks the button description (`artifacts/screenshot-scout.png`).
+- Status: `npm run check` green (59 logic tests + smoke).
+
 ## 2026-11-09 – AI weighs danger
 - `dangerMap(state, me, know)` in `ai.js`: the threat map (`threatTiles`) seen from the AI's side – how many visible enemies could strike each tile next turn. Computed lazily once per AI turn and recomputed only after an enemy unit falls. `threatTiles` now takes an optional `know` ({ sees, knows }) so the AI can use its own knowledge (Hard sees everything, Normal/Easy respect the fog); the overlay still uses the player's view.
 - `dangerPenalty` (weights in `DANGER`): archers and catapults fear any attacker, melee units only a second and further one (a pile-on), wounded units more, and a unit in an own city fears nothing. Used when the AI advances (`moveTowardsGoal`), retreats and picks the tile it strikes from (`planStrike`).

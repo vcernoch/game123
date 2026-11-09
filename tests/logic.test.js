@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  createGame, reachable, moveUnit, attack, buyUnit, endTurn, unitAt, isPassable,
+  createGame, spawnUnit, updateExplored, reachable, moveUnit, attack, buyUnit, endTurn, unitAt, isPassable,
   previewAttack, cloneState, pathTo, nextActiveUnit, tileAt, cityInfo, incomeOf, defenseValue,
   drainEvents, applyEvent, migrateState, STATE_VERSION,
   visibleTiles, exploredTiles, build, unitCost, rankOf, stepCost, getUnit,
@@ -11,7 +11,7 @@ import {
 } from '../src/game.js';
 import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
-  dangerMap, dangerPenalty, moveTowardsGoal, DANGER,
+  dangerMap, dangerPenalty, moveTowardsGoal, DANGER, unexploredLand, SCOUT_WHEN_UNKNOWN, aiKnowledge,
 } from '../src/ai.js';
 import { decideTap } from '../src/input.js';
 import { SHORTCUTS, keyAction, recruitKey } from '../src/keys.js';
@@ -1521,4 +1521,56 @@ test('AI danger: archers keep out of reach, melee units avoid pile-ons, the map 
   // fog: the AI on Normal fears only enemies it can see
   const f = createGame({ seed: 3, fog: true });
   assert.equal(dangerMap(f, 1).get().size, 0, 'at the start the player is out of sight');
+});
+
+test('scout: sees far, never enters a foreign city, the AI sends one exploring on big maps', () => {
+  const s = createGame({ seed: 3, fog: true });
+  for (const t of Object.values(s.tiles)) { t.terrain = 'plains'; delete t.road; delete t.rivers; delete t.resource; }
+  s.factions = [null, null];
+  s.units = [];
+  const neutral = s.cities.find((c) => c.owner === null);
+  const home = s.cities.find((c) => c.owner === 0);
+  const sc = spawnUnit(s, 'scout', 0, neutral.q + 1, neutral.r);
+  sc.movesLeft = unitMove(s, sc);
+  assert.equal(sc.movesLeft, 3);
+  // sight 4
+  const vis = visibleTiles(s, 0);
+  for (const t of Object.values(s.tiles)) {
+    if (distance(t, sc) <= 4) assert.ok(vis.has(key(t.q, t.r)), `sees ${t.q},${t.r}`);
+  }
+  // a foreign (here neutral) city is neither a destination nor a passage
+  assert.ok(!reachable(s, sc).has(key(neutral.q, neutral.r)));
+  assert.equal(moveUnit(s, sc.id, neutral.q, neutral.r), false);
+  updateExplored(s, 0);
+  assert.equal(planRoute(s, sc, neutral.q, neutral.r), null);
+  const far = { q: neutral.q - 2, r: neutral.r };
+  const p = pathTo(s, sc, far.q, far.r);
+  if (p) assert.ok(!p.some((h) => h.q === neutral.q && h.r === neutral.r), 'walks around the city');
+  // other units capture as before, and the scout may enter its own city
+  const w = spawnUnit(s, 'warrior', 0, neutral.q - 1, neutral.r);
+  w.movesLeft = 2;
+  assert.ok(reachable(s, w).has(key(neutral.q, neutral.r)));
+  const own = spawnUnit(s, 'scout', 0, home.q + 1, home.r);
+  own.movesLeft = 3;
+  assert.ok(reachable(s, own).has(key(home.q, home.r)));
+  // AI: on a large unexplored map it wants one scout, which only explores; not on Hard, not a second one
+  const big = createGame({ seed: 5, size: 'large' });
+  big.current = 1;
+  const know = aiKnowledge(big, 1);
+  assert.ok(unexploredLand(big, know) > SCOUT_WHEN_UNKNOWN);
+  const capital = big.cities.find((c) => c.owner === 1);
+  big.units = big.units.filter((u) => !(u.q === capital.q && u.r === capital.r));
+  big.gold[1] = 100;
+  // an army that already has its fill of every other type (only the count matters here)
+  const army = ['warrior', 'warrior', 'warrior', 'archer', 'archer', 'horseman', 'horseman', 'spearman'];
+  const spots = [...exploredTiles(big, 1)].map((k) => k.split(',').map(Number))
+    .filter(([q, r]) => isPassable(big, q, r) && !unitAt(big, q, r) && !(q === capital.q && r === capital.r));
+  big.units = big.units.filter((u) => u.owner === 0)
+    .concat(army.map((type, i) => ({ id: 900 + i, type, owner: 1, q: spots[i][0], r: spots[i][1], hp: 1, movesLeft: 0, xp: 0 })));
+  assert.equal(pickRecruit(big, 1, capital), 'scout');
+  const scout = spawnUnit(big, 'scout', 1, capital.q, capital.r);
+  assert.ok(goalsFor(big, scout).every((g) => g.explore), 'scouts only explore');
+  assert.notEqual(pickRecruit(big, 1, capital), 'scout', 'one is enough');
+  const hard = createGame({ seed: 5, size: 'large', difficulty: 'hard' });
+  assert.equal(unexploredLand(hard, aiKnowledge(hard, 1)), 0);
 });

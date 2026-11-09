@@ -57,7 +57,7 @@ Check off `[x]` when done. Add new ideas to the end of the relevant phase or to 
 
 ## Phase 7 – smarter AI and new content (own improvements)
 - [x] AI weighs danger: archers and catapults keep out of enemy reach, melee units avoid pile-ons, strikes are made from safer tiles
-- [ ] Scout: a cheap, fast unit that sees far but cannot capture cities; the AI recruits one to explore in the fog
+- [x] Scout: a cheap, fast unit that sees far but cannot capture cities; the AI recruits one to explore in the fog
 - [ ] Map seed: the new game dialog shows and accepts a map number, "Same map again" restarts the current map
 
 ## Ideas (unordered)

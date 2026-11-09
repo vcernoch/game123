@@ -18,6 +18,9 @@ export const UNIT_TYPES = {
   // siege: bonus against units in cities, ignores walls
   catapult: { name: 'Catapult',  symbol: 'C', hp: 7,  atk: 6, def: 1, move: 1, range: 2, cost: 20, sight: 2,
     siege: 0.5, desc: '+50 % against city garrisons, ignores walls' },
+  // noCapture: cannot enter foreign (enemy or neutral) cities, so it can't capture them
+  scout:    { name: 'Scout',     symbol: 'Sc', hp: 6, atk: 1, def: 1, move: 3, range: 1, cost: 8,  sight: 4,
+    noCapture: true, desc: 'sees 4 tiles far, cannot capture cities' },
 };
 
 export const PLAYERS = [

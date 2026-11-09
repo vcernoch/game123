@@ -305,6 +305,13 @@ export function isFree(state, q, r) {
   return isPassable(state, q, r) && !unitAt(state, q, r);
 }
 
+// Units that can't capture (scouts) never step into a foreign city – neither to stop nor to pass through.
+export function cityForbidden(state, unit, q, r) {
+  if (!UNIT_TYPES[unit.type].noCapture) return false;
+  const city = cityAt(state, q, r);
+  return !!city && city.owner !== unit.owner;
+}
+
 export const CITY_DEF_BONUS = 0.25;
 
 export const hasBuilding = (city, b) => !!city.buildings && city.buildings.includes(b);
@@ -438,7 +445,7 @@ function searchMoves(state, unit) {
     if (key(cur.q, cur.r) !== start && zoc.has(key(cur.q, cur.r))) continue;
     for (const n of neighbors(cur.q, cur.r)) {
       const t = tileAt(state, n.q, n.r);
-      if (!t || !TERRAIN[t.terrain].passable) continue;
+      if (!t || !TERRAIN[t.terrain].passable || cityForbidden(state, unit, n.q, n.r)) continue;
       const other = unitAt(state, n.q, n.r);
       if (other && other.owner !== unit.owner) continue;
       // entering cost-2 terrain is allowed with 1 point left if it's the first step
@@ -536,6 +543,7 @@ export function planRoute(state, unit, q, r) {
     return o && o.owner !== unit.owner && visible.has(key(tq, tr));
   };
   if (!explored.has(target) || !isPassable(state, q, r) || (unit.q === q && unit.r === r)) return null;
+  if (cityForbidden(state, unit, q, r)) return null;
   const occupant = unitAt(state, q, r);
   if (occupant && (occupant.owner === unit.owner || visible.has(target))) return null;
   const best = new Map([[key(unit.q, unit.r), 0]]);
@@ -547,7 +555,7 @@ export function planRoute(state, unit, q, r) {
     if (key(cur.q, cur.r) === target) break;
     for (const n of neighbors(cur.q, cur.r)) {
       const k = key(n.q, n.r);
-      if (!explored.has(k) || !isPassable(state, n.q, n.r) || blocked(n.q, n.r)) continue;
+      if (!explored.has(k) || !isPassable(state, n.q, n.r) || blocked(n.q, n.r) || cityForbidden(state, unit, n.q, n.r)) continue;
       const cost = cur.cost + stepCost(state, cur, n, unit);
       if (best.has(k) && best.get(k) <= cost) continue;
       best.set(k, cost);

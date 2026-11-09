@@ -144,10 +144,10 @@ export function dangerPenalty(state, unit, q, r, attackers) {
   const type = UNIT_TYPES[unit.type];
   const city = cityAt(state, q, r);
   if (city && city.owner === unit.owner) return 0;
-  const fragile = type.range > 1 ? DANGER.ranged : DANGER.melee;
+  const fragile = type.range > 1 || type.noCapture ? DANGER.ranged : DANGER.melee;
   const hurt = 1 + (1 - unit.hp / type.hp);
   // one attacker is a fair fight for melee units; each extra one is a pile-on
-  const extra = type.range > 1 ? attackers : attackers - 1;
+  const extra = type.range > 1 || type.noCapture ? attackers : attackers - 1;
   return extra > 0 ? extra * fragile * hurt : 0;
 }
 export const DANGER = { ranged: 1.2, melee: 0.6, strike: 1 };
@@ -239,18 +239,26 @@ function tryBestAttack(state, unit, { safeOnly = false } = {}) {
 }
 
 // Movement goals: known foreign cities and visible enemies. If there are none, the AI explores.
+// Scouts can't capture, so they only ever explore (and stay put once everything is known).
 export function goalsFor(state, unit, know = aiKnowledge(state, unit.owner)) {
   const goals = [];
+  if (UNIT_TYPES[unit.type].noCapture) return exploreGoals(state, know);
   for (const c of state.cities) {
     if (c.owner !== unit.owner && know.knows(c.q, c.r)) goals.push({ q: c.q, r: c.r, w: c.owner === null ? 1 : 1.3 });
   }
   for (const u of state.units) if (u.owner !== unit.owner && know.sees(u.q, u.r)) goals.push({ q: u.q, r: u.r, w: 1.1, enemy: true });
-  if (!goals.length) {
-    for (const t of Object.values(state.tiles)) {
-      if (!know.knows(t.q, t.r) && TERRAIN[t.terrain].passable) goals.push({ q: t.q, r: t.r, w: 0.8, explore: true });
-    }
-  }
-  return goals;
+  return goals.length ? goals : exploreGoals(state, know);
+}
+
+function exploreGoals(state, know) {
+  return Object.values(state.tiles)
+    .filter((t) => !know.knows(t.q, t.r) && TERRAIN[t.terrain].passable)
+    .map((t) => ({ q: t.q, r: t.r, w: 0.8, explore: true }));
+}
+
+// Number of passable tiles the AI hasn't explored yet (0 when it sees everything).
+export function unexploredLand(state, know) {
+  return Object.values(state.tiles).filter((t) => TERRAIN[t.terrain].passable && !know.knows(t.q, t.r)).length;
 }
 
 export function moveTowardsGoal(state, unit, danger = new Map()) {
@@ -297,12 +305,16 @@ function evalPos(state, unit, q, r, goals, range, know) {
   return score;
 }
 
+export const SCOUT_WHEN_UNKNOWN = 100; // unexplored passable tiles
+
 // Which unit the AI wants: tops up the army toward a target type ratio.
 // If it sees enemy horsemen it wants more spearmen; catapults only from turn 8.
 export function pickRecruit(state, me, city) {
   const know = aiKnowledge(state, me);
   const enemyHorse = state.units.filter((u) => u.owner !== me && u.type === 'horseman' && know.sees(u.q, u.r)).length;
-  const ratio = { warrior: 3, archer: 2, horseman: 2, spearman: 1 + 2 * enemyHorse, catapult: state.turn >= 8 ? 1 : 0 };
+  // one scout while a lot of land is still unknown – on big maps (never on Hard, which sees everything)
+  const scout = unexploredLand(state, know) > SCOUT_WHEN_UNKNOWN ? 1 : 0;
+  const ratio = { warrior: 3, archer: 2, horseman: 2, spearman: 1 + 2 * enemyHorse, catapult: state.turn >= 8 ? 1 : 0, scout };
   // own faction's strengths: wants more of the discounted units
   const favored = factionOf(state, me).unitDiscount || {};
   for (const type of Object.keys(favored)) ratio[type] += 2;
@@ -313,6 +325,7 @@ export function pickRecruit(state, me, city) {
   let bestWant = 0;
   for (const [type, want] of Object.entries(ratio)) {
     if (!want || state.gold[me] < unitCost(state, city, type)) continue;
+    if (type === 'scout' && count.scout) continue; // one is enough
     const need = (count[type] || 0) / want;
     // on a tie, the type we want more of wins
     if (need < bestNeed || (need === bestNeed && want > bestWant)) { bestNeed = need; best = type; bestWant = want; }
