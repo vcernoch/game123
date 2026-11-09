@@ -1,4 +1,4 @@
-// Verze hry zobrazená v záhlaví. Musí souhlasit s "version" v package.json (hlídá to test).
-// Zvyšuj ji v každém vývojovém běhu: nové funkce = druhé číslo, opravy = třetí číslo.
-export const GAME_VERSION = '0.7.0';
+// Game version shown in the header. Must match "version" in package.json (checked by a test).
+// Bump it in every development run: new features = second number, fixes = third number.
+export const GAME_VERSION = '0.8.0';
 export const GAME_DATE = '2026-11-09';

@@ -22,7 +22,7 @@ import {
   UNIT_TYPES, TERRAIN, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS,
 } from '../src/rules.js';
 
-test('mapa je deterministická a startovní města jsou propojená', () => {
+test('map is deterministic and starting cities are connected', () => {
   for (const seed of [1, 2, 3, 42, 999]) {
     const a = createGame({ seed });
     const b = createGame({ seed });
@@ -33,14 +33,14 @@ test('mapa je deterministická a startovní města jsou propojená', () => {
   }
 });
 
-test('každá strana začíná se dvěma jednotkami a hráč může táhnout', () => {
+test('each side starts with two units and the player can move', () => {
   const s = createGame({ seed: 5 });
   assert.equal(s.units.filter((u) => u.owner === 0).length, 2);
   assert.equal(s.units.filter((u) => u.owner === 1).length, 2);
   for (const u of s.units.filter((x) => x.owner === 0)) assert.ok(reachable(s, u).size > 0);
 });
 
-test('pohyb nepřekročí body pohybu a nevstoupí na neprůchodné pole', () => {
+test('movement does not exceed move points or enter impassable tiles', () => {
   const s = createGame({ seed: 7 });
   const u = s.units.find((x) => x.owner === 0);
   for (const [k, cost] of reachable(s, u)) {
@@ -56,11 +56,11 @@ test('pohyb nepřekročí body pohybu a nevstoupí na neprůchodné pole', () =>
   assert.ok(!moveUnit(s, u.id, 999, 999));
 });
 
-test('útok ubírá životy a zničená jednotka zmizí', () => {
+test('attack reduces HP and a destroyed unit disappears', () => {
   const s = createGame({ seed: 11 });
   const a = s.units.find((x) => x.owner === 0 && x.type === 'warrior');
   const d = s.units.find((x) => x.owner === 1);
-  // přesuneme obránce vedle útočníka na průchodné pole
+  // move the defender next to the attacker onto a passable tile
   const spot = Object.values(s.tiles).find(
     (t) => distance(t, a) === 1 && isPassable(s, t.q, t.r) && !unitAt(s, t.q, t.r),
   );
@@ -71,14 +71,14 @@ test('útok ubírá životy a zničená jednotka zmizí', () => {
   assert.ok(attack(s, a.id, d.id));
   if (p.kills) assert.ok(!s.units.includes(d));
   else assert.equal(d.hp, before - p.damage);
-  assert.ok(!attack(s, a.id, d.id), 'druhý útok ve stejném tahu nejde');
+  assert.ok(!attack(s, a.id, d.id), 'no second attack in the same turn');
 });
 
-test('verbování stojí zlato a vyžaduje volné město', () => {
+test('recruiting costs gold and requires a free city', () => {
   const s = createGame({ seed: 3 });
   const city = s.cities.find((c) => c.owner === 0);
   const u = unitAt(s, city.q, city.r);
-  assert.ok(!buyUnit(s, city.id, 'warrior'), 'město je obsazené');
+  assert.ok(!buyUnit(s, city.id, 'warrior'), 'the city is occupied');
   const [k] = reachable(s, u).keys();
   const [q, r] = k.split(',').map(Number);
   moveUnit(s, u.id, q, r);
@@ -87,7 +87,7 @@ test('verbování stojí zlato a vyžaduje volné město', () => {
   assert.equal(s.gold[0], gold - UNIT_TYPES.warrior.cost);
 });
 
-test('konec tahu dá příjem a obnoví pohyb', () => {
+test('ending the turn gives income and restores movement', () => {
   const s = createGame({ seed: 4 });
   const gold1 = s.gold[1];
   endTurn(s);
@@ -98,7 +98,7 @@ test('konec tahu dá příjem a obnoví pohyb', () => {
   assert.equal(s.turn, 2);
 });
 
-test('AI vs AI odehraje 120 kol bez chyby a bez porušení pravidel', () => {
+test('AI vs AI plays 120 turns without errors or rule violations', () => {
   let finished = 0;
   for (const seed of [1, 2, 3, 4, 5, 6]) {
     const s = createGame({ seed });
@@ -108,7 +108,7 @@ test('AI vs AI odehraje 120 kol bez chyby a bez porušení pravidel', () => {
       const seen = new Set();
       for (const u of s.units) {
         const k = key(u.q, u.r);
-        assert.ok(!seen.has(k), `dvě jednotky na ${k} (seed ${seed})`);
+        assert.ok(!seen.has(k), `two units on ${k} (seed ${seed})`);
         seen.add(k);
         assert.ok(isPassable(s, u.q, u.r));
         assert.ok(u.hp > 0);
@@ -118,10 +118,10 @@ test('AI vs AI odehraje 120 kol bez chyby a bez porušení pravidel', () => {
     if (s.winner !== null) finished++;
     JSON.parse(JSON.stringify(cloneState(s)));
   }
-  assert.ok(finished >= 1, 'aspoň jedna hra AI vs AI by měla skončit');
+  assert.ok(finished >= 1, 'at least one AI vs AI game should finish');
 });
 
-test('trasa vede po sousedních polích a její cena odpovídá dosahu', () => {
+test('path runs over neighboring tiles and its cost matches reachability', () => {
   for (const seed of [3, 7, 11, 21]) {
     const s = createGame({ seed });
     for (const u of s.units.filter((x) => x.owner === 0)) {
@@ -129,7 +129,7 @@ test('trasa vede po sousedních polích a její cena odpovídá dosahu', () => {
       for (const [k, cost] of reach) {
         const [q, r] = k.split(',').map(Number);
         const path = pathTo(s, u, q, r);
-        assert.ok(path, `trasa na ${k}`);
+        assert.ok(path, `path to ${k}`);
         assert.deepEqual(path[0], { q: u.q, r: u.r });
         assert.deepEqual(path[path.length - 1], { q, r });
         let sum = 0;
@@ -138,7 +138,7 @@ test('trasa vede po sousedních polích a její cena odpovídá dosahu', () => {
           assert.ok(isPassable(s, path[i].q, path[i].r));
           sum += stepCost(s, path[i - 1], path[i], u);
         }
-        // cena je buď součet terénu, nebo zkrácená na zbývající body (velký první krok)
+        // the cost is either the terrain sum, or capped to the remaining points (big first step)
         assert.ok(cost === sum || (path.length === 2 && cost === u.movesLeft), `seed ${seed} ${k}`);
       }
       assert.equal(pathTo(s, u, u.q, u.r), null);
@@ -146,7 +146,7 @@ test('trasa vede po sousedních polích a její cena odpovídá dosahu', () => {
   }
 });
 
-test('Tab vybírá cyklicky jednotky, které ještě mohou jednat', () => {
+test('Tab cycles through units that can still act', () => {
   const s = createGame({ seed: 5 });
   const [a, b] = s.units.filter((u) => u.owner === 0).sort((x, y) => x.id - y.id);
   assert.equal(nextActiveUnit(s, 0).id, a.id);
@@ -160,14 +160,14 @@ test('Tab vybírá cyklicky jednotky, které ještě mohou jednat', () => {
   assert.equal(nextActiveUnit(s, 0), null);
 });
 
-test('informace o městě souhlasí s příjmem a obranou', () => {
+test('city info matches income and defense', () => {
   const s = createGame({ seed: 9 });
   const sum = s.cities.filter((c) => c.owner === 0).reduce((a, c) => a + cityInfo(s, c).income, 0);
   assert.equal(sum, incomeOf(s, 0));
   const capital = s.cities.find((c) => c.owner === 0 && c.capital);
   const info = cityInfo(s, capital);
   const u = unitAt(s, capital.q, capital.r);
-  assert.ok(u && u.owner === 0, 'v hlavním městě stojí vlastní jednotka');
+  assert.ok(u && u.owner === 0, 'an own unit stands in the capital');
   assert.equal(info.garrison.id, u.id);
   const mult = defenseValue(s, u) / UNIT_TYPES[u.type].def;
   assert.equal(Math.round((mult - 1) * 100), info.defensePct);
@@ -175,13 +175,13 @@ test('informace o městě souhlasí s příjmem a obranou', () => {
   assert.equal(cityInfo(s, neutral).garrison, null);
 });
 
-// shrnutí, které musí po přehrání událostí sedět
+// summary that must match after replaying events
 const snapshot = (s) => ({
   units: s.units.map((u) => [u.id, u.type, u.owner, u.q, u.r, u.hp, u.xp]).sort((a, b) => a[0] - b[0]),
   cities: s.cities.map((c) => [c.id, c.owner]),
 });
 
-test('přehrání událostí AI tahu dá stejný stav jako skutečný tah', () => {
+test('replaying AI turn events gives the same state as the real turn', () => {
   for (const seed of [1, 4, 8, 15]) {
     const s = createGame({ seed });
     let checkedAttack = false;
@@ -196,11 +196,11 @@ test('přehrání událostí AI tahu dá stejný stav jako skutečný tah', () =
       assert.doesNotThrow(() => JSON.stringify(evs));
       endTurn(s);
     }
-    assert.ok(checkedAttack, `seed ${seed}: v simulaci žádný útok`);
+    assert.ok(checkedAttack, `seed ${seed}: no attack in the simulation`);
   }
 });
 
-test('pohyb zapisuje trasu do události a stav zůstává serializovatelný', () => {
+test('movement records the path in the event and the state stays serializable', () => {
   const s = createGame({ seed: 7 });
   assert.equal(s.version, STATE_VERSION);
   assert.deepEqual(s.events, []);
@@ -215,19 +215,19 @@ test('pohyb zapisuje trasu do události a stav zůstává serializovatelný', ()
   assert.deepEqual(JSON.parse(JSON.stringify(s)), s);
 });
 
-test('starý uložený stav (verze 1) se převede, neznámý se zahodí', () => {
+test('old saved state (version 1) is migrated, unknown is discarded', () => {
   const old = createGame({ seed: 2 });
   old.version = 1;
   delete old.events;
   const m = migrateState(old);
   assert.equal(m.version, STATE_VERSION);
   assert.deepEqual(m.events, []);
-  assert.ok(m.fog && m.explored[0].length > 0, 'migrace dopočítá prozkoumaná pole');
+  assert.ok(m.fog && m.explored[0].length > 0, 'migration computes explored tiles');
   assert.equal(migrateState({ version: 99 }), null);
   assert.equal(migrateState(null), null);
 });
 
-test('mlha války: vidíš okolí svých jednotek a měst, prozkoumané se pamatuje', () => {
+test('fog of war: you see around your units and cities, explored tiles are remembered', () => {
   const s = createGame({ seed: 6 });
   const vis = visibleTiles(s, 0);
   for (const u of s.units.filter((x) => x.owner === 0)) {
@@ -235,14 +235,14 @@ test('mlha války: vidíš okolí svých jednotek a měst, prozkoumané se pamat
     const sight = UNIT_TYPES[u.type].sight;
     for (const k of Object.keys(s.tiles)) {
       const [q, r] = k.split(',').map(Number);
-      if (distance(u, { q, r }) <= sight) assert.ok(vis.has(k), `pole ${k} v dohledu`);
+      if (distance(u, { q, r }) <= sight) assert.ok(vis.has(k), `tile ${k} in sight`);
     }
   }
-  // nepřátelské hlavní město je na začátku daleko a nevidíš ho
+  // the enemy capital is far away at the start and you can't see it
   const enemyCap = s.cities.find((c) => c.owner === 1 && c.capital);
   assert.ok(!vis.has(key(enemyCap.q, enemyCap.r)));
   assert.ok(vis.size < Object.keys(s.tiles).length);
-  // prozkoumané ⊇ viditelné a po pohybu neubývá
+  // explored ⊇ visible and doesn't shrink after moving
   const before = exploredTiles(s, 0);
   for (const k of vis) assert.ok(before.has(k));
   const u = s.units.find((x) => x.owner === 0);
@@ -255,41 +255,41 @@ test('mlha války: vidíš okolí svých jednotek a měst, prozkoumané se pamat
   const after = exploredTiles(s, 0);
   for (const k of before) assert.ok(after.has(k));
   assert.ok(after.size >= before.size);
-  // bez mlhy nebo po konci hry je vidět všechno
+  // without fog or after game over everything is visible
   const open = createGame({ seed: 6, fog: false });
   assert.equal(visibleTiles(open, 0).size, Object.keys(open.tiles).length);
   s.winner = 0;
   assert.equal(visibleTiles(s, 0).size, Object.keys(s.tiles).length);
 });
 
-test('verze hry souhlasí s package.json a má platný formát', () => {
+test('game version matches package.json and has a valid format', () => {
   const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
   assert.equal(GAME_VERSION, pkg.version);
   assert.match(GAME_VERSION, /^\d+\.\d+\.\d+$/);
   assert.match(GAME_DATE, /^\d{4}-\d{2}-\d{2}$/);
 });
 
-test('obtížnost: AI na normální nevidí přes mlhu, na těžké ano a má víc zlata', () => {
+test('difficulty: normal AI cannot see through fog, hard AI can and has more gold', () => {
   const normal = createGame({ seed: 4 });
   const hard = createGame({ seed: 4, difficulty: 'hard' });
   const easy = createGame({ seed: 4, difficulty: 'easy' });
   assert.equal(normal.difficulty, 'normal');
   assert.equal(createGame({ seed: 4, difficulty: 'nesmysl' }).difficulty, 'normal');
   assert.ok(hard.gold[1] > normal.gold[1] && normal.gold[1] > easy.gold[1]);
-  assert.equal(hard.gold[0], easy.gold[0], 'hráč má vždy stejné startovní zlato');
+  assert.equal(hard.gold[0], easy.gold[0], 'the player always has the same starting gold');
   assert.ok(incomeOf(hard, 1) > incomeOf(normal, 1) && incomeOf(normal, 1) > incomeOf(easy, 1));
   assert.equal(incomeOf(hard, 0), incomeOf(easy, 0));
 
   const myCap = normal.cities.find((c) => c.owner === 0 && c.capital);
   const aiUnit = normal.units.find((u) => u.owner === 1);
   const goalsN = goalsFor(normal, aiUnit);
-  assert.ok(!goalsN.some((g) => g.q === myCap.q && g.r === myCap.r && !g.explore), 'normální AI nezná hráčovo hlavní město');
-  assert.ok(goalsN.every((g) => g.explore), 'na začátku normální AI jen průzkumničí');
+  assert.ok(!goalsN.some((g) => g.q === myCap.q && g.r === myCap.r && !g.explore), 'normal AI does not know the player capital');
+  assert.ok(goalsN.every((g) => g.explore), 'at the start normal AI only explores');
   const aiUnitH = hard.units.find((u) => u.owner === 1);
-  assert.ok(goalsFor(hard, aiUnitH).some((g) => g.q === myCap.q && g.r === myCap.r), 'těžká AI vidí vše');
+  assert.ok(goalsFor(hard, aiUnitH).some((g) => g.q === myCap.q && g.r === myCap.r), 'hard AI sees everything');
 });
 
-test('obtížnost má znát: těžká AI si vede lépe než snadná', () => {
+test('difficulty matters: hard AI does better than easy', () => {
   const score = (difficulty) => {
     let total = 0;
     for (const seed of [11, 12, 13, 14, 15, 16]) {
@@ -301,36 +301,36 @@ test('obtížnost má znát: těžká AI si vede lépe než snadná', () => {
   };
   const easy = score('easy');
   const hard = score('hard');
-  assert.ok(hard > easy, `těžká ${hard} > snadná ${easy}`);
+  assert.ok(hard > easy, `hard ${hard} > easy ${easy}`);
 });
 
-test('dotyk: první klepnutí ukáže náhled, druhé na stejné pole provede akci', () => {
+test('touch: first tap shows a preview, second tap on the same tile performs the action', () => {
   const s = createGame({ seed: 7 });
   const u = s.units.find((x) => x.owner === 0);
   const [k] = reachable(s, u).keys();
   const [q, r] = k.split(',').map(Number);
-  // myš: rovnou pohyb
+  // mouse: move right away
   assert.deepEqual(decideTap(s, { selectedId: u.id }, q, r), { type: 'move', unitId: u.id, q, r });
-  // dotyk: nejdřív náhled, pak pohyb
+  // touch: preview first, then move
   const first = decideTap(s, { selectedId: u.id, confirm: true }, q, r);
   assert.equal(first.type, 'preview');
   assert.equal(first.kind, 'move');
   const second = decideTap(s, { selectedId: u.id, confirm: true, pending: { q: first.q, r: first.r } }, q, r);
   assert.equal(second.type, 'move');
-  // klepnutí jinam náhled zruší (výběr), klepnutí mimo mapu nic
+  // tapping elsewhere cancels the preview (select), tapping off the map does nothing
   const elsewhere = decideTap(s, { selectedId: u.id, confirm: true, pending: { q, r } }, u.q, u.r);
   assert.equal(elsewhere.type, 'select');
   assert.equal(elsewhere.unitId, u.id);
   assert.equal(decideTap(s, { selectedId: u.id }, 999, 999).type, 'none');
 });
 
-test('dotyk: útok potřebuje potvrzení a skrytou jednotku v mlze nejde vybrat', () => {
+test('touch: attack needs confirmation and a unit hidden in fog cannot be selected', () => {
   const s = createGame({ seed: 7 });
   const u = s.units.find((x) => x.owner === 0);
   const enemy = s.units.find((x) => x.owner === 1);
-  // nepřítel daleko v mlze: klepnutí na něj ho nevybere
+  // enemy far away in fog: tapping it does not select it
   assert.equal(decideTap(s, { selectedId: null }, enemy.q, enemy.r).unitId, null);
-  // přesuneme nepřítele vedle naší jednotky (pole volné a průchozí)
+  // move the enemy next to our unit (tile free and passable)
   const spot = neighbors(u.q, u.r).find((n) => isPassable(s, n.q, n.r) && !unitAt(s, n.q, n.r));
   enemy.q = spot.q;
   enemy.r = spot.r;
@@ -342,7 +342,7 @@ test('dotyk: útok potřebuje potvrzení a skrytou jednotku v mlze nejde vybrat'
   assert.deepEqual(second, { type: 'attack', unitId: u.id, targetId: enemy.id });
 });
 
-test('budovy: stojí zlato, nejdou postavit dvakrát a mají účinek', () => {
+test('buildings: cost gold, cannot be built twice and have an effect', () => {
   const s = createGame({ seed: 3 });
   const cap = s.cities.find((c) => c.owner === 0 && c.capital);
   const neutral = s.cities.find((c) => c.owner === null);
@@ -350,8 +350,8 @@ test('budovy: stojí zlato, nejdou postavit dvakrát a mají účinek', () => {
   const incomeBefore = incomeOf(s, 0);
   assert.ok(build(s, cap.id, 'market'));
   assert.equal(s.gold[0], 100 - BUILDINGS.market.cost);
-  assert.ok(!build(s, cap.id, 'market'), 'druhý trh ne');
-  assert.ok(!build(s, neutral.id, 'walls'), 'cizí město ne');
+  assert.ok(!build(s, cap.id, 'market'), 'no second market');
+  assert.ok(!build(s, neutral.id, 'walls'), 'not in a foreign city');
   assert.equal(incomeOf(s, 0), incomeBefore + BUILDING_EFFECTS.marketIncome);
 
   const u = unitAt(s, cap.q, cap.r);
@@ -365,7 +365,7 @@ test('budovy: stojí zlato, nejdou postavit dvakrát a mají účinek', () => {
 
   assert.ok(build(s, cap.id, 'barracks'));
   assert.equal(unitCost(s, cap, 'warrior'), UNIT_TYPES.warrior.cost - BUILDING_EFFECTS.barracksDiscount);
-  // verbování v kasárnách stojí méně
+  // recruiting with barracks costs less
   const moveAway = [...reachable(s, u).keys()][0].split(',').map(Number);
   moveUnit(s, u.id, moveAway[0], moveAway[1]);
   const g = s.gold[0];
@@ -375,7 +375,7 @@ test('budovy: stojí zlato, nejdou postavit dvakrát a mají účinek', () => {
   assert.ok(!build(s, cap.id, 'nesmysl'));
 });
 
-test('budovy: AI staví z přebytku a stará hra dostane prázdné budovy', () => {
+test('buildings: AI builds from surplus and an old game gets empty buildings', () => {
   const s = createGame({ seed: 5 });
   s.current = 1;
   s.gold[1] = 200;
@@ -392,7 +392,7 @@ test('budovy: AI staví z přebytku a stará hra dostane prázdné budovy', () =
   assert.ok(m.units.every((u) => u.xp === 0));
 });
 
-// Postaví souboj: naše jednotka typu `type` a nepřítel `enemyType` vedle ní na pláni.
+// Sets up a fight: our unit of type `type` and an `enemyType` enemy next to it on plains.
 function duel(seed, type = 'warrior', enemyType = 'warrior') {
   const s = createGame({ seed, fog: false });
   s.units = [];
@@ -405,7 +405,7 @@ function duel(seed, type = 'warrior', enemyType = 'warrior') {
   return { s, me, foe };
 }
 
-test('zkušenosti: útok a obrana dávají XP, zničení víc', () => {
+test('experience: attack and defense give XP, a kill gives more', () => {
   const { s, me, foe } = duel(3);
   attack(s, me.id, foe.id);
   assert.equal(me.xp, XP.attack);
@@ -416,7 +416,7 @@ test('zkušenosti: útok a obrana dávají XP, zničení víc', () => {
   assert.equal(d2.me.xp, XP.attack + XP.kill);
 });
 
-test('zkušenosti: povýšení zvýší sílu a vyléčí, hodnosti podle prahů', () => {
+test('experience: promotion raises strength and heals, ranks follow thresholds', () => {
   assert.equal(rankOf({ xp: 0 }), 0);
   assert.equal(rankOf({ xp: RANKS[1].xp }), 1);
   assert.equal(rankOf({ xp: RANKS[2].xp + 5 }), 2);
@@ -428,7 +428,7 @@ test('zkušenosti: povýšení zvýší sílu a vyléčí, hodnosti podle prahů
   const elite = previewAttack(s, me, foe);
   assert.ok(elite.damage >= base.damage);
   assert.ok(Math.abs(defenseValue(s, me) - baseDef * (1 + 2 * XP.rankBonus)) < 1e-9);
-  // povýšení během útoku: těsně pod prahem + oslabený
+  // promotion during an attack: just below the threshold + weakened
   const p = duel(4);
   p.me.xp = RANKS[1].xp - XP.attack;
   p.me.hp = 4;
@@ -436,34 +436,34 @@ test('zkušenosti: povýšení zvýší sílu a vyléčí, hodnosti podle prahů
   attack(p.s, p.me.id, p.foe.id);
   assert.equal(rankOf(p.me), 1);
   assert.equal(p.me.hp, 4 + XP.promotionHeal);
-  assert.ok(p.s.log.some((l) => l.msg.includes('povýšen')));
+  assert.ok(p.s.log.some((l) => l.msg.includes('promoted')));
 });
 
-test('kopiník je silný proti jezdcům v útoku i v obraně', () => {
+test('spearman is strong against horsemen in attack and defense', () => {
   const asWarrior = duel(6, 'warrior', 'horseman');
   const asSpear = duel(6, 'spearman', 'horseman');
   const w = previewAttack(asWarrior.s, asWarrior.me, asWarrior.foe);
   const k = previewAttack(asSpear.s, asSpear.me, asSpear.foe);
-  assert.ok(k.damage > w.damage, `kopiník ${k.damage} > válečník ${w.damage}`);
-  // jezdec útočí na kopiníka a dostane silnější protiúder než od válečníka
+  assert.ok(k.damage > w.damage, `spearman ${k.damage} > warrior ${w.damage}`);
+  // a horseman attacking a spearman takes a stronger counter than from a warrior
   const hw = previewAttack(asWarrior.s, asWarrior.foe, asWarrior.me);
   const hk = previewAttack(asSpear.s, asSpear.foe, asSpear.me);
-  assert.ok(hk.damage < hw.damage, 'kopiník se proti jezdci lépe brání');
-  assert.ok(hk.counter > hw.counter, 'a silněji vrací úder');
-  // proti válečníkovi bonus nemá
+  assert.ok(hk.damage < hw.damage, 'spearman defends better against a horseman');
+  assert.ok(hk.counter > hw.counter, 'and strikes back harder');
+  // no bonus against a warrior
   const plain = duel(6, 'spearman', 'warrior');
   assert.equal(defenseValue(plain.s, plain.me, plain.foe), defenseValue(plain.s, plain.me));
 });
 
-test('katapult je silný proti posádce města a ignoruje hradby', () => {
+test('catapult is strong against city garrisons and ignores walls', () => {
   const { s, me, foe } = duel(8, 'catapult', 'warrior');
   const field = previewAttack(s, me, foe);
-  // dáme nepřítele do města s hradbami
+  // put the enemy into a city with walls
   const city = s.cities.find((c) => c.owner === 1);
   foe.q = city.q;
   foe.r = city.r;
   city.buildings = ['walls'];
-  // katapult na dostřel 2
+  // catapult at range 2
   const spot = Object.values(s.tiles).find((t) => distance(t, city) === 2 && isPassable(s, t.q, t.r) && !unitAt(s, t.q, t.r));
   me.q = spot.q;
   me.r = spot.r;
@@ -471,12 +471,12 @@ test('katapult je silný proti posádce města a ignoruje hradby', () => {
   const archer = { ...me, id: 902, type: 'archer', hp: UNIT_TYPES.archer.hp };
   s.units.push(archer);
   const archVsCity = previewAttack(s, archer, foe);
-  assert.ok(defenseValue(s, foe, me) < defenseValue(s, foe, archer), 'hradby proti katapultu neplatí');
-  assert.ok(catVsCity.damage > archVsCity.damage * 1.5, `katapult ${catVsCity.damage} vs lučištník ${archVsCity.damage}`);
+  assert.ok(defenseValue(s, foe, me) < defenseValue(s, foe, archer), 'walls do not apply against a catapult');
+  assert.ok(catVsCity.damage > archVsCity.damage * 1.5, `catapult ${catVsCity.damage} vs archer ${archVsCity.damage}`);
   assert.ok(catVsCity.damage >= field.damage * 0.8);
 });
 
-test('AI verbuje i nové jednotky a na jezdce odpovídá kopiníky', () => {
+test('AI recruits new units too and answers horsemen with spearmen', () => {
   const s = createGame({ seed: 2, fog: false });
   const cap = s.cities.find((c) => c.owner === 1 && c.capital);
   s.current = 1;
@@ -498,13 +498,13 @@ test('AI verbuje i nové jednotky a na jezdce odpovídá kopiníky', () => {
   assert.ok(seen.has('spearman') && seen.has('catapult'), [...seen].join(','));
 });
 
-test('silnice spojují všechna města a zrychlují pohyb', () => {
+test('roads connect all cities and speed up movement', () => {
   for (const seed of [1, 2, 3, 9, 77]) {
     const s = createGame({ seed });
     const roads = Object.values(s.tiles).filter((t) => t.road);
-    assert.ok(roads.length >= s.cities.length, `seed ${seed}: málo silnic`);
-    for (const c of s.cities) assert.ok(s.tiles[key(c.q, c.r)].road, `město ${c.name} bez silnice`);
-    // po silnicích se dá dojít z prvního města do všech ostatních
+    assert.ok(roads.length >= s.cities.length, `seed ${seed}: too few roads`);
+    for (const c of s.cities) assert.ok(s.tiles[key(c.q, c.r)].road, `city ${c.name} without a road`);
+    // roads lead from the first city to all the others
     const start = key(s.cities[0].q, s.cities[0].r);
     const seen = new Set([start]);
     const queue = [s.cities[0]];
@@ -515,22 +515,22 @@ test('silnice spojují všechna města a zrychlují pohyb', () => {
         if (!seen.has(k) && s.tiles[k] && s.tiles[k].road) { seen.add(k); queue.push(n); }
       }
     }
-    for (const c of s.cities) assert.ok(seen.has(key(c.q, c.r)), `seed ${seed}: ${c.name} mimo síť`);
+    for (const c of s.cities) assert.ok(seen.has(key(c.q, c.r)), `seed ${seed}: ${c.name} off the network`);
     assert.ok(roads.every((t) => isPassable(s, t.q, t.r)));
   }
-  // krok po silnici je levnější než po terénu
+  // a step along a road is cheaper than over terrain
   const s = createGame({ seed: 1 });
   const a = Object.values(s.tiles).find((t) => t.road && neighbors(t.q, t.r).some((n) => s.tiles[key(n.q, n.r)]?.road));
   const b = neighbors(a.q, a.r).map((n) => s.tiles[key(n.q, n.r)]).find((t) => t && t.road);
   assert.ok(stepCost(s, a, b) < TERRAIN[b.terrain].cost);
-  // stará hra (verze 6) se načte bez silnic
+  // an old game (version 6) loads without roads
   const old = createGame({ seed: 1 });
   old.version = 6;
   for (const t of Object.values(old.tiles)) delete t.road;
   assert.equal(migrateState(old).version, STATE_VERSION);
 });
 
-test('řeky: tečou po hranách, jsou souměrné a nezmění rozložení mapy', () => {
+test('rivers: flow along edges, are symmetric and do not change the map layout', () => {
   for (const [size, cfg] of Object.entries(MAP_SIZES)) {
     let total = 0;
     for (const seed of [1, 2, 3, 9, 77]) {
@@ -540,23 +540,23 @@ test('řeky: tečou po hranách, jsou souměrné a nezmění rozložení mapy', 
           total++;
           assert.ok(d >= 0 && d < 6);
           const n = m.tiles[key(t.q + [1, 1, 0, -1, -1, 0][d], t.r + [0, -1, -1, 0, 1, 1][d])];
-          if (!n) continue; // hrana na okraji mapy
-          assert.ok(n.rivers && n.rivers.includes(dirTo(n, t)), `${size}/${seed}: nesouměrná hrana`);
-          assert.ok(t.terrain !== 'water' && n.terrain !== 'water', 'řeka nevede po vodě');
+          if (!n) continue; // edge at the map border
+          assert.ok(n.rivers && n.rivers.includes(dirTo(n, t)), `${size}/${seed}: asymmetric edge`);
+          assert.ok(t.terrain !== 'water' && n.terrain !== 'water', 'river does not run over water');
         }
-        assert.equal(new Set(t.rivers || []).size, (t.rivers || []).length, 'hrana dvakrát');
+        assert.equal(new Set(t.rivers || []).size, (t.rivers || []).length, 'edge twice');
       }
-      // stejný seed = stejné řeky
+      // same seed = same rivers
       assert.deepEqual(generateMap(seed, cfg.cols, cfg.rows, cfg.neutralCities).tiles, m.tiles);
     }
-    assert.ok(total / 2 >= RIVER.minLength * 5, `${size}: málo řek`);
+    assert.ok(total / 2 >= RIVER.minLength * 5, `${size}: too few rivers`);
   }
 });
 
-test('řeky: přechod stojí pohyb navíc, most ne, obránce za řekou má bonus', () => {
+test('rivers: crossing costs extra movement, a bridge does not, a defender behind a river gets a bonus', () => {
   const s = createGame({ seed: 1, fog: false });
   const tiles = Object.values(s.tiles);
-  // bez řeky mezi a, b se cena nezmění; s řekou přibude crossCost
+  // without a river between a, b the cost is unchanged; with a river crossCost is added
   const a = tiles.find((t) => t.terrain === 'plains' && !t.road);
   const b = neighbors(a.q, a.r).map((n) => s.tiles[key(n.q, n.r)]).find((t) => t && t.terrain === 'plains' && !t.road);
   const plain = stepCost(s, a, b);
@@ -565,11 +565,11 @@ test('řeky: přechod stojí pohyb navíc, most ne, obránce za řekou má bonus
   b.rivers = [dirTo(b, a)];
   assert.ok(riverBetween(s, a, b) && riverBetween(s, b, a));
   assert.equal(stepCost(s, a, b), plain + RIVER.crossCost);
-  // most: silnice na obou stranách
+  // bridge: road on both sides
   a.road = true; b.road = true;
   assert.ok(stepCost(s, a, b) < plain);
   delete a.road; delete b.road;
-  // boj přes řeku: bonus má jen napadený, protiúder ne
+  // fighting across a river: only the defender gets the bonus, not the counterattack
   s.units = [];
   const me = { id: 900, type: 'warrior', owner: 0, q: a.q, r: a.r, hp: 10, movesLeft: 2, hasAttacked: false, xp: 0 };
   const foe = { id: 901, type: 'warrior', owner: 1, q: b.q, r: b.r, hp: 10, movesLeft: 0, hasAttacked: true, xp: 0 };
@@ -579,28 +579,28 @@ test('řeky: přechod stojí pohyb navíc, most ne, obránce za řekou má bonus
   a.rivers = []; b.rivers = [];
   const dry = previewAttack(s, me, foe);
   assert.equal(riverDefense(s, me, foe), 0);
-  assert.ok(across.damage < dry.damage, `přes řeku ${across.damage} < bez ${dry.damage}`);
-  // dosah: přes řeku se na sousední pole dostane jen s dostatkem pohybu
+  assert.ok(across.damage < dry.damage, `across river ${across.damage} < without ${dry.damage}`);
+  // reach: a neighboring tile across a river is reachable only with enough movement
   a.rivers = [dirTo(a, b)]; b.rivers = [dirTo(b, a)];
   s.units = [me];
   me.movesLeft = 2;
   assert.equal(reachable(s, me).get(key(b.q, b.r)), plain + RIVER.crossCost);
-  // stará hra (verze 9) se načte bez řek
+  // an old game (version 9) loads without rivers
   const old = createGame({ seed: 1 });
   old.version = 9;
   for (const t of Object.values(old.tiles)) delete t.rivers;
   assert.equal(migrateState(old).version, STATE_VERSION);
 });
 
-test('náhodné události: úroda, mor a vzpoura mají správný účinek', () => {
+test('random events: harvest, plague and revolt have the right effect', () => {
   const s = createGame({ seed: 5, fog: false });
   const cap = s.cities.find((c) => c.owner === 0 && c.capital);
-  // úroda
+  // harvest
   const gold = s.gold[0];
   const h = applyHappening(s, 0, 'harvest', cap);
   assert.equal(s.gold[0], gold + HAPPENINGS.kinds.harvest.gold);
   assert.equal(h.gold, HAPPENINGS.kinds.harvest.gold);
-  // mor: jednotky ve městě a vedle něj (i cizí) ztratí životy, ale nezemřou; vzdálené ne
+  // plague: units in and next to the city (foreign too) lose HP but don't die; distant ones don't
   const far = { id: 950, type: 'warrior', owner: 1, q: cap.q, r: cap.r, hp: 10, movesLeft: 0, hasAttacked: true, xp: 0 };
   const spot = Object.values(s.tiles).find((t) => distance(t, cap) >= 3 && isPassable(s, t.q, t.r) && !unitAt(s, t.q, t.r));
   far.q = spot.q; far.r = spot.r;
@@ -613,7 +613,7 @@ test('náhodné události: úroda, mor a vzpoura mají správný účinek', () =
   for (const u of near) assert.equal(u.hp, Math.max(1, before.get(u.id) - HAPPENINGS.kinds.plague.damage));
   assert.equal(far.hp, 10);
   assert.equal(p.hits.length, near.length);
-  // vzpoura: město bez posádky přijde o daně, s posádkou ne
+  // revolt: a city without a garrison loses its taxes, with a garrison it doesn't
   const town = s.cities.find((c) => c.owner === null);
   town.owner = 0;
   s.units = s.units.filter((u) => u.q !== town.q || u.r !== town.r);
@@ -625,12 +625,12 @@ test('náhodné události: úroda, mor a vzpoura mají správný účinek', () =
   const r2 = applyHappening(s, 0, 'revolt', town);
   assert.ok(r2.suppressed);
   assert.equal(s.gold[0], 30 - cityIncome(town, s));
-  // vzpoura nikdy nevezme víc zlata, než hráč má
+  // a revolt never takes more gold than the player has
   s.units.pop();
   s.gold[0] = 1;
   applyHappening(s, 0, 'revolt', town);
   assert.equal(s.gold[0], 0);
-  // přehrání události dá stejný stav
+  // replaying the event gives the same state
   const a = createGame({ seed: 5, fog: false });
   const b = cloneState(a);
   const c = a.cities.find((x) => x.owner === 0);
@@ -642,8 +642,8 @@ test('náhodné události: úroda, mor a vzpoura mají správný účinek', () =
   assert.deepEqual(b.gold, a.gold);
 });
 
-test('náhodné události: deterministické, dají se vypnout, četnost sedí', () => {
-  // stejný seed = stejné události; bez událostí se nic nestane
+test('random events: deterministic, can be disabled, frequency matches', () => {
+  // same seed = same events; with events off nothing happens
   const run = (happenings) => {
     const s = createGame({ seed: 21, happenings });
     const kinds = [];
@@ -656,12 +656,12 @@ test('náhodné události: deterministické, dají se vypnout, četnost sedí', 
   };
   assert.deepEqual(run(true), run(true));
   assert.equal(run(false).length, 0);
-  // před kolem fromTurn se nic neděje; četnost zhruba podle chance
+  // nothing happens before turn fromTurn; frequency roughly per chance
   let hits = 0;
   let tries = 0;
   for (let seed = 1; seed <= 60; seed++) {
     const s = createGame({ seed, fog: false });
-    assert.equal(rollHappening(s, 0), null, 'v 1. kole žádná událost');
+    assert.equal(rollHappening(s, 0), null, 'no event in turn 1');
     for (let turn = HAPPENINGS.fromTurn; turn < HAPPENINGS.fromTurn + 10; turn++) {
       const t = cloneState(s);
       t.turn = turn;
@@ -670,8 +670,8 @@ test('náhodné události: deterministické, dají se vypnout, četnost sedí', 
     }
   }
   const rate = hits / tries;
-  assert.ok(rate > HAPPENINGS.chance * 0.5 && rate < HAPPENINGS.chance * 1.6, `četnost ${rate}`);
-  // stará hra (verze 10) pokračuje bez událostí
+  assert.ok(rate > HAPPENINGS.chance * 0.5 && rate < HAPPENINGS.chance * 1.6, `frequency ${rate}`);
+  // an old game (version 10) continues without events
   const old = createGame({ seed: 1 });
   old.version = 10;
   delete old.happenings;
@@ -680,27 +680,27 @@ test('náhodné události: deterministické, dají se vypnout, četnost sedí', 
   assert.equal(m.happenings, false);
 });
 
-test('lepší AI: ohrožené prázdné město dostane posádku', () => {
+test('better AI: a threatened empty city gets a garrison', () => {
   const s = createGame({ seed: 3, fog: false, difficulty: 'hard' });
-  endTurn(s); // na tahu je AI a její jednotky mají body pohybu
+  endTurn(s); // it's the AI's turn and its units have move points
   const city = s.cities.find((c) => c.owner === 1 && c.capital);
   const inCity = unitAt(s, city.q, city.r);
-  // vyklidit město: jednotku přesuneme na volné sousední pole
+  // empty the city: move the unit to a free neighboring tile
   const out = neighbors(city.q, city.r).find((n) => isPassable(s, n.q, n.r) && !unitAt(s, n.q, n.r));
   inCity.q = out.q; inCity.r = out.r;
-  // nepřítel dvě pole od města
+  // enemy two tiles from the city
   const spot = Object.values(s.tiles).find((t) => distance(t, city) === 2 && isPassable(s, t.q, t.r) && !unitAt(s, t.q, t.r) && !s.cities.some((c) => c.q === t.q && c.r === t.r));
   s.units.push({ id: 700, type: 'warrior', owner: 0, q: spot.q, r: spot.r, hp: 10, movesLeft: 0, hasAttacked: true, xp: 0 });
   const g = assignGarrisons(s, 1);
-  assert.ok([...g.values()].some((c) => c.id === city.id), 'město má přidělenou posádku');
+  assert.ok([...g.values()].some((c) => c.id === city.id), 'the city has an assigned garrison');
   runAITurn(s);
   const holder = unitAt(s, city.q, city.r);
-  assert.ok(holder && holder.owner === 1, 'po tahu AI v městě stojí její jednotka');
+  assert.ok(holder && holder.owner === 1, 'after the AI turn its unit stands in the city');
 });
 
-test('lepší AI: těžce zraněná jednotka ustoupí místo útoku', () => {
+test('better AI: a badly wounded unit retreats instead of attacking', () => {
   const { s, me, foe } = duel(5, 'warrior', 'warrior');
-  // AI je hráč 1 => otočíme role: foe patří AI a je skoro mrtvý
+  // AI is player 1 => swap roles: foe belongs to the AI and is nearly dead
   s.current = 1;
   s.difficulty = 'hard';
   foe.hp = 2;
@@ -711,26 +711,26 @@ test('lepší AI: těžce zraněná jednotka ustoupí místo útoku', () => {
   const before = distance(foe, me);
   runAITurn(s);
   const after = getUnit(s, foe.id);
-  assert.ok(after, 'zraněná jednotka přežila tah');
-  assert.equal(me.hp, 10, 'nezaútočila sebevražedně');
+  assert.ok(after, 'the wounded unit survived the turn');
+  assert.equal(me.hp, 10, 'it did not attack suicidally');
   assert.ok(distance(after, me) >= before, 'odstoupila');
 });
 
-test('lepší AI: dojde na výhodné pole a dorazí oslabeného nepřítele', () => {
+test('better AI: moves to a good tile and finishes a weakened enemy', () => {
   const { s, me, foe } = duel(5, 'warrior', 'horseman');
   s.current = 1;
   s.difficulty = 'hard';
-  // AI jezdec (foe) stojí dál; náš válečník je oslabený – AI by měla dojet a zničit ho
+  // the AI horseman (foe) stands farther away; our warrior is weakened – the AI should ride up and destroy it
   me.hp = 2;
   const far = Object.values(s.tiles).find((t) => distance(t, me) === 3 && isPassable(s, t.q, t.r) && reachableFrom(s, foe, t));
   foe.q = far.q; foe.r = far.r;
   foe.movesLeft = UNIT_TYPES.horseman.move;
   foe.hasAttacked = false;
   assert.ok(planStrike(s, foe));
-  assert.equal(getUnit(s, me.id), undefined, 'oslabený válečník zničen');
+  assert.equal(getUnit(s, me.id), undefined, 'weakened warrior destroyed');
 });
 
-// pomocník: dá se na pole t dojet (bez ohledu na to, kdo zrovna táhne)
+// helper: can tile t be reached (regardless of whose turn it is)
 function reachableFrom(s, unit, t) {
   const saved = { q: unit.q, r: unit.r };
   unit.q = t.q; unit.r = t.r;
@@ -739,22 +739,22 @@ function reachableFrom(s, unit, t) {
   return ok;
 }
 
-test('frakce: každá má své bonusy a AI dostane jinou než hráč', () => {
+test('factions: each has its bonuses and the AI gets a different one than the player', () => {
   for (const f of Object.keys(FACTIONS)) {
     const s = createGame({ seed: 10, faction: f });
     assert.equal(s.factions[0], f);
-    assert.ok(FACTIONS[s.factions[1]] && s.factions[1] !== f, `AI má jinou frakci než ${f}`);
+    assert.ok(FACTIONS[s.factions[1]] && s.factions[1] !== f, `AI has a different faction than ${f}`);
   }
   assert.equal(createGame({ seed: 10, faction: 'nesmysl' }).factions[0], 'kingdom');
   assert.equal(createGame({ seed: 10, faction: 'horde', aiFaction: 'forest' }).factions[1], 'forest');
 
-  // Království: +1 zlato za město, levnější hradby
+  // Kingdom: +1 gold per city, cheaper walls
   const k = createGame({ seed: 10, faction: 'kingdom', aiFaction: 'horde' });
   const h = createGame({ seed: 10, faction: 'horde', aiFaction: 'kingdom' });
   assert.equal(incomeOf(k, 0), incomeOf(h, 0) + 1);
   assert.ok(buildingCost(k, 0, 'walls') < buildingCost(h, 0, 'walls'));
 
-  // Horda: levnější a rychlejší jezdci
+  // Horde: cheaper and faster horsemen
   const hCap = h.cities.find((c) => c.owner === 0);
   const kCap = k.cities.find((c) => c.owner === 0);
   assert.ok(unitCost(h, hCap, 'horseman') < unitCost(k, kCap, 'horseman'));
@@ -762,7 +762,7 @@ test('frakce: každá má své bonusy a AI dostane jinou než hráč', () => {
   assert.equal(unitMove(h, rider), UNIT_TYPES.horseman.move + 1);
   assert.equal(unitMove(k, rider), UNIT_TYPES.horseman.move);
 
-  // Lesní lid: les za 1 a obrana v lese navíc
+  // Forest Folk: forest costs 1 and extra defense in forest
   const fo = createGame({ seed: 10, faction: 'forest', aiFaction: 'kingdom' });
   const forest = Object.values(fo.tiles).find((t) => t.terrain === 'forest' && !t.road);
   const from = neighbors(forest.q, forest.r).map((n) => fo.tiles[key(n.q, n.r)]).find((t) => t && !t.road);
@@ -772,7 +772,7 @@ test('frakce: každá má své bonusy a AI dostane jinou než hráč', () => {
   assert.equal(stepCost(fo, from, forest, man), TERRAIN.forest.cost);
   assert.ok(defenseValue(fo, elf) > defenseValue(fo, man));
 
-  // Horda: kořist za dobytí neutrálního města
+  // Horde: loot for capturing a neutral city
   for (const [faction, loot] of [['horde', FACTIONS.horde.captureGold], ['kingdom', 0]]) {
     const g = createGame({ seed: 10, faction, fog: false });
     const city = g.cities.find((c) => c.owner === null);
@@ -785,7 +785,7 @@ test('frakce: každá má své bonusy a AI dostane jinou než hráč', () => {
   }
 });
 
-test('frakce: stará hra je bez frakcí a AI vs AI s frakcemi doběhne', () => {
+test('factions: an old game has no factions and AI vs AI with factions finishes', () => {
   const old = createGame({ seed: 4 });
   old.version = 7;
   delete old.factions;
@@ -799,7 +799,7 @@ test('frakce: stará hra je bez frakcí a AI vs AI s frakcemi doběhne', () => {
   }
 });
 
-test('velikosti mapy: všechny se vygenerují propojené a hra na nich doběhne', () => {
+test('map sizes: all generate connected and a game on them finishes', () => {
   for (const [size, m] of Object.entries(MAP_SIZES)) {
     for (const seed of [1, 2, 3]) {
       const s = createGame({ seed, size });
@@ -811,12 +811,12 @@ test('velikosti mapy: všechny se vygenerují propojené a hra na nich doběhne'
     }
     const g = createGame({ seed: 5, size });
     for (let i = 0; i < 400 && g.winner === null; i++) { runAITurn(g); endTurn(g); }
-    assert.ok(g.winner !== null || g.turn > 150, `${size}: hra se zasekla`);
+    assert.ok(g.winner !== null || g.turn > 150, `${size}: game got stuck`);
   }
   assert.equal(createGame({ seed: 1, size: 'nesmysl' }).cols, 14);
 });
 
-test('zvuky: každá událost má zvuk a omezovač brání kakofonii', () => {
+test('sounds: every event has a sound and the limiter prevents cacophony', () => {
   assert.equal(soundFor({ type: 'move' }), 'step');
   assert.equal(soundFor({ type: 'attack', killed: true }), 'kill');
   assert.equal(soundFor({ type: 'attack' }), 'hit');
@@ -824,27 +824,27 @@ test('zvuky: každá událost má zvuk a omezovač brání kakofonii', () => {
   assert.equal(soundFor({ type: 'capture', owner: 0 }, 0), 'capture');
   assert.equal(soundFor({ type: 'capture', owner: 1 }, 0), 'lose');
   assert.equal(soundFor({ type: 'nic' }), null);
-  // všechny události, které hra vyrobí, mají existující zvuk
+  // all events the game produces have an existing sound
   const s = createGame({ seed: 4, fog: false });
   for (let i = 0; i < 40 && s.winner === null; i++) {
     runAITurn(s);
     for (const ev of drainEvents(s)) {
       const name = soundFor(ev);
-      assert.ok(name && SOUND_NAMES.includes(name), `událost ${ev.type} bez zvuku`);
+      assert.ok(name && SOUND_NAMES.includes(name), `event ${ev.type} has no sound`);
     }
     endTurn(s);
   }
   const limit = createLimiter(100);
   assert.ok(limit('hit', 0));
-  assert.ok(!limit('hit', 50), 'stejný zvuk hned znovu ne');
-  assert.ok(limit('step', 50), 'jiný zvuk ano');
+  assert.ok(!limit('hit', 50), 'not the same sound again right away');
+  assert.ok(limit('step', 50), 'a different sound is fine');
   assert.ok(limit('hit', 150));
-  // v Node není AudioContext – přehrání nesmí spadnout
+  // Node has no AudioContext – playback must not crash
   const snd = createSound();
   assert.doesNotThrow(() => snd.play('hit'));
 });
 
-test('statistiky: historie po kolech, počítadla a graf', () => {
+test('statistics: per-turn history, counters and chart', () => {
   const s = createGame({ seed: 4, fog: false });
   assert.equal(s.history.length, 1);
   assert.equal(s.history[0].turn, 1);
@@ -852,19 +852,19 @@ test('statistiky: historie po kolech, počítadla a graf', () => {
   for (let i = 0; i < 400 && s.winner === null; i++) { runAITurn(s); endTurn(s); }
   assert.ok(s.winner !== null);
   const turns = s.history.map((e) => e.turn);
-  assert.deepEqual(turns, [...new Set(turns)], 'každé kolo jen jednou');
-  assert.equal(turns[turns.length - 1], s.turn, 'poslední záznam je z konce hry');
-  assert.equal(s.history[s.history.length - 1].cities[1 - s.winner], 0, 'poražený nemá města');
+  assert.deepEqual(turns, [...new Set(turns)], 'each turn only once');
+  assert.equal(turns[turns.length - 1], s.turn, 'the last record is from game over');
+  assert.equal(s.history[s.history.length - 1].cities[1 - s.winner], 0, 'the loser has no cities');
   const total = s.stats.kills[0] + s.stats.kills[1];
-  assert.equal(total, s.stats.losses[0] + s.stats.losses[1], 'co jeden zničil, druhý ztratil');
+  assert.equal(total, s.stats.losses[0] + s.stats.losses[1], 'what one destroyed, the other lost');
   assert.ok(total > 0 && s.stats.captures[s.winner] > 0);
   const svg = chartSvg(s.history);
   assert.equal((svg.match(/<polyline/g) || []).length, 2);
   assert.ok(!svg.includes('NaN'));
-  assert.ok(!chartSvg([s.history[0]]).includes('NaN'), 'graf s jedním bodem');
-  assert.ok(!chartSvg([]).includes('NaN'), 'prázdný graf');
+  assert.ok(!chartSvg([s.history[0]]).includes('NaN'), 'chart with a single point');
+  assert.ok(!chartSvg([]).includes('NaN'), 'empty chart');
   assert.equal(summaryRows(s).length, 4);
-  // stav zůstává JSON a stará hra dostane prázdné statistiky
+  // the state stays JSON and an old game gets empty statistics
   assert.deepEqual(JSON.parse(JSON.stringify(s)).stats, s.stats);
   const old = createGame({ seed: 4 });
   old.version = 8;
@@ -875,11 +875,11 @@ test('statistiky: historie po kolech, počítadla a graf', () => {
   assert.deepEqual(m.stats.kills, [0, 0]);
 });
 
-test('kronika: akce soupeře v mlze hráč nevidí, vlastní a viditelné ano', () => {
+test('chronicle: the player does not see enemy actions in fog, but sees own and visible ones', () => {
   const s = createGame({ seed: 7 });
   const aiCap = s.cities.find((c) => c.owner === 1 && c.capital);
-  assert.ok(!visibleTiles(s, 0).has(key(aiCap.q, aiCap.r)), 'nepřátelské hlavní město je na začátku v mlze');
-  // AI naverbuje a postaví v mlze
+  assert.ok(!visibleTiles(s, 0).has(key(aiCap.q, aiCap.r)), 'the enemy capital is in fog at the start');
+  // the AI recruits and builds in fog
   s.current = 1;
   s.gold[1] = 200;
   const g = unitAt(s, aiCap.q, aiCap.r);
@@ -887,13 +887,13 @@ test('kronika: akce soupeře v mlze hráč nevidí, vlastní a viditelné ano', 
   assert.ok(buyUnit(s, aiCap.id, 'warrior'));
   assert.ok(build(s, aiCap.id, 'market'));
   const mine = logFor(s, 1).slice(-2);
-  assert.ok(mine.every((l) => !l.hidden), 'AI vidí své akce');
+  assert.ok(mine.every((l) => !l.hidden), 'the AI sees its own actions');
   const hidden = logFor(s, 0);
   const last = hidden[hidden.length - 1];
-  assert.ok(last.hidden, 'hráč akce v mlze nevidí');
-  assert.equal(last.count, 2, 'po sobě jdoucí skryté akce se slijí do jednoho řádku');
-  assert.ok(!hidden.some((l) => l.msg.includes('naverbován')));
-  // boj, kde je hráč napaden, vidí vždy (i když útočník stojí v mlze a obránce padne)
+  assert.ok(last.hidden, 'the player does not see actions in fog');
+  assert.equal(last.count, 2, 'consecutive hidden actions merge into one line');
+  assert.ok(!hidden.some((l) => l.msg.includes('recruited')));
+  // a fight where the player is attacked is always visible (even if the attacker is in fog and the defender dies)
   const victim = s.units.find((u) => u.owner === 0);
   const spot = neighbors(victim.q, victim.r).find((n) => isPassable(s, n.q, n.r) && !unitAt(s, n.q, n.r));
   const archer = { id: 999, type: 'archer', owner: 1, q: spot.q, r: spot.r, hp: 10, movesLeft: 0, hasAttacked: false, xp: 0 };
@@ -901,29 +901,29 @@ test('kronika: akce soupeře v mlze hráč nevidí, vlastní a viditelné ano', 
   victim.hp = 1;
   assert.ok(attack(s, archer.id, victim.id));
   const after = logFor(s, 0);
-  assert.ok(after[after.length - 1].msg.includes('zničil'), 'hráč vidí ztrátu vlastní jednotky');
-  // neveřejné záznamy jdou do JSON a po konci hry se odkryje vše
+  assert.ok(after[after.length - 1].msg.includes('destroyed'), 'the player sees the loss of their own unit');
+  // non-public entries go into JSON and everything is revealed after game over
   const copy = JSON.parse(JSON.stringify(s));
   copy.winner = 1;
   assert.ok(logFor(copy, 0).every((l) => !l.hidden));
-  // bez mlhy se nic neskrývá
+  // without fog nothing is hidden
   const open = createGame({ seed: 7, fog: false });
   open.current = 1;
   open.gold[1] = 200;
   const cap2 = open.cities.find((c) => c.owner === 1 && c.capital);
   build(open, cap2.id, 'market');
   assert.ok(logFor(open, 0).every((l) => !l.hidden));
-  // stará hra (verze 11) se načte a její záznamy zůstanou veřejné
+  // an old game (version 11) loads and its entries stay public
   const old = createGame({ seed: 3 });
   old.version = 11;
-  old.log = [{ turn: 1, msg: 'AI: něco' }];
+  old.log = [{ turn: 1, msg: 'AI: something' }];
   const m = migrateState(old);
   assert.equal(m.version, STATE_VERSION);
-  assert.equal(logFor(m, 0)[0].msg, 'AI: něco');
+  assert.equal(logFor(m, 0)[0].msg, 'AI: something');
 });
 
-test('vrácení pohybu: jen pohyb, který nic neprozradil', () => {
-  // zkusí pohyb a vrátí, jestli jde vrátit (stav před pohybem zůstane netknutý)
+test('undo move: only a move that revealed nothing', () => {
+  // tries a move and returns whether it can be undone (the pre-move state stays untouched)
   const tryMove = (s, unit, q, r) => {
     const before = cloneState(s);
     assert.ok(moveUnit(s, unit.id, q, r));
@@ -942,18 +942,18 @@ test('vrácení pohybu: jen pohyb, který nic neprozradil', () => {
     const tu = getUnit(trial, u.id);
     const { ok } = tryMove(trial, tu, t.q, t.r);
     const grew = exploredTiles(trial, 0).size > explored.size;
-    if (grew) assert.equal(ok, false, 'pohyb, který prozkoumá nové pole, nejde vrátit');
+    if (grew) assert.equal(ok, false, 'a move that explores a new tile cannot be undone');
     if (ok && !safe) safe = t;
     if (grew && !revealing) revealing = t;
   }
-  assert.ok(safe, 'aspoň jeden pohyb uvnitř prozkoumaného území jde vrátit');
-  assert.ok(revealing, 'aspoň jeden pohyb odhalí nové pole');
+  assert.ok(safe, 'at least one move inside explored territory can be undone');
+  assert.ok(revealing, 'at least one move reveals a new tile');
   const orig = JSON.parse(JSON.stringify(s));
   const { ok, before } = tryMove(s, u, safe.q, safe.r);
   assert.ok(ok);
-  assert.deepEqual(JSON.parse(JSON.stringify(before)), orig, 'stav před pohybem jde obnovit beze změny');
+  assert.deepEqual(JSON.parse(JSON.stringify(before)), orig, 'the pre-move state can be restored unchanged');
 
-  // nově viditelný nepřítel (i na už prozkoumaném poli) pohyb zamkne
+  // a newly visible enemy (even on an already explored tile) locks the move
   const e = createGame({ seed: 21 });
   e.explored[0] = Object.keys(e.tiles).sort();
   const eu = e.units.find((x) => x.owner === 0 && x.type === 'warrior');
@@ -970,11 +970,11 @@ test('vrácení pohybu: jen pohyb, který nic neprozradil', () => {
   }
   assert.ok(spot);
   const clean = cloneState(e);
-  assert.equal(tryMove(clean, getUnit(clean, eu.id), spot.dest.q, spot.dest.r).ok, true, 'bez nepřítele jde vrátit');
+  assert.equal(tryMove(clean, getUnit(clean, eu.id), spot.dest.q, spot.dest.r).ok, true, 'without an enemy it can be undone');
   e.units.push({ id: 900, type: 'warrior', owner: 1, q: spot.enemy.q, r: spot.enemy.r, hp: 10, movesLeft: 0, hasAttacked: true, xp: 0 });
-  assert.equal(tryMove(e, eu, spot.dest.q, spot.dest.r).ok, false, 'odhalený nepřítel pohyb zamkne');
+  assert.equal(tryMove(e, eu, spot.dest.q, spot.dest.r).ok, false, 'a revealed enemy locks the move');
 
-  // dobytí města nejde vrátit
+  // capturing a city cannot be undone
   const c = createGame({ seed: 21, fog: false });
   const city = c.cities.find((x) => x.owner === null);
   const cu = c.units.find((x) => x.owner === 0);
@@ -983,7 +983,7 @@ test('vrácení pohybu: jen pohyb, který nic neprozradil', () => {
   cu.r = near.r;
   cu.movesLeft = 5;
   assert.equal(tryMove(c, cu, city.q, city.r).ok, false);
-  // jiná akce než pohyb (útok) se vrátit nedá
+  // an action other than a move (attack) cannot be undone
   const p = duel(4);
   const pb = cloneState(p.s);
   assert.ok(attack(p.s, p.me.id, p.foe.id));

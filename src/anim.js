@@ -1,26 +1,26 @@
-// Přehrávání herních událostí jako krátkých animací.
-// Logika se nemění: události se postupně aplikují na kopii stavu z doby před akcí
-// (applyEvent z game.js) a mezi tím se jen posouvají kreslené pozice jednotek.
+// Replays game events as short animations.
+// Logic is unchanged: events are applied one by one to a copy of the state from before the action
+// (applyEvent from game.js), and in between only the drawn unit positions move.
 import { applyEvent, getUnit } from './game.js';
 import { tileCenter } from './render.js';
 
-const STEP_MS = 110;    // jeden krok pohybu
-const ATTACK_MS = 300;  // výpad a návrat útočníka
-const PAUSE_MS = 160;   // pauza u verbování / dobytí
-const FLOAT_MS = 900;   // jak dlouho visí plovoucí text
+const STEP_MS = 110;    // one movement step
+const ATTACK_MS = 300;  // attacker lunge and return
+const PAUSE_MS = 160;   // pause on recruit / capture
+const FLOAT_MS = 900;   // how long floating text stays
 
 const lerp = (a, b, t) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
 const ease = (t) => (t < 0.5 ? 2 * t * t : 1 - 2 * (1 - t) * (1 - t));
 
-// redraw: překreslí jen plátno (HUD se během animace nepřepisuje, aby nemizela tlačítka).
-// isVisible(state, q, r): jestli hráč u obrazovky pole vidí – co je v mlze, se neanimuje.
-// onShow(ev): zavolá se pro každou viditelnou událost, když začne její animace (zvuky).
+// redraw: redraws only the canvas (the HUD isn't rewritten during animation so buttons don't vanish).
+// isVisible(state, q, r): whether the player at the screen sees the tile – nothing in fog is animated.
+// onShow(ev): called for each visible event when its animation starts (sounds).
 export function createAnimator(redraw, isVisible = () => true, onShow = () => {}) {
   const a = {
-    display: null,        // stav, který se právě kreslí (null = skutečný stav)
-    unitPos: new Map(),   // id jednotky -> {x, y} během pohybu
+    display: null,        // state currently being drawn (null = the real state)
+    unitPos: new Map(),   // unit id -> {x, y} while moving
     floaters: [],
-    speed: 1,             // 0 = bez animací
+    speed: 1,             // 0 = no animations
     busy: false,
     skipping: false,
   };
@@ -48,7 +48,7 @@ export function createAnimator(redraw, isVisible = () => true, onShow = () => {}
     a.floaters.push({ x: pos.x, y: pos.y, text, color, start: performance.now() });
   }
 
-  // Průběh 0..1 po dobu ms (upravenou rychlostí); při přeskočení hned skončí.
+  // Progress 0..1 over ms (scaled by speed); finishes immediately when skipping.
   function tween(ms, onT) {
     const dur = ms * a.speed;
     if (dur <= 0 || a.skipping) { onT(1); return Promise.resolve(); }
@@ -85,7 +85,7 @@ export function createAnimator(redraw, isVisible = () => true, onShow = () => {}
         addFloater(cd, ev.killed ? `−${ev.damage} ✖` : `−${ev.damage}`, '#ff6b5b');
         if (ev.counter) addFloater(ca, `−${ev.counter}`, '#ffb347');
       };
-      const promo = (pos) => addFloater({ x: pos.x, y: pos.y - 16 }, '★ povýšení', '#ffd34d');
+      const promo = (pos) => addFloater({ x: pos.x, y: pos.y - 16 }, '★ promotion', '#ffd34d');
       await tween(ATTACK_MS, (t) => {
         a.unitPos.set(ev.attackerId, lerp(ca, cd, Math.sin(Math.PI * t) * 0.4));
         if (t >= 0.5 && !hit) onHit();
@@ -95,14 +95,14 @@ export function createAnimator(redraw, isVisible = () => true, onShow = () => {}
       if (ev.defenderPromoted && !ev.killed) promo(cd);
     } else if (ev.type === 'capture') {
       const c = st.cities.find((x) => x.id === ev.cityId);
-      if (c) addFloater(tileCenter(c.q, c.r), 'Dobyto!', '#ffe27a');
+      if (c) addFloater(tileCenter(c.q, c.r), 'Captured!', '#ffe27a');
       await tween(PAUSE_MS * 2, () => {});
     } else if (ev.type === 'spawn') {
       await tween(PAUSE_MS, () => {});
     }
   }
 
-  // Přehraje události nad kopií stavu `before`. Vrací Promise, který se splní po dokončení.
+  // Replays events on a copy of the `before` state. Returns a Promise that resolves when done.
   a.play = async (before, events) => {
     if (!events.length) return;
     a.display = before;
@@ -110,7 +110,7 @@ export function createAnimator(redraw, isVisible = () => true, onShow = () => {}
     ensureLoop();
     for (const ev of events) {
       const shown = eventVisible(a.display, ev);
-      // nová jednotka a dobytí se nejdřív ukážou, pak se chvíli čeká
+      // a new unit or capture is shown first, then there's a short wait
       if (ev.type === 'spawn' || ev.type === 'capture') applyEvent(a.display, ev);
       if (shown) {
         onShow(ev);
@@ -125,7 +125,7 @@ export function createAnimator(redraw, isVisible = () => true, onShow = () => {}
     redraw();
   };
 
-  // Událost stojí za animaci, jen když se aspoň zčásti odehrává na viditelném poli.
+  // An event is worth animating only if it happens at least partly on a visible tile.
   function eventVisible(st, ev) {
     const see = (p) => p && isVisible(st, p.q, p.r);
     if (ev.type === 'move') return ev.path.some(see);

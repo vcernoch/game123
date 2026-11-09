@@ -1,9 +1,9 @@
 {
   "name": "game123",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "private": true,
   "type": "module",
-  "description": "Hexová říše – tahová strategie v prohlížeči",
+  "description": "Hex Realm – a turn-based strategy game in the browser",
   "scripts": {
     "test": "node --test tests/*.test.js",
     "smoke": "node tests/smoke.mjs",

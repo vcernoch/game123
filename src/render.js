@@ -1,4 +1,4 @@
-// Vykreslení na canvas. Žádná herní logika, jen kreslení stavu.
+// Canvas rendering. No game logic, only drawing the state.
 import { hexToPixel, hexCorners, pixelToHex, key, neighbors, DIRS } from './hex.js';
 import { TERRAIN, UNIT_TYPES, PLAYERS, NEUTRAL_COLOR, RANKS } from './rules.js';
 
@@ -34,8 +34,8 @@ function hexPath(ctx, cx, cy, size) {
 }
 
 // view = { selectedId, reachable: Map, targets: Set(unitId), hover: {q,r}, path: [{q,r}],
-//          unitPos: Map(unitId -> {x,y}) pro animace, floaters: [{x,y,text,color,age}],
-//          visible/explored: Set klíčů pro mlhu války (chybí = vidět vše), viewer: hráč u obrazovky }
+//          unitPos: Map(unitId -> {x,y}) for animations, floaters: [{x,y,text,color,age}],
+//          visible/explored: Set of keys for fog of war (missing = everything visible), viewer: player at the screen }
 export function render(ctx, state, view = {}) {
   const { w, h } = canvasSize(state);
   ctx.clearRect(0, 0, w, h);
@@ -51,7 +51,7 @@ export function render(ctx, state, view = {}) {
       ctx.fill();
       drawTerrainDetail(ctx, t.terrain, c.x, c.y);
       if (t.road) drawRoad(ctx, state, t, c);
-      // detail terénu kreslí vlastní cesty – obrys hexu je potřeba založit znovu
+      // terrain detail draws its own paths – the hex outline must be rebuilt
       hexPath(ctx, c.x, c.y, HEX_SIZE - 1);
       if (!seen(t.q, t.r)) {
         ctx.fillStyle = 'rgba(12,14,22,0.5)';
@@ -84,12 +84,12 @@ export function render(ctx, state, view = {}) {
 
   if (view.path && view.path.length > 1) drawPath(ctx, view.path);
 
-  // animované jednotky kreslíme až nakonec, aby byly nad ostatními
+  // animated units are drawn last so they sit on top
   const moving = view.unitPos || new Map();
   const units = [...state.units].sort((a, b) => moving.has(a.id) - moving.has(b.id));
   for (const u of units) {
     const c = moving.get(u.id) || tileCenter(u.q, u.r);
-    // cizí jednotky v mlze nekreslíme (u animace podle pole, kde právě je)
+    // enemy units in fog are not drawn (when animating, by the tile they are on right now)
     if (view.visible && u.owner !== view.viewer) {
       const at = moving.has(u.id) ? pickHex(c.x, c.y) : u;
       if (!seen(at.q, at.r)) continue;
@@ -109,7 +109,7 @@ export function render(ctx, state, view = {}) {
   for (const f of view.floaters || []) drawFloater(ctx, f);
 }
 
-// Plovoucí text (poškození, dobytí): stoupá a mizí, age je 0..1.
+// Floating text (damage, capture): rises and fades, age is 0..1.
 function drawFloater(ctx, f) {
   ctx.save();
   ctx.globalAlpha = Math.max(0, 1 - f.age);
@@ -125,13 +125,13 @@ function drawFloater(ctx, f) {
   ctx.restore();
 }
 
-// Trasa pohybu: lomená čára přes středy polí se šipkou v cíli.
+// Movement path: polyline through tile centers with an arrow at the end.
 function drawPath(ctx, path) {
   const pts = path.map((p) => tileCenter(p.q, p.r));
   const end = pts[pts.length - 1];
   const prev = pts[pts.length - 2];
   const ang = Math.atan2(end.y - prev.y, end.x - prev.x);
-  // čára končí kousek před středem, aby hrot šipky byl ostrý
+  // the line stops just short of the center so the arrow tip stays sharp
   const tip = { x: end.x - Math.cos(ang) * 4, y: end.y - Math.sin(ang) * 4 };
   const base = { x: tip.x - Math.cos(ang) * 12, y: tip.y - Math.sin(ang) * 12 };
   ctx.save();
@@ -156,7 +156,7 @@ function drawPath(ctx, path) {
   ctx.lineWidth = 1.5;
   ctx.fill();
   ctx.stroke();
-  // tečky na mezilehlých polích
+  // dots on intermediate tiles
   ctx.fillStyle = '#ffe27a';
   for (let i = 1; i < pts.length - 1; i++) {
     ctx.beginPath();
@@ -167,7 +167,7 @@ function drawPath(ctx, path) {
   ctx.restore();
 }
 
-// Silnice: z každého pole se silnicí půlka cesty ke každému sousedovi se silnicí.
+// Roads: from each road tile, half a segment towards every neighboring road tile.
 function drawRoad(ctx, state, t, c) {
   const ends = [];
   for (const n of neighbors(t.q, t.r)) {
@@ -192,8 +192,8 @@ function drawRoad(ctx, state, t, c) {
   ctx.restore();
 }
 
-// Řeky po hranách hexů. Každou hranu kreslíme jednou (z pole s menším klíčem nebo
-// když soused leží mimo mapu). Most = silnice na obou stranách hrany.
+// Rivers along hex edges. Each edge is drawn once (from the tile with the smaller key, or
+// when the neighbor is off the map). Bridge = road on both sides of the edge.
 function drawRivers(ctx, state, known, seen) {
   ctx.save();
   ctx.lineCap = 'round';
@@ -208,7 +208,7 @@ function drawRivers(ctx, state, known, seen) {
       if (nt && nk < key(t.q, t.r)) continue;
       if (!known(t.q, t.r) && !(nt && known(n.q, n.r))) continue;
       const lit = seen(t.q, t.r) || (nt && seen(n.q, n.r));
-      // směr d míří pod úhlem −60·d°, hrana leží mezi rohy (6−d)%6 a (7−d)%6
+      // direction d points at angle −60·d°, the edge lies between corners (6−d)%6 and (7−d)%6
       const p1 = corners[(6 - d) % 6];
       const p2 = corners[(7 - d) % 6];
       ctx.globalAlpha = lit ? 1 : 0.55;
@@ -300,7 +300,7 @@ function drawCity(ctx, city) {
   ctx.strokeStyle = color;
   ctx.lineWidth = 4;
   ctx.stroke();
-  // domečky
+  // houses
   ctx.fillStyle = color;
   ctx.strokeStyle = 'rgba(0,0,0,0.5)';
   ctx.lineWidth = 1;
@@ -320,7 +320,7 @@ function drawCity(ctx, city) {
   ctx.restore();
 }
 
-// Malé značky budov: hradby = kamenný lem, trh = mince, kasárna = praporek.
+// Small building markers: walls = stone rim, market = coin, barracks = flag.
 function drawBuildings(ctx, city, x, y) {
   const has = (b) => city.buildings && city.buildings.includes(b);
   if (has('walls')) {
@@ -373,7 +373,7 @@ function drawUnit(ctx, u, x, y, selected, active) {
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(t.symbol, x, y + 4);
-  // hodnost: zlaté hvězdičky nad jednotkou
+  // rank: gold stars above the unit
   let rank = 0;
   RANKS.forEach((r, i) => { if ((u.xp || 0) >= r.xp) rank = i; });
   if (rank > 0) {
@@ -384,13 +384,13 @@ function drawUnit(ctx, u, x, y, selected, active) {
     ctx.fillStyle = '#ffd34d';
     ctx.fillText(RANKS[rank].symbol, x, y - 13);
   }
-  // HP lišta
+  // HP bar
   const frac = u.hp / t.hp;
   ctx.fillStyle = 'rgba(0,0,0,0.6)';
   ctx.fillRect(x - 13, y + 18, 26, 4);
   ctx.fillStyle = frac > 0.5 ? '#5ad65a' : frac > 0.25 ? '#e5c33a' : '#e04848';
   ctx.fillRect(x - 13, y + 18, 26 * frac, 4);
-  // vyčerpaná jednotka aktivního hráče
+  // exhausted unit of the active player
   if (active && u.movesLeft === 0 && u.hasAttacked) {
     ctx.beginPath();
     ctx.arc(x, y + 3, 13, 0, Math.PI * 2);

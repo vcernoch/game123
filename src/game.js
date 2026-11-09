@@ -1,4 +1,4 @@
-// Čistá herní logika bez DOM. Stav je obyčejný JSON objekt (dá se uložit).
+// Pure game logic without DOM. The state is a plain JSON object (can be saved).
 import { key, neighbors, distance } from './hex.js';
 import { generateMap, hasRiverEdge } from './map.js';
 import {
@@ -15,7 +15,7 @@ export function createGame({
   if (!DIFFICULTY[difficulty]) difficulty = 'normal';
   if (!FACTIONS[faction]) faction = 'kingdom';
   if (!FACTIONS[aiFaction]) {
-    // AI dostane jinou frakci než hráč, vybranou podle seedu (opakovatelně)
+    // the AI gets a different faction than the player, chosen by seed (reproducibly)
     const others = Object.keys(FACTIONS).filter((f) => f !== faction);
     aiFaction = others[Math.abs(seed) % others.length];
   }
@@ -59,13 +59,13 @@ export function createGame({
   return state;
 }
 
-// ---------- statistiky ----------
+// ---------- statistics ----------
 
 function emptyStats() {
   return { kills: PLAYERS.map(() => 0), losses: PLAYERS.map(() => 0), captures: PLAYERS.map(() => 0) };
 }
 
-// Síla armády: cena jednotek vážená životy a hodností (hrubé, ale srovnatelné číslo).
+// Army power: unit cost weighted by HP and rank (a rough but comparable number).
 export function armyPower(state, player) {
   let sum = 0;
   for (const u of state.units) {
@@ -75,7 +75,7 @@ export function armyPower(state, player) {
   return Math.round(sum);
 }
 
-// Zapíše stav kola do historie (jednou za kolo; opakovaný zápis kolo přepíše).
+// Records the turn's state into history (once per turn; a repeated record overwrites the turn).
 export function recordHistory(state) {
   if (!state.history) state.history = [];
   const entry = {
@@ -96,7 +96,7 @@ function countStat(state, name, player) {
 
 export const STATE_VERSION = 12;
 
-// Převede uložený stav starší verze na aktuální; neznámý formát vrátí null.
+// Converts a saved state of an older version to the current one; returns null for an unknown format.
 export function migrateState(s) {
   if (!s || typeof s !== 'object') return null;
   if (s.version === 1) {
@@ -104,7 +104,7 @@ export function migrateState(s) {
     s.version = 2;
   }
   if (s.version === 2) {
-    // mlha války: staré hry ji dostanou taky, prozkoumané je to, co je vidět teď
+    // fog of war: old games get it too, explored = what is visible now
     s.fog = true;
     s.explored = PLAYERS.map(() => []);
     PLAYERS.forEach((_, p) => updateExplored(s, p));
@@ -123,36 +123,36 @@ export function migrateState(s) {
     s.version = 6;
   }
   if (s.version === 6) {
-    // silnice přibyly až ve verzi 7 – staré mapy je prostě nemají (tile.road chybí = bez silnice)
+    // roads were added in version 7 – old maps simply lack them (missing tile.road = no road)
     s.version = 7;
   }
   if (s.version === 7) {
-    s.factions = [null, null]; // staré hry hrají bez frakcí
+    s.factions = [null, null]; // old games play without factions
     s.version = 8;
   }
   if (s.version === 8) {
-    s.history = []; // statistiky začnou od načtení
+    s.history = []; // statistics start from loading
     s.stats = emptyStats();
     s.version = 9;
   }
   if (s.version === 9) {
-    // řeky přibyly ve verzi 10 – staré mapy je nemají (tile.rivers chybí = bez řek)
+    // rivers were added in version 10 – old maps lack them (missing tile.rivers = no rivers)
     s.version = 10;
   }
   if (s.version === 10) {
-    s.happenings = false; // rozehraná hra pokračuje podle pravidel, se kterými začala
+    s.happenings = false; // a game in progress continues with the rules it started with
     s.version = 11;
   }
   if (s.version === 11) {
-    // záznamy kroniky bez `seen` jsou veřejné, takže staré záznamy zůstanou vidět všem
+    // chronicle entries without `seen` are public, so old entries stay visible to everyone
     s.version = 12;
   }
   return s.version === STATE_VERSION ? s : null;
 }
 
-// ---------- mlha války ----------
+// ---------- fog of war ----------
 
-// Pole, která hráč právě vidí (Set klíčů). Bez mlhy vidí všechno.
+// Tiles the player currently sees (a Set of keys). Without fog they see everything.
 export function visibleTiles(state, player) {
   const seen = new Set();
   if (!state.fog || state.winner !== null) {
@@ -176,7 +176,7 @@ export function visibleTiles(state, player) {
   return seen;
 }
 
-// Přidá aktuálně viditelná pole mezi prozkoumaná (state.explored[player] je seřazené pole klíčů).
+// Adds currently visible tiles to the explored ones (state.explored[player] is a sorted array of keys).
 export function updateExplored(state, player) {
   if (!state.explored) return;
   const all = new Set(state.explored[player] || []);
@@ -184,15 +184,15 @@ export function updateExplored(state, player) {
   state.explored[player] = [...all].sort();
 }
 
-// Prozkoumaná pole jako Set (pro rychlé dotazy při kreslení).
+// Explored tiles as a Set (for fast lookups while drawing).
 export function exploredTiles(state, player) {
   if (!state.fog) return new Set(Object.keys(state.tiles));
   return new Set(state.explored ? state.explored[player] : []);
 }
 
-// ---------- události pro animace ----------
-// Akce zapisují do state.events, co se stalo (JSON). UI si je vybere přes drainEvents()
-// a přehraje je na kopii stavu z doby před akcí pomocí applyEvent().
+// ---------- events for animations ----------
+// Actions write what happened into state.events (JSON). The UI takes them via drainEvents()
+// and replays them on a copy of the pre-action state using applyEvent().
 
 function emit(state, ev) {
   (state.events ||= []).push(ev);
@@ -243,7 +243,7 @@ export function cloneState(state) {
   return JSON.parse(JSON.stringify(state));
 }
 
-// ---------- dotazy ----------
+// ---------- queries ----------
 
 export const tileAt = (state, q, r) => state.tiles[key(q, r)];
 export const unitAt = (state, q, r) => state.units.find((u) => u.q === q && u.r === r);
@@ -263,7 +263,7 @@ export const CITY_DEF_BONUS = 0.25;
 
 export const hasBuilding = (city, b) => !!city.buildings && city.buildings.includes(b);
 
-// ---------- frakce ----------
+// ---------- factions ----------
 
 export function factionOf(state, player) {
   const id = state && state.factions ? state.factions[player] : null;
@@ -280,25 +280,25 @@ export function buildingCost(state, player, building) {
   return Math.max(1, BUILDINGS[building].cost - ((d && d[building]) || 0));
 }
 
-// Obranný bonus terénu pro jednotku (Lesní lid má v lese navíc).
+// Terrain defense bonus for a unit (Forest Folk get extra in forest).
 export function terrainDefense(state, unit, tile) {
   const f = factionOf(state, unit.owner);
   return TERRAIN[tile.terrain].defBonus + (tile.terrain === 'forest' ? f.forestDefense || 0 : 0);
 }
 
-// Příjem města; se state se započítá i bonus frakce majitele.
+// City income; with state, the owner's faction bonus is included too.
 export function cityIncome(city, state = null) {
   const base = city.capital ? ECONOMY.capitalIncome : ECONOMY.cityIncome;
   const faction = state && city.owner !== null ? factionOf(state, city.owner).cityIncome || 0 : 0;
   return base + faction + (hasBuilding(city, 'market') ? BUILDING_EFFECTS.marketIncome : 0);
 }
 
-// Násobitel obrany posádky ve vlastním městě (město + případné hradby).
+// Garrison defense multiplier in an own city (city + walls, if any).
 export function cityDefenseMult(city) {
   return (1 + CITY_DEF_BONUS) * (hasBuilding(city, 'walls') ? 1 + BUILDING_EFFECTS.wallsDefense : 1);
 }
 
-// Cena jednotky při verbování v daném městě (kasárna a frakce majitele zlevňují).
+// Unit cost when recruiting in the given city (barracks and the owner's faction make it cheaper).
 export function unitCost(state, city, type) {
   let discount = hasBuilding(city, 'barracks') ? BUILDING_EFFECTS.barracksDiscount : 0;
   const fd = city.owner !== null ? factionOf(state, city.owner).unitDiscount : null;
@@ -311,13 +311,13 @@ export function incomeOf(state, player) {
   return Math.max(0, base + difficultyOf(state, player).incomeBonus);
 }
 
-// Nastavení obtížnosti pro daného hráče (člověk má vždy neutrální hodnoty).
+// Difficulty settings for the given player (the human always has neutral values).
 export function difficultyOf(state, player) {
   if (!PLAYERS[player].isAI) return DIFFICULTY.normal;
   return DIFFICULTY[state.difficulty] || DIFFICULTY.normal;
 }
 
-// Souhrn pro tooltip města: příjem, bonus obrany posádky (terén + město) a léčení.
+// City tooltip summary: income, garrison defense bonus (terrain + city) and healing.
 export function cityInfo(state, city) {
   const tile = tileAt(state, city.q, city.r);
   const owner = city.owner === null ? null : { owner: city.owner };
@@ -331,12 +331,12 @@ export function cityInfo(state, city) {
   };
 }
 
-// Cena kroku z pole `from` na sousední pole `to` (silnice zlevňují, jinak terén cílového pole).
-// unit (nepovinná) určuje frakci – Lesní lid chodí lesem levněji.
+// Cost of a step from tile `from` to the neighboring tile `to` (roads are cheaper, otherwise the target tile's terrain).
+// unit (optional) determines the faction – Forest Folk move through forest more cheaply.
 export function stepCost(state, from, to, unit = null) {
   const a = tileAt(state, from.q, from.r);
   const b = tileAt(state, to.q, to.r);
-  if (a && b && a.road && b.road) return ROAD_COST; // silnice přes řeku = most
+  if (a && b && a.road && b.road) return ROAD_COST; // road across a river = bridge
   const river = riverBetween(state, from, to) ? RIVER.crossCost : 0;
   if (unit && b.terrain === 'forest') {
     const fc = factionOf(state, unit.owner).forestCost;
@@ -345,18 +345,18 @@ export function stepCost(state, from, to, unit = null) {
   return TERRAIN[b.terrain].cost + river;
 }
 
-// Teče mezi sousedními poli a, b řeka?
+// Does a river flow between neighboring tiles a, b?
 export function riverBetween(state, a, b) {
   return hasRiverEdge(state.tiles, a, b);
 }
 
-// Bonus obránce napadeného zblízka přes řeku (0, když řeka mezi nimi neteče).
+// Defense bonus for a unit attacked in melee across a river (0 if no river between them).
 export function riverDefense(state, attacker, defender) {
   return distance(attacker, defender) === 1 && riverBetween(state, attacker, defender) ? RIVER.defBonus : 0;
 }
 
-// Prohledá dosažitelná pole (Dijkstra). Vrací ceny i předchůdce, aby šla složit trasa.
-// Přes vlastní jednotky lze projít, ale ne zastavit.
+// Searches reachable tiles (Dijkstra). Returns costs and predecessors so a path can be built.
+// Own units can be passed through but not stopped on.
 function searchMoves(state, unit) {
   const result = new Map();
   const parent = new Map();
@@ -371,7 +371,7 @@ function searchMoves(state, unit) {
       if (!t || !TERRAIN[t.terrain].passable) continue;
       const other = unitAt(state, n.q, n.r);
       if (other && other.owner !== unit.owner) continue;
-      // vstup do terénu za 2 je povolen i s 1 zbývajícím bodem, pokud je to první krok
+      // entering cost-2 terrain is allowed with 1 point left if it's the first step
       let cost = cur.cost + stepCost(state, cur, n, unit);
       if (cost > unit.movesLeft) {
         if (cur.cost === 0 && unit.movesLeft > 0) cost = unit.movesLeft;
@@ -388,13 +388,13 @@ function searchMoves(state, unit) {
   return { result, parent };
 }
 
-// Dosažitelná pole: Map klíč -> cena pohybu.
+// Reachable tiles: Map key -> movement cost.
 export function reachable(state, unit) {
   return searchMoves(state, unit).result;
 }
 
-// Nejlevnější trasa na cílové pole jako pole {q, r} od startu (včetně) po cíl.
-// Vrací null, pokud cíl není v tomto tahu dosažitelný.
+// Cheapest path to the target tile as an array of {q, r} from the start (inclusive) to the target.
+// Returns null if the target isn't reachable this turn.
 export function pathTo(state, unit, q, r) {
   const { result, parent } = searchMoves(state, unit);
   const target = key(q, r);
@@ -407,8 +407,8 @@ export function pathTo(state, unit, q, r) {
   return path;
 }
 
-// Další vlastní jednotka, která se ještě může hýbat nebo útočit (pro klávesu Tab).
-// Prochází podle id cyklicky za jednotkou afterId; vrací null, když žádná není.
+// The next own unit that can still move or attack (for the Tab key).
+// Cycles by id after unit afterId; returns null if there is none.
 export function nextActiveUnit(state, player, afterId = null) {
   const canAct = (u) => u.movesLeft > 0 || attackTargets(state, u).length > 0;
   const mine = state.units.filter((u) => u.owner === player && canAct(u)).sort((a, b) => a.id - b.id);
@@ -416,9 +416,9 @@ export function nextActiveUnit(state, player, afterId = null) {
   return mine.find((u) => afterId === null || u.id > afterId) || mine[0];
 }
 
-// Dá se pohyb vrátit? before/after = stav před a po akci hráče `viewer`, events = co akce vyvolala.
-// Vrátit jde jen obyčejný pohyb, který hráči neprozradil nic nového: žádné dobytí ani povýšení,
-// žádné nově prozkoumané pole a na nově viditelných polích žádná cizí jednotka ani cizí město.
+// Can the move be undone? before/after = state before and after the action of player `viewer`, events = what it caused.
+// Only a plain move that revealed nothing new can be undone: no capture or promotion,
+// no newly explored tile, and no foreign unit or foreign city on newly visible tiles.
 export function isUndoableMove(before, after, events, viewer) {
   if (after.winner !== null || before.current !== viewer || after.current !== viewer) return false;
   if (events.length !== 1 || events[0].type !== 'move') return false;
@@ -440,7 +440,7 @@ export function attackTargets(state, unit) {
   return state.units.filter((u) => u.owner !== unit.owner && distance(unit, u) <= range);
 }
 
-// ---------- zkušenosti ----------
+// ---------- experience ----------
 
 export function rankOf(unit) {
   let rank = 0;
@@ -450,37 +450,37 @@ export function rankOf(unit) {
 
 export const rankMult = (unit) => 1 + XP.rankBonus * rankOf(unit);
 
-// Přidá zkušenosti; při povýšení jednotku trochu vyléčí. Vrací true, když došlo k povýšení.
+// Adds experience; heals the unit a bit on promotion. Returns true if a promotion happened.
 function gainXp(state, unit, amount) {
   const before = rankOf(unit);
   unit.xp = (unit.xp || 0) + amount;
   if (rankOf(unit) <= before) return false;
   unit.hp = Math.min(UNIT_TYPES[unit.type].hp, unit.hp + XP.promotionHeal);
-  addLog(state, `${PLAYERS[unit.owner].name}: ${UNIT_TYPES[unit.type].name} povýšen na ${RANKS[rankOf(unit)].name}`, {
+  addLog(state, `${PLAYERS[unit.owner].name}: ${UNIT_TYPES[unit.type].name} promoted to ${RANKS[rankOf(unit)].name}`, {
     by: unit.owner, at: [unit],
   });
   return true;
 }
 
-// Násobek síly jednotky proti konkrétnímu protivníkovi (kopiník proti jezdci…).
+// Unit strength multiplier against a specific opponent (spearman vs. horseman…).
 export function vsMult(unit, other) {
   const bonus = other && UNIT_TYPES[unit.type].bonusVs ? UNIT_TYPES[unit.type].bonusVs[other.type] || 0 : 0;
   return 1 + bonus;
 }
 
-// Obrana jednotky; attacker (nepovinný) určuje bonusy proti typu a obléhání.
+// Unit defense; attacker (optional) determines type bonuses and siege.
 export function defenseValue(state, unit, attacker = null) {
   const t = tileAt(state, unit.q, unit.r);
   let d = UNIT_TYPES[unit.type].def * rankMult(unit) * (1 + terrainDefense(state, unit, t)) * vsMult(unit, attacker);
   const city = cityAt(state, unit.q, unit.r);
   if (city && city.owner === unit.owner) {
     const siege = attacker && UNIT_TYPES[attacker.type].siege;
-    d *= siege ? 1 + CITY_DEF_BONUS : cityDefenseMult(city); // obléhací stroj hradby ignoruje
+    d *= siege ? 1 + CITY_DEF_BONUS : cityDefenseMult(city); // siege engines ignore walls
   }
   return d;
 }
 
-// Útočná síla včetně hodnosti, bonusu proti typu a obléhání města.
+// Attack strength including rank, type bonus and city siege.
 function attackPower(state, unit, target) {
   let atk = UNIT_TYPES[unit.type].atk * rankMult(unit) * vsMult(unit, target);
   const siege = UNIT_TYPES[unit.type].siege;
@@ -488,7 +488,7 @@ function attackPower(state, unit, target) {
   return atk;
 }
 
-// Odhad boje bez náhody – používá ho UI i AI.
+// Combat estimate without randomness – used by both UI and AI.
 export function previewAttack(state, attacker, defender) {
   const atk = attackPower(state, attacker, defender) * hpFactor(attacker);
   const def = defenseValue(state, defender, attacker) * (1 + riverDefense(state, attacker, defender));
@@ -508,7 +508,7 @@ function hpFactor(unit) {
   return 0.5 + 0.5 * (unit.hp / UNIT_TYPES[unit.type].hp);
 }
 
-// ---------- akce (vrací true/false podle úspěchu) ----------
+// ---------- actions (return true/false on success) ----------
 
 export function spawnUnit(state, type, owner, q, r) {
   const t = UNIT_TYPES[type];
@@ -548,7 +548,7 @@ export function moveUnit(state, unitId, q, r) {
     countStat(state, 'captures', unit.owner);
     const loot = factionOf(state, unit.owner).captureGold || 0;
     state.gold[unit.owner] += loot;
-    addLog(state, `${PLAYERS[unit.owner].name}: dobyto město ${city.name}${loot ? ` (kořist ${loot} zl.)` : ''}`, {
+    addLog(state, `${PLAYERS[unit.owner].name}: captured ${city.name}${loot ? ` (loot ${loot} gold)` : ''}`, {
       by: unit.owner, at: [city], also: prev === null ? [] : [prev],
     });
     if (prev !== null) checkWinner(state);
@@ -569,14 +569,14 @@ export function attack(state, attackerId, defenderId) {
   a.moved = true;
   const aName = UNIT_TYPES[a.type].name;
   const dName = UNIT_TYPES[d.type].name;
-  // boj vidí oba účastníci a každý, kdo vidí aspoň jedno z polí (spočítáno před ztrátou jednotek)
+  // the fight is seen by both participants and anyone who sees at least one of the tiles (computed before units are lost)
   const fight = { by: a.owner, at: [{ q: a.q, r: a.r }, { q: d.q, r: d.r }], also: [d.owner] };
   fight.seen = seenBy(state, fight);
   const ev = { type: 'attack', attackerId: a.id, defenderId: d.id, damage: res.damage, counter: 0, killed: d.hp <= 0, died: false };
   emit(state, ev);
   if (d.hp <= 0) {
     removeUnit(state, d.id);
-    addLog(state, `${PLAYERS[a.owner].name}: ${aName} zničil jednotku ${dName}`, fight);
+    addLog(state, `${PLAYERS[a.owner].name}: ${aName} destroyed ${dName}`, fight);
     countStat(state, 'kills', a.owner);
     countStat(state, 'losses', d.owner);
     ev.promoted = gainXp(state, a, XP.attack + XP.kill);
@@ -584,10 +584,10 @@ export function attack(state, attackerId, defenderId) {
     a.hp -= res.counter;
     ev.counter = res.counter;
     ev.died = a.hp <= 0;
-    addLog(state, `${PLAYERS[a.owner].name}: ${aName} útočí na ${dName} (−${res.damage}, protiúder −${res.counter})`, fight);
+    addLog(state, `${PLAYERS[a.owner].name}: ${aName} attacks ${dName} (−${res.damage}, counter −${res.counter})`, fight);
     if (a.hp <= 0) {
       removeUnit(state, a.id);
-      addLog(state, `${aName} padl v boji`, fight);
+      addLog(state, `${aName} fell in battle`, fight);
       countStat(state, 'kills', d.owner);
       countStat(state, 'losses', a.owner);
     } else {
@@ -595,7 +595,7 @@ export function attack(state, attackerId, defenderId) {
     }
     ev.defenderPromoted = gainXp(state, d, XP.defend);
   }
-  // výsledné hodnoty, aby přehrání události bylo přesné i s povýšením
+  // resulting values, so replaying the event is exact even with a promotion
   ev.attackerHp = a.hp;
   ev.attackerXp = a.xp;
   ev.defenderHp = d.hp;
@@ -612,11 +612,11 @@ export function buyUnit(state, cityId, type) {
   if (state.gold[state.current] < cost || unitAt(state, city.q, city.r)) return false;
   state.gold[state.current] -= cost;
   spawnUnit(state, type, state.current, city.q, city.r);
-  addLog(state, `${PLAYERS[state.current].name}: naverbován ${t.name} (${city.name})`, { by: state.current, at: [city] });
+  addLog(state, `${PLAYERS[state.current].name}: recruited ${t.name} (${city.name})`, { by: state.current, at: [city] });
   return true;
 }
 
-// Postaví budovu ve vlastním městě. Vrací true/false podle úspěchu.
+// Builds a building in an own city. Returns true/false on success.
 export function build(state, cityId, building) {
   const city = state.cities.find((c) => c.id === cityId);
   const b = BUILDINGS[building];
@@ -626,13 +626,13 @@ export function build(state, cityId, building) {
   state.gold[state.current] -= cost;
   city.buildings = [...(city.buildings || []), building];
   emit(state, { type: 'build', cityId, building });
-  addLog(state, `${PLAYERS[state.current].name}: dokončena stavba ${b.name} (${city.name})`, { by: state.current, at: [city] });
+  addLog(state, `${PLAYERS[state.current].name}: built ${b.name} (${city.name})`, { by: state.current, at: [city] });
   return true;
 }
 
 export function endTurn(state) {
   if (state.winner !== null) return false;
-  // léčení jednotek hráče, který končí tah
+  // heal units of the player ending the turn
   for (const u of state.units.filter((x) => x.owner === state.current)) {
     const city = cityAt(state, u.q, u.r);
     const heal = city && city.owner === u.owner ? ECONOMY.healInCity : u.moved ? 0 : ECONOMY.healIdle;
@@ -653,15 +653,15 @@ export function endTurn(state) {
   return true;
 }
 
-// ---------- náhodné události ----------
+// ---------- random events ----------
 
-// RNG pro událost je odvozený ze seedu, kola a hráče – stav nemusí nést stav generátoru
-// a stejná hra dá stejné události.
+// The event RNG is derived from the seed, turn and player – the state need not carry generator state
+// and the same game yields the same events.
 function happeningRng(state, player) {
   return createRng((state.seed * 7919 + state.turn * 131 + player * 17 + 12345) >>> 0);
 }
 
-// Hodí kostkou na náhodnou událost pro hráče na začátku jeho tahu. Vrací událost nebo null.
+// Rolls for a random event for the player at the start of their turn. Returns the event or null.
 export function rollHappening(state, player) {
   if (state.winner !== null || state.turn < HAPPENINGS.fromTurn) return null;
   const rng = happeningRng(state, player);
@@ -674,13 +674,13 @@ export function rollHappening(state, player) {
   for (const [id, k] of kinds) {
     if ((roll -= k.weight) < 0) { kind = id; break; }
   }
-  // vzpoura jen v obyčejném městě; když hráč žádné nemá, nic se nestane
+  // revolt only in an ordinary city; if the player has none, nothing happens
   const pool = kind === 'revolt' ? cities.filter((c) => !c.capital) : cities;
   if (!pool.length) return null;
   return applyHappening(state, player, kind, rng.pick(pool));
 }
 
-// Provede událost daného druhu v daném městě (exportované kvůli testům).
+// Applies an event of the given kind in the given city (exported for tests).
 export function applyHappening(state, player, kind, city) {
   const info = HAPPENINGS.kinds[kind];
   const ev = { type: 'happening', kind, player, cityId: city.id, gold: 0, hits: [], suppressed: false };
@@ -689,25 +689,25 @@ export function applyHappening(state, player, kind, city) {
   if (kind === 'harvest') {
     ev.gold = info.gold;
     state.gold[player] += info.gold;
-    addLog(state, `${who}: ${info.name} ve městě ${city.name} (+${info.gold} zl.)`, where);
+    addLog(state, `${who}: ${info.name} in ${city.name} (+${info.gold} gold)`, where);
   } else if (kind === 'plague') {
     for (const u of state.units) {
       if (distance(u, city) > 1 || u.hp <= 1) continue;
       u.hp = Math.max(1, u.hp - info.damage);
       ev.hits.push({ unitId: u.id, hp: u.hp });
       if (!where.also) where.also = [];
-      where.also.push(u.owner); // o nákaze ví i majitel postižené jednotky
+      where.also.push(u.owner); // the owner of an infected unit also learns about it
     }
-    addLog(state, `${who}: ${info.name} ve městě ${city.name}${ev.hits.length ? ` – nakaženo jednotek: ${ev.hits.length}` : ''}`, where);
+    addLog(state, `${who}: ${info.name} in ${city.name}${ev.hits.length ? ` – units infected: ${ev.hits.length}` : ''}`, where);
   } else if (kind === 'revolt') {
     const g = unitAt(state, city.q, city.r);
     if (g && g.owner === player) {
       ev.suppressed = true;
-      addLog(state, `${who}: ${info.name} ve městě ${city.name} – posádka udržela pořádek`, where);
+      addLog(state, `${who}: ${info.name} in ${city.name} – the garrison kept order`, where);
     } else {
       ev.gold = -Math.min(state.gold[player], cityIncome(city, state));
       state.gold[player] += ev.gold;
-      addLog(state, `${who}: ${info.name} ve městě ${city.name} – město tento tah neodvedlo daně (${ev.gold} zl.)`, where);
+      addLog(state, `${who}: ${info.name} in ${city.name} – the city paid no taxes this turn (${ev.gold} gold)`, where);
     }
   }
   emit(state, ev);
@@ -723,16 +723,16 @@ function checkWinner(state) {
     const hasCity = state.cities.some((c) => c.owner === p);
     if (!hasCity) {
       state.winner = (p + 1) % PLAYERS.length;
-      addLog(state, `Konec hry – vítěz: ${PLAYERS[state.winner].name}`);
+      addLog(state, `Game over – winner: ${PLAYERS[state.winner].name}`);
       recordHistory(state);
       return;
     }
   }
 }
 
-// Zápis do kroniky. Bez `where` je záznam veřejný (konec hry…). S `where` = { by, at, also, seen }
-// se uloží `seen`: hráči, kteří akci viděli – její původce, hráči z `also` a ti, kdo právě vidí
-// některé z polí `at`. Bez mlhy vidí všichni, takže se `seen` neukládá.
+// Chronicle entry. Without `where` the entry is public (game over…). With `where` = { by, at, also, seen }
+// `seen` is stored: players who saw the action – its author, players in `also` and those who currently see
+// any of the `at` tiles. Without fog everyone sees, so `seen` isn't stored.
 function addLog(state, msg, where = null) {
   const entry = { turn: state.turn, msg };
   if (where && state.fog) entry.seen = where.seen || seenBy(state, where);
@@ -753,8 +753,8 @@ function seenBy(state, { by = null, at = [], also = [] }) {
   return [...seen].sort();
 }
 
-// Kronika z pohledu hráče (nejstarší první). Záznamy, které hráč neviděl, se slijí do jednoho
-// řádku „Akce soupeře v mlze války (N)“ s počtem; po konci hry je vidět všechno.
+// Chronicle from a player's view (oldest first). Entries the player didn't see are merged into one
+// line "Enemy actions in the fog of war (N)" with a count; after game over everything is visible.
 export function logFor(state, viewer) {
   const out = [];
   for (const e of state.log) {
@@ -766,6 +766,6 @@ export function logFor(state, viewer) {
     if (last && last.hidden && last.turn === e.turn) last.count++;
     else out.push({ turn: e.turn, hidden: true, count: 1 });
   }
-  for (const e of out) if (e.hidden) e.msg = `Akce soupeře v mlze války (${e.count})`;
+  for (const e of out) if (e.hidden) e.msg = `Enemy actions in the fog of war (${e.count})`;
   return out;
 }

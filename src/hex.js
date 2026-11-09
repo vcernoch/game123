@@ -1,5 +1,5 @@
-// Hexová geometrie: axiální souřadnice (q, r), šestiúhelníky "pointy-top".
-// Návod: https://www.redblobgames.com/grids/hexagons/
+// Hex geometry: axial coordinates (q, r), "pointy-top" hexagons.
+// Guide: https://www.redblobgames.com/grids/hexagons/
 
 export const DIRS = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]];
 
@@ -15,7 +15,7 @@ export function distance(a, b) {
   return (Math.abs(dq) + Math.abs(dr) + Math.abs(dq + dr)) / 2;
 }
 
-// "odd-r" offset (sloupec, řádek) <-> axiální souřadnice
+// "odd-r" offset (column, row) <-> axial coordinates
 export function offsetToAxial(col, row) {
   return { q: col - (row - (row & 1)) / 2, r: row };
 }

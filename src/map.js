@@ -2,14 +2,14 @@ import { key, neighbors, offsetToAxial, distance, DIRS } from './hex.js';
 import { createRng } from './rng.js';
 import { TERRAIN, CITY_NAMES, RIVER } from './rules.js';
 
-// Vygeneruje mapu: obdélník cols × rows v "odd-r" offsetu.
-// Vrací { tiles, cities, starts } – bez jednotek.
+// Generates a map: a cols × rows rectangle in "odd-r" offset.
+// Returns { tiles, cities, starts } – without units.
 export function generateMap(seed, cols, rows, neutralCities = 4) {
   for (let attempt = 0; attempt < 100; attempt++) {
     const result = tryGenerate(seed + attempt * 7919, cols, rows, neutralCities);
     if (result) return result;
   }
-  throw new Error('Nepodařilo se vygenerovat propojenou mapu');
+  throw new Error('Failed to generate a connected map');
 }
 
 function smoothField(field, cols, rows, passes) {
@@ -67,7 +67,7 @@ function tryGenerate(seed, cols, rows, neutralCount) {
   const midRow = Math.floor(rows / 2);
   const starts = [offsetToAxial(1, midRow), offsetToAxial(cols - 2, midRow)];
 
-  // Okolí startů srovnat na pláně, ať se dá hned hrát.
+  // Flatten the surroundings of the starts to plains so play can begin right away.
   for (const s of starts) {
     tiles[key(s.q, s.r)].terrain = 'plains';
     for (const n of neighbors(s.q, s.r)) {
@@ -79,8 +79,8 @@ function tryGenerate(seed, cols, rows, neutralCount) {
   if (!pathExists(tiles, starts[0], starts[1])) return null;
 
   const cities = [
-    { id: 1, q: starts[0].q, r: starts[0].r, owner: 0, capital: true, name: 'Tvoje hlavní město' },
-    { id: 2, q: starts[1].q, r: starts[1].r, owner: 1, capital: true, name: 'Nepřátelská pevnost' },
+    { id: 1, q: starts[0].q, r: starts[0].r, owner: 0, capital: true, name: 'Your Capital' },
+    { id: 2, q: starts[1].q, r: starts[1].r, owner: 1, capital: true, name: 'Enemy Fortress' },
   ];
 
   const candidates = Object.values(tiles).filter(
@@ -98,12 +98,12 @@ function tryGenerate(seed, cols, rows, neutralCount) {
   if (cities.length < 2 + neutralCount) return null;
 
   buildRoads(tiles, cities);
-  // řeky mají vlastní RNG, aby nezměnily rozložení terénu a měst pro dané seedy
+  // rivers have their own RNG so they don't change the terrain and city layout for given seeds
   buildRivers(tiles, height, cols, rows, createRng(seed * 31 + 17));
   return { tiles, cities, starts };
 }
 
-// Silnice: minimální kostra mezi městy, každý úsek vede nejlevnější cestou terénem.
+// Roads: a minimum spanning tree between cities, each segment follows the cheapest path through terrain.
 function buildRoads(tiles, cities) {
   const connected = [cities[0]];
   const rest = cities.slice(1);
@@ -122,18 +122,18 @@ function buildRoads(tiles, cities) {
   }
 }
 
-// ---------- řeky ----------
-// Řeka je řetěz hran mezi sousedními poli. Hrana (A, B) má dva koncové vrcholy; v každém se
-// potká se třetím polem C (společný soused A i B). Z vrcholu může řeka pokračovat po hraně
-// (A, C), nebo (B, C). Řeka teče z kopců/hor „z kopce“ podle výškového pole, dokud nedojde
-// do vody, na okraj mapy, do jiné řeky, nebo nepřekročí maximální délku.
+// ---------- rivers ----------
+// A river is a chain of edges between neighboring tiles. Edge (A, B) has two end vertices; at each
+// it meets a third tile C (a common neighbor of A and B). From a vertex the river can continue along edge
+// (A, C) or (B, C). Rivers flow from hills/mountains "downhill" along the height field until they reach
+// water, the map edge, another river, or exceed the maximum length.
 
-// Směr z a do b (index do DIRS), nebo -1, když nejsou sousedé.
+// Direction from a to b (index into DIRS), or -1 if they aren't neighbors.
 export function dirTo(a, b) {
   return DIRS.findIndex(([dq, dr]) => a.q + dq === b.q && a.r + dr === b.r);
 }
 
-// Dva společní sousedé sousedních polí a, b.
+// The two common neighbors of neighboring tiles a, b.
 function commonNeighbors(a, b) {
   const d = dirTo(a, b);
   return [DIRS[(d + 5) % 6], DIRS[(d + 1) % 6]].map(([dq, dr]) => ({ q: a.q + dq, r: a.r + dr }));
@@ -156,7 +156,7 @@ function addRiverEdge(tiles, a, b) {
 function buildRivers(tiles, height, cols, rows, rng) {
   const h = (p) => {
     const t = tiles[key(p.q, p.r)];
-    if (!t) return -1; // za okrajem mapy je „moře“
+    if (!t) return -1; // beyond the map edge is "sea"
     return t.terrain === 'water' ? -0.5 : height[t.row][t.col];
   };
   const ends = (p) => { const t = tiles[key(p.q, p.r)]; return !t || t.terrain === 'water'; };
@@ -169,7 +169,7 @@ function buildRivers(tiles, height, cols, rows, rng) {
     let a = { q: src.q, r: src.r };
     let b = { q: src.q + DIRS[d][0], r: src.r + DIRS[d][1] };
     if (ends(b) || hasRiverEdge(tiles, a, b)) continue;
-    // vrchol, ke kterému řeka teče: nižší ze dvou společných sousedů
+    // the vertex the river flows toward: the lower of the two common neighbors
     let [c1, c2] = commonNeighbors(a, b);
     let c = h(c1) <= h(c2) ? c1 : c2;
     const edges = [];
@@ -178,8 +178,8 @@ function buildRivers(tiles, height, cols, rows, rng) {
     while (edges.length < RIVER.maxLength) {
       edges.push([a, b]);
       used.add(edgeKey(a, b));
-      if (ends(c)) break; // vrchol na pobřeží / okraji – řeka ústí
-      // pokračování (a, c) s dalším vrcholem mimo b, nebo (b, c) s dalším vrcholem mimo a
+      if (ends(c)) break; // vertex on the coast / edge – the river ends
+      // continue along (a, c) with the next vertex other than b, or (b, c) with the next vertex other than a
       const opts = [[a, c, b], [b, c, a]].map(([x, y, back]) => {
         const next = commonNeighbors(x, y).find((p) => p.q !== back.q || p.r !== back.r);
         return { x, y, next, score: h(x) + h(y) + h(next) + rng.next() * 0.08 };
@@ -187,7 +187,7 @@ function buildRivers(tiles, height, cols, rows, rng) {
       if (!opts.length) break;
       opts.sort((p, q) => p.score - q.score);
       const o = opts[0];
-      if (hasRiverEdge(tiles, o.x, o.y)) break; // vlévá se do jiné řeky
+      if (hasRiverEdge(tiles, o.x, o.y)) break; // flows into another river
       [a, b, c] = [o.x, o.y, o.next];
     }
     if (edges.length < RIVER.minLength) continue;
@@ -196,7 +196,7 @@ function buildRivers(tiles, height, cols, rows, rng) {
   }
 }
 
-// Dijkstra po průchodném terénu; po už postavené silnici je to levnější (silnice se slévají).
+// Dijkstra over passable terrain; already built roads are cheaper (roads merge).
 function cheapestPath(tiles, from, to) {
   const start = key(from.q, from.r);
   const goal = key(to.q, to.r);

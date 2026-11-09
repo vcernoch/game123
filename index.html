@@ -1,73 +1,73 @@
 <!doctype html>
-<html lang="cs">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Hexová říše</title>
+  <title>Hex Realm</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Cpolygon points=%2716,2 29,9 29,23 16,30 3,23 3,9%27 fill=%27%23e0b44a%27/%3E%3C/svg%3E">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <header>
-    <h1>Hexová říše <small id="version" title=""></small> <button id="sound" class="icon-btn" aria-pressed="true" aria-label="Zvuk">♪</button></h1>
+    <h1>Hex Realm <small id="version" title=""></small> <button id="sound" class="icon-btn" aria-pressed="true" aria-label="Sound">♪</button></h1>
     <div class="stats">
-      <span>Kolo <b id="turn">1</b></span>
-      <span>Zlato <b id="gold">0</b> <small id="income"></small></span>
-      <span>Města <b id="cities">0</b></span>
+      <span>Turn <b id="turn">1</b></span>
+      <span>Gold <b id="gold">0</b> <small id="income"></small></span>
+      <span>Cities <b id="cities">0</b></span>
     </div>
     <div class="actions">
-      <button id="new-game" class="secondary">Nová hra</button>
-      <button id="next-unit" class="secondary" title="Další jednotka (Tab)">Další jednotka</button>
-      <button id="end-turn">Ukončit tah</button>
+      <button id="new-game" class="secondary">New game</button>
+      <button id="next-unit" class="secondary" title="Next unit (Tab)">Next unit</button>
+      <button id="end-turn">End turn</button>
     </div>
   </header>
-  <div id="banner" hidden><span id="banner-text"></span> <button id="banner-new" class="secondary">Nová hra</button></div>
+  <div id="banner" hidden><span id="banner-text"></span> <button id="banner-new" class="secondary">New game</button></div>
   <div id="notice" role="status" hidden></div>
   <main>
-    <button id="zoom" class="secondary zoom-btn" aria-pressed="false">Přiblížit mapu</button>
+    <button id="zoom" class="secondary zoom-btn" aria-pressed="false">Zoom map</button>
     <div class="board-wrap"><canvas id="board"></canvas></div>
     <aside>
       <section id="info"></section>
       <details id="stats-panel">
-        <summary>Statistiky</summary>
+        <summary>Statistics</summary>
         <div id="stats"></div>
       </details>
       <section>
-        <h3>Kronika</h3>
+        <h3>Chronicle</h3>
         <ul id="log"></ul>
       </section>
       <details>
-        <summary>Jak hrát</summary>
-        <p>Klikni na svou modrou jednotku, pak na zvýrazněné pole pro pohyb nebo na nepřítele se žlutým kroužkem pro útok. Na dotykovém displeji první klepnutí ukáže trasu nebo odhad boje a druhé ji potvrdí; tlačítkem „Přiblížit mapu“ dostaneš větší políčka.
-          Vstupem do města ho dobudeš. Ve vlastním městě, kde nestojí jednotka, můžeš verbovat, a kdykoli v něm stavět hradby, trh nebo kasárna.
-          Vidíš jen okolí svých jednotek a měst (jezdci a jednotky na kopcích dohlédnou dál), prozkoumaná krajina zůstává na mapě. Po silnicích (hnědé cesty mezi městy) se jednotky pohybují dvakrát rychleji. Překročit řeku (modré čáry na hranách polí) stojí bod pohybu navíc – po mostě ne – a jednotka napadená zblízka přes řeku se brání o 25 % lépe. Občas tě na začátku tahu potká náhodná událost: bohatá úroda přinese zlato, mor ubere životy jednotkám ve městě a kolem něj, vzpoura připraví město bez posádky o daně. Kopiník je silný proti jezdcům, katapult rozbíjí posádky měst a nevadí mu hradby. Jednotky sbírají zkušenosti v boji a povyšují na Veterána (★) a Elitu (★★) – každá hodnost přidá 15 % útoku i obrany. Vyhraješ, když AI přijde o všechna města. Najetím na pole uvidíš trasu pohybu. Tab = další jednotka s pohybem, Z = vrátit pohyb (jde jen u pohybu, který neodhalil nic nového – žádné nové pole ani nepřítele), Enter = konec tahu, Esc = zrušit výběr nebo přeskočit animaci (stačí i klik do mapy).</p>
+        <summary>How to play</summary>
+        <p>Click your blue unit, then a highlighted tile to move or an enemy with a yellow ring to attack. On a touch screen the first tap shows the path or a battle estimate and the second tap confirms it; the “Zoom map” button gives you bigger tiles.
+          Enter a city to capture it. In your own city with no unit standing in it you can recruit, and you can build walls, a market or barracks there at any time.
+          You only see the surroundings of your units and cities (horsemen and units on hills see farther); explored land stays on the map. On roads (brown paths between cities) units move twice as fast. Crossing a river (blue lines on tile edges) costs an extra move point – not over a bridge – and a unit attacked in melee across a river defends 25 % better. Sometimes a random event hits you at the start of your turn: a bountiful harvest brings gold, plague takes HP from units in and around a city, and a revolt costs a city without a garrison its taxes. Spearmen are strong against horsemen; catapults smash city garrisons and ignore walls. Units gain experience in battle and are promoted to Veteran (★) and Elite (★★) – each rank adds 15 % attack and defense. You win when the AI loses all its cities. Hover over a tile to see the movement path. Tab = next unit with moves left, Z = undo move (only for a move that revealed nothing new – no new tile or enemy), Enter = end turn, Esc = cancel selection or skip animation (a click on the map works too).</p>
       </details>
     </aside>
   </main>
   <div id="tooltip" hidden></div>
   <dialog id="new-game-dialog">
     <form method="dialog">
-      <h2>Nová hra</h2>
+      <h2>New game</h2>
       <fieldset>
-        <legend>Obtížnost AI</legend>
-        <label><input type="radio" name="difficulty" value="easy"> <b>Snadná</b> <small>AI má méně zlata, váhá s útokem a nevidí přes mlhu</small></label>
-        <label><input type="radio" name="difficulty" value="normal" checked> <b>Normální</b> <small>férová AI, která taky musí průzkumničit</small></label>
-        <label><input type="radio" name="difficulty" value="hard"> <b>Těžká</b> <small>AI vidí celou mapu a má zlato navíc</small></label>
+        <legend>AI difficulty</legend>
+        <label><input type="radio" name="difficulty" value="easy"> <b>Easy</b> <small>AI has less gold, hesitates to attack and can't see through fog</small></label>
+        <label><input type="radio" name="difficulty" value="normal" checked> <b>Normal</b> <small>a fair AI that has to scout too</small></label>
+        <label><input type="radio" name="difficulty" value="hard"> <b>Hard</b> <small>AI sees the whole map and gets extra gold</small></label>
       </fieldset>
       <fieldset>
-        <legend>Velikost mapy</legend>
+        <legend>Map size</legend>
         <div id="size-options"></div>
       </fieldset>
       <fieldset>
-        <legend>Tvoje frakce</legend>
+        <legend>Your faction</legend>
         <div id="faction-options"></div>
       </fieldset>
-      <label class="check"><input type="checkbox" name="fog" checked> Mlha války</label>
-      <label class="check"><input type="checkbox" name="happenings" checked> Náhodné události (úroda, mor, vzpoura)</label>
-      <p class="hint" id="new-game-warning">Rozehraná hra se ztratí.</p>
+      <label class="check"><input type="checkbox" name="fog" checked> Fog of war</label>
+      <label class="check"><input type="checkbox" name="happenings" checked> Random events (harvest, plague, revolt)</label>
+      <p class="hint" id="new-game-warning">The current game will be lost.</p>
       <div class="dialog-actions">
-        <button value="cancel" class="secondary" formnovalidate>Zrušit</button>
-        <button value="start" id="start-game">Začít hru</button>
+        <button value="cancel" class="secondary" formnovalidate>Cancel</button>
+        <button value="start" id="start-game">Start game</button>
       </div>
     </form>
   </dialog>

@@ -1,99 +1,99 @@
-// Herní data: terén, jednotky, frakce. Balanc se ladí tady.
+// Game data: terrain, units, factions. Balance is tuned here.
 
 export const TERRAIN = {
-  plains:   { name: 'Pláně',  cost: 1, defBonus: 0,    passable: true,  color: '#a8c66c' },
-  forest:   { name: 'Les',    cost: 2, defBonus: 0.25, passable: true,  color: '#4f7f3a' },
-  hills:    { name: 'Kopce',  cost: 2, defBonus: 0.5,  passable: true,  color: '#b39b62' },
-  mountain: { name: 'Hory',   cost: Infinity, defBonus: 0, passable: false, color: '#7d7a78' },
-  water:    { name: 'Voda',   cost: Infinity, defBonus: 0, passable: false, color: '#4a86c5' },
+  plains:   { name: 'Plains', cost: 1, defBonus: 0,    passable: true,  color: '#a8c66c' },
+  forest:   { name: 'Forest', cost: 2, defBonus: 0.25, passable: true,  color: '#4f7f3a' },
+  hills:    { name: 'Hills',  cost: 2, defBonus: 0.5,  passable: true,  color: '#b39b62' },
+  mountain: { name: 'Mountains', cost: Infinity, defBonus: 0, passable: false, color: '#7d7a78' },
+  water:    { name: 'Water',  cost: Infinity, defBonus: 0, passable: false, color: '#4a86c5' },
 };
 
 export const UNIT_TYPES = {
-  warrior:  { name: 'Válečník',  symbol: 'V', hp: 10, atk: 4, def: 3, move: 2, range: 1, cost: 10, sight: 2 },
-  archer:   { name: 'Lučištník', symbol: 'L', hp: 8,  atk: 3, def: 2, move: 2, range: 2, cost: 12, sight: 2 },
-  horseman: { name: 'Jezdec',    symbol: 'J', hp: 10, atk: 5, def: 2, move: 4, range: 1, cost: 15, sight: 3 },
-  // bonusVs: násobek síly navíc proti danému typu (útok i obrana)
-  spearman: { name: 'Kopiník',   symbol: 'K', hp: 10, atk: 3, def: 4, move: 2, range: 1, cost: 12, sight: 2,
-    bonusVs: { horseman: 1 }, desc: 'dvojnásobná síla proti jezdcům' },
-  // siege: bonus proti jednotkám ve městech a ignoruje hradby
-  catapult: { name: 'Katapult',  symbol: 'O', hp: 7,  atk: 6, def: 1, move: 1, range: 2, cost: 20, sight: 2,
-    siege: 0.5, desc: '+50 % proti posádkám měst, ignoruje hradby' },
+  warrior:  { name: 'Warrior',   symbol: 'W', hp: 10, atk: 4, def: 3, move: 2, range: 1, cost: 10, sight: 2 },
+  archer:   { name: 'Archer',    symbol: 'A', hp: 8,  atk: 3, def: 2, move: 2, range: 2, cost: 12, sight: 2 },
+  horseman: { name: 'Horseman',  symbol: 'H', hp: 10, atk: 5, def: 2, move: 4, range: 1, cost: 15, sight: 3 },
+  // bonusVs: extra strength multiplier against the given type (attack and defense)
+  spearman: { name: 'Spearman',  symbol: 'S', hp: 10, atk: 3, def: 4, move: 2, range: 1, cost: 12, sight: 2,
+    bonusVs: { horseman: 1 }, desc: 'double strength against horsemen' },
+  // siege: bonus against units in cities, ignores walls
+  catapult: { name: 'Catapult',  symbol: 'C', hp: 7,  atk: 6, def: 1, move: 1, range: 2, cost: 20, sight: 2,
+    siege: 0.5, desc: '+50 % against city garrisons, ignores walls' },
 };
 
 export const PLAYERS = [
-  { name: 'Ty',  color: '#2f6fd6', light: '#9cc0ff', isAI: false },
+  { name: 'You', color: '#2f6fd6', light: '#9cc0ff', isAI: false },
   { name: 'AI',  color: '#d23c3c', light: '#ffa3a3', isAI: true },
 ];
 
-// Budovy ve městech. Každou lze ve městě postavit jednou; při dobytí města zůstávají.
+// City buildings. Each can be built once per city; they remain when the city is captured.
 export const BUILDINGS = {
-  walls:    { name: 'Hradby',  cost: 20, symbol: '▣', desc: 'posádka +50 % obrany' },
-  market:   { name: 'Trh',     cost: 25, symbol: '¤', desc: '+2 zlata za kolo' },
-  barracks: { name: 'Kasárna', cost: 20, symbol: '⚑', desc: 'verbování o 3 zlaté levnější' },
+  walls:    { name: 'Walls',   cost: 20, symbol: '▣', desc: 'garrison +50 % defense' },
+  market:   { name: 'Market',  cost: 25, symbol: '¤', desc: '+2 gold per turn' },
+  barracks: { name: 'Barracks', cost: 20, symbol: '⚑', desc: 'recruiting 3 gold cheaper' },
 };
 export const BUILDING_EFFECTS = { wallsDefense: 0.5, marketIncome: 2, barracksDiscount: 3 };
 
-// Zkušenosti: XP za útok (+ za zničení) a za přežitý útok. Hodnost zvyšuje útok i obranu.
+// Experience: XP for attacking (+ for a kill) and for surviving an attack. Rank raises attack and defense.
 export const RANKS = [
-  { name: 'Rekrut',  xp: 0, symbol: '' },
-  { name: 'Veterán', xp: 3, symbol: '★' },
-  { name: 'Elita',   xp: 7, symbol: '★★' },
+  { name: 'Recruit', xp: 0, symbol: '' },
+  { name: 'Veteran', xp: 3, symbol: '★' },
+  { name: 'Elite',   xp: 7, symbol: '★★' },
 ];
 export const XP = { attack: 1, kill: 1, defend: 1, rankBonus: 0.15, promotionHeal: 3 };
 
-// Frakce: každá strana má jednu. Chybějící položka = bez bonusu.
-// cityIncome: zlato navíc za každé město; unitDiscount / buildingDiscount: sleva podle typu;
-// moveBonus: pohyb navíc podle typu jednotky; forestCost / forestDefense: pohyb a obrana v lese;
-// captureGold: kořist za dobytí města.
+// Factions: each side has one. A missing entry = no bonus.
+// cityIncome: extra gold per city; unitDiscount / buildingDiscount: discount by type;
+// moveBonus: extra movement by unit type; forestCost / forestDefense: movement and defense in forest;
+// captureGold: loot for capturing a city.
 export const FACTIONS = {
-  kingdom: { name: 'Království', desc: '+1 zlato za každé město, hradby o 10 levnější',
+  kingdom: { name: 'Kingdom', desc: '+1 gold per city, walls 10 cheaper',
     cityIncome: 1, buildingDiscount: { walls: 10 } },
-  horde:   { name: 'Horda', desc: 'jezdci o 4 levnější a s pohybem +1, za dobyté město kořist 5 zlatých',
+  horde:   { name: 'Horde', desc: 'horsemen 4 cheaper with +1 move, 5 gold loot per captured city',
     unitDiscount: { horseman: 4 }, moveBonus: { horseman: 1 }, captureGold: 5 },
-  forest:  { name: 'Lesní lid', desc: 'les stojí jen 1 pohyb a dává +25 % obrany navíc, lučištníci o 3 levnější',
+  forest:  { name: 'Forest Folk', desc: 'forest costs only 1 move and gives +25 % extra defense, archers 3 cheaper',
     unitDiscount: { archer: 3 }, forestCost: 1, forestDefense: 0.25 },
 };
 export const NO_FACTION = { name: '—', desc: '' };
 
-// Obtížnost ovlivňuje jen AI hráče.
-// seesAll: AI ignoruje mlhu války; incomeBonus: zlato navíc za kolo; startGold: zlato navíc na začátku;
-// caution: jak moc AI váhá s útokem (vyšší = opatrnější, hraje hůř).
+// Difficulty affects only the AI player.
+// seesAll: AI ignores the fog of war; incomeBonus: extra gold per turn; startGold: extra gold at the start;
+// caution: how much the AI hesitates to attack (higher = more cautious, plays worse).
 export const DIFFICULTY = {
-  easy:   { name: 'Snadná',    seesAll: false, incomeBonus: -2, startGold: -10, caution: 1.6 },
-  normal: { name: 'Normální',  seesAll: false, incomeBonus: 0,  startGold: 0,   caution: 1 },
-  hard:   { name: 'Těžká',     seesAll: true,  incomeBonus: 3,  startGold: 10,  caution: 0.8 },
+  easy:   { name: 'Easy',      seesAll: false, incomeBonus: -2, startGold: -10, caution: 1.6 },
+  normal: { name: 'Normal',    seesAll: false, incomeBonus: 0,  startGold: 0,   caution: 1 },
+  hard:   { name: 'Hard',      seesAll: true,  incomeBonus: 3,  startGold: 10,  caution: 0.8 },
 };
 
-// Silnice: krok z pole se silnicí na další pole se silnicí stojí jen tolik bodů pohybu.
+// Roads: a step from a road tile to another road tile costs only this many movement points.
 export const ROAD_COST = 0.5;
 
-// Řeky tečou po hranách hexů. Překročení řeky stojí pohyb navíc (most = silnice na obou stranách
-// je zdarma) a jednotka napadená přes řeku zblízka má bonus k obraně.
-// perTiles: jedna řeka na tolik polí mapy (malá 1, střední 2, velká 4); délka v hranách.
+// Rivers flow along hex edges. Crossing a river costs extra movement (a bridge = road on both sides
+// is free) and a unit attacked in melee across a river gets a defense bonus.
+// perTiles: one river per this many map tiles (small 1, medium 2, large 4); length in edges.
 export const RIVER = { crossCost: 1, defBonus: 0.25, minLength: 3, maxLength: 14, perTiles: 70 };
 
-// Náhodné události na začátku tahu hráče (od kola fromTurn, s pravděpodobností chance).
-// Postihnou náhodné město hráče; weight = relativní četnost.
-// harvest: zlato navíc; plague: jednotky ve městě a kolem něj ztratí životy (nezemřou);
-// revolt: město bez vlastní posádky tento tah neodvede příjem (hlavní město se nebouří).
+// Random events at the start of a player's turn (from turn fromTurn, with probability chance).
+// They hit a random city of the player; weight = relative frequency.
+// harvest: extra gold; plague: units in and around the city lose HP (they don't die);
+// revolt: a city without its own garrison yields no income this turn (the capital never revolts).
 export const HAPPENINGS = {
   chance: 0.15,
   fromTurn: 3,
   kinds: {
-    harvest: { name: 'Bohatá úroda', weight: 3, gold: 8, good: true },
-    plague:  { name: 'Mor',          weight: 2, damage: 3 },
-    revolt:  { name: 'Vzpoura',      weight: 2 },
+    harvest: { name: 'Bountiful Harvest', weight: 3, gold: 8, good: true },
+    plague:  { name: 'Plague',       weight: 2, damage: 3 },
+    revolt:  { name: 'Revolt',       weight: 2 },
   },
 };
 
-// Velikosti mapy pro dialog nové hry.
+// Map sizes for the new game dialog.
 export const MAP_SIZES = {
-  small:  { name: 'Malá',    cols: 10, rows: 8,  neutralCities: 2, desc: 'rychlá hra' },
-  medium: { name: 'Střední', cols: 14, rows: 10, neutralCities: 4, desc: 'klasika' },
-  large:  { name: 'Velká',   cols: 20, rows: 14, neutralCities: 8, desc: 'dlouhá hra s víc městy' },
+  small:  { name: 'Small',  cols: 10, rows: 8,  neutralCities: 2, desc: 'quick game' },
+  medium: { name: 'Medium', cols: 14, rows: 10, neutralCities: 4, desc: 'classic' },
+  large:  { name: 'Large',  cols: 20, rows: 14, neutralCities: 8, desc: 'long game with more cities' },
 };
 
-// Mlha války: dohled měst a bonus z kopců.
+// Fog of war: city sight range and the hills bonus.
 export const VISION = { city: 2, hillsBonus: 1 };
 
 export const NEUTRAL_COLOR = '#e8e2d0';
@@ -107,6 +107,6 @@ export const ECONOMY = {
 };
 
 export const CITY_NAMES = [
-  'Brodek', 'Lipnice', 'Kamenec', 'Vrbno', 'Hradiště', 'Olšany',
-  'Ždár', 'Bystřice', 'Topolná', 'Mlýnec', 'Zahrádky', 'Javorník',
+  'Brookby', 'Lindenhall', 'Stonecliff', 'Willowmere', 'Hillfort', 'Aldergrove',
+  'Ashford', 'Riverton', 'Poplar Vale', 'Millbrook', 'Gardenside', 'Mapleton',
 ];

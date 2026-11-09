@@ -118,7 +118,7 @@ fieldset small, .check small { display: block; color: var(--muted); margin-left:
 @media (max-width: 760px) {
   main { grid-template-columns: 1fr; padding: 16px; }
   .actions { margin-left: 0; }
-  /* přiblížená mapa: větší hexy pro prsty, posun uvnitř rámečku (stránka se do šířky neposouvá) */
+  /* zoomed map: bigger hexes for fingers, scrolling inside the frame (the page itself doesn't scroll sideways) */
   .zoom-btn { display: block; width: 100%; }
   .board-wrap.zoomed { overflow: auto; max-height: 75vh; border-radius: 8px; -webkit-overflow-scrolling: touch; }
   .board-wrap.zoomed canvas { width: var(--zoom-w, 820px); max-width: none; }
