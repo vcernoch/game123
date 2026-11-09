@@ -100,6 +100,23 @@ try {
   await page.mouse.move(cityPt.x, cityPt.y);
   const tipText = await page.evaluate(() => !document.getElementById('tooltip').hidden && document.getElementById('tooltip').textContent);
   if (!tipText || !tipText.includes('gold/turn')) throw new Error(`city tooltip missing: ${tipText}`);
+  // hovering a unit shows its stats
+  const unitPt = await page.evaluate(async () => {
+    const rnd = await import('./src/render.js');
+    const st = window.__game.getState();
+    const u = st.units.find((x) => x.owner === 0);
+    if (!u) return null;
+    const p = rnd.tileCenter(u.q, u.r);
+    const rect = document.getElementById('board').getBoundingClientRect();
+    const k = rect.width / rnd.canvasSize(st).w;
+    return { x: rect.left + p.x * k, y: rect.top + p.y * k };
+  });
+  if (unitPt) {
+    await page.mouse.move(unitPt.x + 1, unitPt.y + 1);
+    const ut = await page.evaluate(() => !document.getElementById('tooltip').hidden && document.getElementById('tooltip').textContent);
+    if (!ut || !/HP \d+\/\d+/.test(ut) || !ut.includes('Defense')) throw new Error(`unit tooltip missing: ${ut}`);
+    await page.screenshot({ path: 'artifacts/screenshot-unit-tip.png' });
+  }
   await page.screenshot({ path: 'artifacts/screenshot-city.png' });
 
   // AI turn at full speed: capture a frame mid-animation

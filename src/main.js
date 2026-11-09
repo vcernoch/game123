@@ -2,7 +2,7 @@
 import {
   createGame, reachable, attackTargets, moveUnit, attack, buyUnit, endTurn,
   unitAt, cityAt, getUnit, incomeOf, previewAttack, tileAt, pathTo, nextActiveUnit, cityInfo,
-  cloneState, drainEvents, migrateState, logFor, isUndoableMove, canFortify, fortify, activeUnits, territoryOwner, cityResources, planRoute, setOrder, runOrders, cancelOrder, visibleTiles, exploredTiles, build, unitCost, hasBuilding,
+  cloneState, drainEvents, migrateState, logFor, isUndoableMove, canFortify, fortify, activeUnits, territoryOwner, cityResources, unitSummary, planRoute, setOrder, runOrders, cancelOrder, visibleTiles, exploredTiles, build, unitCost, hasBuilding,
   rankOf, rankMult, buildingCost, unitMove, factionOf, riverDefense,
 } from './game.js';
 import { createAnimator } from './anim.js';
@@ -368,17 +368,34 @@ function showTooltip(ev, hex) {
     const p = previewAttack(state, sel, target);
     tip.textContent = `${riverDefense(state, sel, target) ? 'Attack across a river' : 'Attack'}: −${p.damage}${p.kills ? ' (destroys)' : ''}, counter −${p.counter}`;
     placeTip(tip, ev);
-  } else if (hex && cityAt(state, hex.q, hex.r) && exploredTiles(state, 0).has(key(hex.q, hex.r))) {
+  } else if (target) {
+    // any visible unit: its stats; a city under it gets a second line
+    const lines = [unitTipText(target)];
     const city = cityAt(state, hex.q, hex.r);
-    const ci = cityInfo(state, city);
-    const owner = city.owner === null ? 'neutral' : PLAYERS[city.owner].name;
-    const gar = ci.garrison ? UNIT_TYPES[ci.garrison.type].name : 'no garrison';
-    const bs = (city.buildings || []).map((b) => BUILDINGS[b].name).join(', ');
-    tip.textContent = `${city.name} (${owner}): +${ci.income} gold/turn · defense +${ci.defensePct} % · ${gar}${bs ? ` · ${bs}` : ''}`;
+    if (city) lines.push(cityTipText(city));
+    tip.textContent = lines.join('\n');
+    placeTip(tip, ev);
+  } else if (hex && cityAt(state, hex.q, hex.r) && exploredTiles(state, 0).has(key(hex.q, hex.r))) {
+    tip.textContent = cityTipText(cityAt(state, hex.q, hex.r));
     placeTip(tip, ev);
   } else {
     tip.hidden = true;
   }
+}
+
+function unitTipText(u) {
+  const s = unitSummary(state, u);
+  const tags = [s.rank !== RANKS[0].name ? s.rank : '', s.fortified ? 'fortified' : '', s.marching ? 'marching' : ''].filter(Boolean);
+  return `${PLAYERS[s.owner].name}: ${s.name}${tags.length ? ` (${tags.join(', ')})` : ''} · HP ${s.hp}/${s.maxHp}\n`
+    + `Attack ${fmt(s.attack)} · Defense ${fmt(s.defense)}${s.notes.length ? ` (${s.notes.join(', ')})` : ''} · Range ${s.range} · Move ${s.move}`;
+}
+
+function cityTipText(city) {
+  const ci = cityInfo(state, city);
+  const owner = city.owner === null ? 'neutral' : PLAYERS[city.owner].name;
+  const gar = ci.garrison ? UNIT_TYPES[ci.garrison.type].name : 'no garrison';
+  const bs = (city.buildings || []).map((b) => BUILDINGS[b].name).join(', ');
+  return `${city.name} (${owner}): +${ci.income} gold/turn · defense +${ci.defensePct} % · ${gar}${bs ? ` · ${bs}` : ''}`;
 }
 
 // After a player action: save and replay what happened (before = state before the action).

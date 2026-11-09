@@ -6,7 +6,7 @@ import {
   drainEvents, applyEvent, migrateState, STATE_VERSION,
   visibleTiles, exploredTiles, build, unitCost, rankOf, stepCost, getUnit,
   buildingCost, unitMove, factionOf, armyPower, riverBetween, riverDefense,
-  rollHappening, applyHappening, cityIncome, logFor, isUndoableMove, canFortify, fortify, activeUnits, territoryMap, territoryOwner, planRoute, setOrder, runOrders, cancelOrder, cityHeal, citySight, cityResources,
+  rollHappening, applyHappening, cityIncome, logFor, isUndoableMove, canFortify, fortify, activeUnits, territoryMap, territoryOwner, planRoute, setOrder, runOrders, cancelOrder, cityHeal, citySight, cityResources, unitSummary,
 } from '../src/game.js';
 import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
@@ -1284,4 +1284,24 @@ test('resources: placed fairly in territories, add income and cheaper horsemen',
   const old = createGame({ seed: 2 });
   old.version = 14;
   assert.equal(migrateState(old).version, STATE_VERSION);
+});
+
+test('unit summary for the tooltip: effective stats and reasons', () => {
+  const { s, me } = duel(6);
+  const a = unitSummary(s, me);
+  assert.equal(a.name, UNIT_TYPES[me.type].name);
+  assert.equal(a.hp, me.hp);
+  assert.equal(a.defense, Math.round(defenseValue(s, me) * 10) / 10);
+  assert.deepEqual(a.notes, [], 'plains, no city');
+  me.fortified = true;
+  me.xp = RANKS[1].xp;
+  const b = unitSummary(s, me);
+  assert.ok(b.fortified && b.notes.includes('fortified'));
+  assert.equal(b.rank, RANKS[1].name);
+  assert.ok(b.defense > a.defense && b.attack > a.attack);
+  // in an own city with walls
+  const cap = s.cities.find((c) => c.owner === 0 && c.capital);
+  cap.buildings = ['walls'];
+  me.q = cap.q; me.r = cap.r;
+  assert.ok(unitSummary(s, me).notes.includes('city with walls'));
 });

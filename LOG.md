@@ -2,6 +2,12 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-09 – Unit tooltip
+- `unitSummary(state, unit)` in `game.js`: name, owner, HP, effective attack (rank) and defense where the unit stands (rank, terrain, own city / walls, fortify), range, move, rank, fortified / marching, plus the reasons for the defense bonus.
+- Hovering any visible unit (own or enemy) shows it in the tooltip on two lines; a city under the unit adds a third line with the city summary. The attack preview still takes priority when the selected unit can attack the hovered one. On touch there is no hover – tapping a unit shows it in the panel as before.
+- Tests: +1 logic (values match `defenseValue`, rank and fortify raise them, reasons for terrain / city with walls / fortify). Smoke test hovers an own unit and checks the tooltip (`artifacts/screenshot-unit-tip.png`).
+- Status: `npm run check` green (51 logic tests + smoke).
+
 ## 2026-11-09 – Map resources
 - `RESOURCES` in `rules.js`, `placeResources` in `map.js`, `cityResources()` in `game.js`. Two kinds on tiles near cities:
   - **Gold mine** (gold nuggets): +2 gold per turn for the city whose territory it is in (`cityIncome`).

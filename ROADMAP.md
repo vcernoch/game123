@@ -47,7 +47,7 @@ Check off `[x]` when done. Add new ideas to the end of the relevant phase or to 
 
 ## Phase 5 – map and information (own improvements)
 - [x] Map resources: gold mines and horse pastures in city territory (more income, cheaper horsemen)
-- [ ] Unit tooltip: hovering any visible unit shows its stats, HP, rank and state
+- [x] Unit tooltip: hovering any visible unit shows its stats, HP, rank and state
 - [ ] Keyboard shortcuts: number keys recruit in the selected city, `?` shows a shortcut overlay
 
 ## Ideas (unordered)

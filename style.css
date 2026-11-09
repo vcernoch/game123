@@ -82,6 +82,8 @@ aside h4 { margin: 10px 0 0; font-size: 13px; color: var(--muted); font-weight: 
   padding: 4px 8px;
   border-radius: 4px;
   font-size: 13px;
+  white-space: pre-line;
+  max-width: min(420px, calc(100vw - 16px));
 }
 summary { cursor: pointer; font-weight: 600; }
 .chart { width: 100%; height: auto; margin-top: 4px; font: 11px system-ui, sans-serif; }

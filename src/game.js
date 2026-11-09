@@ -674,6 +674,37 @@ export function vsMult(unit, other) {
   return 1 + bonus;
 }
 
+// Everything worth knowing about a unit, for the hover tooltip. Attack and defense are the effective
+// values where it stands (rank, terrain, river-free, city, walls, fortify), without bonuses against
+// a specific enemy type. `notes` lists the reasons for the defense bonus.
+export function unitSummary(state, unit) {
+  const t = UNIT_TYPES[unit.type];
+  const def = defenseValue(state, unit);
+  const notes = [];
+  const tile = tileAt(state, unit.q, unit.r);
+  const terr = terrainDefense(state, unit, tile);
+  if (terr) notes.push(`${TERRAIN[tile.terrain].name.toLowerCase()} +${Math.round(terr * 100)} %`);
+  const city = cityAt(state, unit.q, unit.r);
+  if (city && city.owner === unit.owner) notes.push(hasBuilding(city, 'walls') ? 'city with walls' : 'city');
+  if (unit.fortified) notes.push('fortified');
+  return {
+    name: t.name,
+    owner: unit.owner,
+    hp: unit.hp,
+    maxHp: t.hp,
+    attack: Math.round(t.atk * rankMult(unit) * 10) / 10,
+    defense: Math.round(def * 10) / 10,
+    baseDefense: t.def,
+    range: t.range,
+    move: unitMove(state, unit),
+    rank: RANKS[rankOf(unit)].name,
+    xp: unit.xp || 0,
+    fortified: !!unit.fortified,
+    marching: !!unit.goto,
+    notes,
+  };
+}
+
 // Unit defense; attacker (optional) determines type bonuses and siege.
 export function defenseValue(state, unit, attacker = null) {
   const t = tileAt(state, unit.q, unit.r);
