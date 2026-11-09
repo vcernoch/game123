@@ -14,7 +14,7 @@ import { runAITurn } from './ai.js';
 import { render, canvasSize, pickHex } from './render.js';
 import { key } from './hex.js';
 import {
-  UNIT_TYPES, TERRAIN, PLAYERS, DIFFICULTY, BUILDINGS, RANKS, FACTIONS, MAP_SIZES, RIVER,
+  UNIT_TYPES, TERRAIN, PLAYERS, DIFFICULTY, BUILDINGS, RANKS, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS,
 } from './rules.js';
 
 const SAVE_KEY = 'game123-save';
@@ -189,7 +189,7 @@ function updateHud() {
   if (!html) {
     const diff = DIFFICULTY[state.difficulty] || DIFFICULTY.normal;
     html = `<p class="hint">Klikni na svou jednotku (modrá) nebo město.</p>
-      <p class="hint">Obtížnost: ${diff.name}${state.fog ? '' : ' · bez mlhy'}</p>
+      <p class="hint">Obtížnost: ${diff.name}${state.fog ? '' : ' · bez mlhy'}${state.happenings ? '' : ' · bez náhodných událostí'}</p>
       ${state.factions && state.factions[0] ? `<p class="hint">Ty: ${factionOf(state, 0).name} · AI: ${factionOf(state, 1).name}</p>` : ''}`;
   }
   info.innerHTML = html;
@@ -340,6 +340,7 @@ function doEndTurn() {
   selectedCityId = null;
   $('tooltip').hidden = true;
   pending = null;
+  showNotice([]);
   endTurn(state);
   drainEvents(state);
   aiRunning = true;
@@ -349,11 +350,33 @@ function doEndTurn() {
     runAITurn(state);
     const events = drainEvents(state);
     if (state.winner === null) endTurn(state);
+    const happened = drainEvents(state).filter((e) => e.type === 'happening' && e.player === 0);
     save();
     await anim.play(before, events);
     aiRunning = false;
+    showNotice(happened);
     draw();
   }, 250);
+}
+
+// Pruh s náhodnou událostí, která hráče potkala na začátku tahu (zmizí s dalším koncem tahu).
+function showNotice(happened) {
+  const el = $('notice');
+  if (!happened.length) { el.hidden = true; return; }
+  const ev = happened[0];
+  const city = state.cities.find((c) => c.id === ev.cityId);
+  const name = HAPPENINGS.kinds[ev.kind].name;
+  const place = city ? ` ve městě ${city.name}` : '';
+  let text = `${name}${place}`;
+  if (ev.kind === 'harvest') text += `: +${ev.gold} zlata.`;
+  else if (ev.kind === 'plague') text += ev.hits.length ? `: nakažené jednotky ztratily životy (${ev.hits.length}).` : ', ale žádná jednotka nebyla poblíž.';
+  else if (ev.suppressed) text += ', ale posádka udržela pořádek.';
+  else text += `: město tento tah neodvedlo daně (${ev.gold} zl.).`;
+  const good = ev.kind === 'harvest' || ev.suppressed;
+  el.textContent = text;
+  el.className = good ? 'good' : 'bad';
+  el.hidden = false;
+  sound.play(soundFor(ev, 0));
 }
 
 // Poslední volba v dialogu nové hry (jen pohodlí, hra funguje i bez úložiště).
@@ -373,6 +396,7 @@ function newGame({ firstVisit = false } = {}) {
   const diff = DIFFICULTY[prefs.difficulty] ? prefs.difficulty : state.difficulty || 'normal';
   form.elements.difficulty.value = diff;
   form.elements.fog.checked = prefs.fog !== false;
+  form.elements.happenings.checked = prefs.happenings !== false;
   form.elements.faction.value = FACTIONS[prefs.faction] ? prefs.faction : 'kingdom';
   form.elements.size.value = MAP_SIZES[prefs.size] ? prefs.size : 'medium';
   $('new-game-warning').hidden = firstVisit || state.winner !== null;
@@ -381,6 +405,7 @@ function newGame({ firstVisit = false } = {}) {
 
 function startNewGame(options) {
   state = createGame({ seed: randomSeed(), ...options });
+  showNotice([]);
   selectedId = null;
   selectedCityId = null;
   save();
@@ -395,6 +420,7 @@ $('new-game-dialog').addEventListener('close', () => {
   const options = {
     difficulty: form.elements.difficulty.value,
     fog: form.elements.fog.checked,
+    happenings: form.elements.happenings.checked,
     faction: form.elements.faction.value,
     size: form.elements.size.value,
   };
@@ -477,7 +503,8 @@ window.__game = {
   version: GAME_VERSION,
   setAnimSpeed: (x) => { anim.speed = x; },
   refresh: () => { resize(); draw(); },
-  newGame: (seed, options = {}) => { state = createGame({ seed, ...options }); resize(); draw(); },
+  newGame: (seed, options = {}) => { state = createGame({ seed, ...options }); showNotice([]); resize(); draw(); },
+  showNotice: (events) => { showNotice(events); draw(); },
 };
 
 $('size-options').innerHTML = Object.entries(MAP_SIZES).map(([id, m]) => `

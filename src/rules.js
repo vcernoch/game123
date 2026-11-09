@@ -72,6 +72,20 @@ export const ROAD_COST = 0.5;
 // perTiles: jedna řeka na tolik polí mapy (malá 1, střední 2, velká 4); délka v hranách.
 export const RIVER = { crossCost: 1, defBonus: 0.25, minLength: 3, maxLength: 14, perTiles: 70 };
 
+// Náhodné události na začátku tahu hráče (od kola fromTurn, s pravděpodobností chance).
+// Postihnou náhodné město hráče; weight = relativní četnost.
+// harvest: zlato navíc; plague: jednotky ve městě a kolem něj ztratí životy (nezemřou);
+// revolt: město bez vlastní posádky tento tah neodvede příjem (hlavní město se nebouří).
+export const HAPPENINGS = {
+  chance: 0.15,
+  fromTurn: 3,
+  kinds: {
+    harvest: { name: 'Bohatá úroda', weight: 3, gold: 8, good: true },
+    plague:  { name: 'Mor',          weight: 2, damage: 3 },
+    revolt:  { name: 'Vzpoura',      weight: 2 },
+  },
+};
+
 // Velikosti mapy pro dialog nové hry.
 export const MAP_SIZES = {
   small:  { name: 'Malá',    cols: 10, rows: 8,  neutralCities: 2, desc: 'rychlá hra' },

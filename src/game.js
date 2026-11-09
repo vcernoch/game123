@@ -3,12 +3,13 @@ import { key, neighbors, distance } from './hex.js';
 import { generateMap, hasRiverEdge } from './map.js';
 import {
   TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY, VISION, DIFFICULTY, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, ROAD_COST, RIVER,
-  FACTIONS, NO_FACTION, MAP_SIZES,
+  FACTIONS, NO_FACTION, MAP_SIZES, HAPPENINGS,
 } from './rules.js';
+import { createRng } from './rng.js';
 
 export function createGame({
   seed = 1, size = null, cols = 14, rows = 10, neutralCities = 4, fog = true, difficulty = 'normal',
-  faction = 'kingdom', aiFaction = null,
+  faction = 'kingdom', aiFaction = null, happenings = true,
 } = {}) {
   if (MAP_SIZES[size]) ({ cols, rows, neutralCities } = MAP_SIZES[size]);
   if (!DIFFICULTY[difficulty]) difficulty = 'normal';
@@ -36,6 +37,7 @@ export function createGame({
     log: [],
     events: [],
     fog,
+    happenings: !!happenings,
     difficulty,
     factions: [faction, aiFaction],
     history: [],
@@ -92,7 +94,7 @@ function countStat(state, name, player) {
   state.stats[name][player]++;
 }
 
-export const STATE_VERSION = 10;
+export const STATE_VERSION = 11;
 
 // Převede uložený stav starší verze na aktuální; neznámý formát vrátí null.
 export function migrateState(s) {
@@ -136,6 +138,10 @@ export function migrateState(s) {
   if (s.version === 9) {
     // řeky přibyly ve verzi 10 – staré mapy je nemají (tile.rivers chybí = bez řek)
     s.version = 10;
+  }
+  if (s.version === 10) {
+    s.happenings = false; // rozehraná hra pokračuje podle pravidel, se kterými začala
+    s.version = 11;
   }
   return s.version === STATE_VERSION ? s : null;
 }
@@ -217,6 +223,12 @@ export function applyEvent(state, ev) {
   } else if (ev.type === 'capture') {
     const c = state.cities.find((x) => x.id === ev.cityId);
     if (c) c.owner = ev.owner;
+  } else if (ev.type === 'happening') {
+    if (ev.gold) state.gold[ev.player] += ev.gold;
+    for (const h of ev.hits || []) {
+      const u = getUnit(state, h.unitId);
+      if (u) u.hp = h.hp;
+    }
   } else if (ev.type === 'build') {
     const c = state.cities.find((x) => x.id === ev.cityId);
     if (c && !hasBuilding(c, ev.building)) c.buildings = [...(c.buildings || []), ev.building];
@@ -608,7 +620,66 @@ export function endTurn(state) {
     u.hasAttacked = false;
     u.moved = false;
   }
+  if (state.happenings) rollHappening(state, state.current);
   return true;
+}
+
+// ---------- náhodné události ----------
+
+// RNG pro událost je odvozený ze seedu, kola a hráče – stav nemusí nést stav generátoru
+// a stejná hra dá stejné události.
+function happeningRng(state, player) {
+  return createRng((state.seed * 7919 + state.turn * 131 + player * 17 + 12345) >>> 0);
+}
+
+// Hodí kostkou na náhodnou událost pro hráče na začátku jeho tahu. Vrací událost nebo null.
+export function rollHappening(state, player) {
+  if (state.winner !== null || state.turn < HAPPENINGS.fromTurn) return null;
+  const rng = happeningRng(state, player);
+  if (rng.next() >= HAPPENINGS.chance) return null;
+  const cities = state.cities.filter((c) => c.owner === player);
+  if (!cities.length) return null;
+  const kinds = Object.entries(HAPPENINGS.kinds);
+  let roll = rng.next() * kinds.reduce((sum, [, k]) => sum + k.weight, 0);
+  let kind = kinds[kinds.length - 1][0];
+  for (const [id, k] of kinds) {
+    if ((roll -= k.weight) < 0) { kind = id; break; }
+  }
+  // vzpoura jen v obyčejném městě; když hráč žádné nemá, nic se nestane
+  const pool = kind === 'revolt' ? cities.filter((c) => !c.capital) : cities;
+  if (!pool.length) return null;
+  return applyHappening(state, player, kind, rng.pick(pool));
+}
+
+// Provede událost daného druhu v daném městě (exportované kvůli testům).
+export function applyHappening(state, player, kind, city) {
+  const info = HAPPENINGS.kinds[kind];
+  const ev = { type: 'happening', kind, player, cityId: city.id, gold: 0, hits: [], suppressed: false };
+  const who = PLAYERS[player].name;
+  if (kind === 'harvest') {
+    ev.gold = info.gold;
+    state.gold[player] += info.gold;
+    addLog(state, `${who}: ${info.name} ve městě ${city.name} (+${info.gold} zl.)`);
+  } else if (kind === 'plague') {
+    for (const u of state.units) {
+      if (distance(u, city) > 1 || u.hp <= 1) continue;
+      u.hp = Math.max(1, u.hp - info.damage);
+      ev.hits.push({ unitId: u.id, hp: u.hp });
+    }
+    addLog(state, `${who}: ${info.name} ve městě ${city.name}${ev.hits.length ? ` – nakaženo jednotek: ${ev.hits.length}` : ''}`);
+  } else if (kind === 'revolt') {
+    const g = unitAt(state, city.q, city.r);
+    if (g && g.owner === player) {
+      ev.suppressed = true;
+      addLog(state, `${who}: ${info.name} ve městě ${city.name} – posádka udržela pořádek`);
+    } else {
+      ev.gold = -Math.min(state.gold[player], cityIncome(city, state));
+      state.gold[player] += ev.gold;
+      addLog(state, `${who}: ${info.name} ve městě ${city.name} – město tento tah neodvedlo daně (${ev.gold} zl.)`);
+    }
+  }
+  emit(state, ev);
+  return ev;
 }
 
 function removeUnit(state, id) {

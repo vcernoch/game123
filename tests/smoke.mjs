@@ -236,6 +236,20 @@ try {
   }
   await touchCtx.close();
 
+  // náhodná událost: mor u hlavního města ukáže pruh s oznámením a ubere životy
+  const plague = await page.evaluate(async () => {
+    const g = await import('./src/game.js');
+    window.__game.newGame(777, { fog: false });
+    const st = window.__game.getState();
+    const cap = st.cities.find((c) => c.owner === 0);
+    const ev = g.applyHappening(st, 0, 'plague', cap);
+    window.__game.showNotice([ev]);
+    return { hits: ev.hits.length, text: document.getElementById('notice').textContent,
+      hidden: document.getElementById('notice').hidden };
+  });
+  if (plague.hidden || !plague.text.includes('Mor') || !plague.hits) throw new Error(`událost: ${JSON.stringify(plague)}`);
+  await page.screenshot({ path: 'artifacts/screenshot-happening.png' });
+
   // řeky: velká mapa bez mlhy, najetí na pole u řeky ukáže popis v panelu
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.evaluate(() => { window.__game.newGame(4242, { size: 'large', fog: false }); });

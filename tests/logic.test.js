@@ -6,6 +6,7 @@ import {
   drainEvents, applyEvent, migrateState, STATE_VERSION,
   visibleTiles, exploredTiles, build, unitCost, rankOf, stepCost, getUnit,
   buildingCost, unitMove, factionOf, armyPower, riverBetween, riverDefense,
+  rollHappening, applyHappening, cityIncome,
 } from '../src/game.js';
 import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
@@ -18,7 +19,7 @@ import { GAME_VERSION, GAME_DATE } from '../src/version.js';
 import { pathExists, generateMap, dirTo } from '../src/map.js';
 import { distance, key, neighbors } from '../src/hex.js';
 import {
-  UNIT_TYPES, TERRAIN, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, FACTIONS, MAP_SIZES, RIVER,
+  UNIT_TYPES, TERRAIN, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS,
 } from '../src/rules.js';
 
 test('mapa je deterministická a startovní města jsou propojená', () => {
@@ -589,6 +590,94 @@ test('řeky: přechod stojí pohyb navíc, most ne, obránce za řekou má bonus
   old.version = 9;
   for (const t of Object.values(old.tiles)) delete t.rivers;
   assert.equal(migrateState(old).version, STATE_VERSION);
+});
+
+test('náhodné události: úroda, mor a vzpoura mají správný účinek', () => {
+  const s = createGame({ seed: 5, fog: false });
+  const cap = s.cities.find((c) => c.owner === 0 && c.capital);
+  // úroda
+  const gold = s.gold[0];
+  const h = applyHappening(s, 0, 'harvest', cap);
+  assert.equal(s.gold[0], gold + HAPPENINGS.kinds.harvest.gold);
+  assert.equal(h.gold, HAPPENINGS.kinds.harvest.gold);
+  // mor: jednotky ve městě a vedle něj (i cizí) ztratí životy, ale nezemřou; vzdálené ne
+  const far = { id: 950, type: 'warrior', owner: 1, q: cap.q, r: cap.r, hp: 10, movesLeft: 0, hasAttacked: true, xp: 0 };
+  const spot = Object.values(s.tiles).find((t) => distance(t, cap) >= 3 && isPassable(s, t.q, t.r) && !unitAt(s, t.q, t.r));
+  far.q = spot.q; far.r = spot.r;
+  s.units.push(far);
+  const near = s.units.filter((u) => distance(u, cap) <= 1);
+  assert.ok(near.length >= 1);
+  near[0].hp = 2;
+  const before = new Map(s.units.map((u) => [u.id, u.hp]));
+  const p = applyHappening(s, 0, 'plague', cap);
+  for (const u of near) assert.equal(u.hp, Math.max(1, before.get(u.id) - HAPPENINGS.kinds.plague.damage));
+  assert.equal(far.hp, 10);
+  assert.equal(p.hits.length, near.length);
+  // vzpoura: město bez posádky přijde o daně, s posádkou ne
+  const town = s.cities.find((c) => c.owner === null);
+  town.owner = 0;
+  s.units = s.units.filter((u) => u.q !== town.q || u.r !== town.r);
+  s.gold[0] = 30;
+  const r1 = applyHappening(s, 0, 'revolt', town);
+  assert.equal(s.gold[0], 30 - cityIncome(town, s));
+  assert.equal(r1.suppressed, false);
+  s.units.push({ id: 951, type: 'warrior', owner: 0, q: town.q, r: town.r, hp: 10, movesLeft: 0, hasAttacked: true, xp: 0 });
+  const r2 = applyHappening(s, 0, 'revolt', town);
+  assert.ok(r2.suppressed);
+  assert.equal(s.gold[0], 30 - cityIncome(town, s));
+  // vzpoura nikdy nevezme víc zlata, než hráč má
+  s.units.pop();
+  s.gold[0] = 1;
+  applyHappening(s, 0, 'revolt', town);
+  assert.equal(s.gold[0], 0);
+  // přehrání události dá stejný stav
+  const a = createGame({ seed: 5, fog: false });
+  const b = cloneState(a);
+  const c = a.cities.find((x) => x.owner === 0);
+  drainEvents(a);
+  applyHappening(a, 0, 'plague', c);
+  applyHappening(a, 0, 'harvest', c);
+  for (const ev of drainEvents(a)) applyEvent(b, ev);
+  assert.deepEqual(b.units, a.units);
+  assert.deepEqual(b.gold, a.gold);
+});
+
+test('náhodné události: deterministické, dají se vypnout, četnost sedí', () => {
+  // stejný seed = stejné události; bez událostí se nic nestane
+  const run = (happenings) => {
+    const s = createGame({ seed: 21, happenings });
+    const kinds = [];
+    for (let i = 0; i < 80 && s.winner === null; i++) {
+      runAITurn(s);
+      endTurn(s);
+      for (const ev of drainEvents(s)) if (ev.type === 'happening') kinds.push(`${s.turn}:${ev.kind}`);
+    }
+    return kinds;
+  };
+  assert.deepEqual(run(true), run(true));
+  assert.equal(run(false).length, 0);
+  // před kolem fromTurn se nic neděje; četnost zhruba podle chance
+  let hits = 0;
+  let tries = 0;
+  for (let seed = 1; seed <= 60; seed++) {
+    const s = createGame({ seed, fog: false });
+    assert.equal(rollHappening(s, 0), null, 'v 1. kole žádná událost');
+    for (let turn = HAPPENINGS.fromTurn; turn < HAPPENINGS.fromTurn + 10; turn++) {
+      const t = cloneState(s);
+      t.turn = turn;
+      tries++;
+      if (rollHappening(t, 0)) hits++;
+    }
+  }
+  const rate = hits / tries;
+  assert.ok(rate > HAPPENINGS.chance * 0.5 && rate < HAPPENINGS.chance * 1.6, `četnost ${rate}`);
+  // stará hra (verze 10) pokračuje bez událostí
+  const old = createGame({ seed: 1 });
+  old.version = 10;
+  delete old.happenings;
+  const m = migrateState(old);
+  assert.equal(m.version, STATE_VERSION);
+  assert.equal(m.happenings, false);
 });
 
 test('lepší AI: ohrožené prázdné město dostane posádku', () => {

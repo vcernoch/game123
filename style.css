@@ -90,6 +90,14 @@ summary { cursor: pointer; font-weight: 600; }
 .stats-table th, .stats-table td { padding: 3px 4px; text-align: right; }
 .stats-table th:first-child, .stats-table td:first-child { text-align: left; color: var(--muted); font-weight: 400; }
 #banner button { margin-left: 8px; }
+#notice {
+  padding: 8px 16px;
+  text-align: center;
+  background: var(--panel);
+  border-bottom: 1px solid #000;
+}
+#notice.good { color: #b9e08a; }
+#notice.bad { color: #ffb4a3; }
 dialog {
   background: var(--panel);
   color: var(--text);

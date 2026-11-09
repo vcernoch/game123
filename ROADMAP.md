@@ -33,8 +33,8 @@ Odškrtávej `[x]` po dokončení. Nové nápady přidávej na konec příslušn
 - [x] Statistiky na konci hry (graf síly v čase)
 - [ ] Kampaň nebo scénáře s cíli (čeká na Vladimíra – jiné cíle = změna pravidel vítězství, viz LOG.md)
 - [x] Řeky na hranách hexů: přechod stojí pohyb navíc, mosty na silnicích, bonus obránci (vlastní vylepšení)
+- [x] Náhodné události na začátku tahu: úroda, mor, vzpoura; dají se vypnout (vlastní vylepšení z Nápadů)
 
 ## Nápady (neřazené)
 - Diplomacie s více AI
-- Náhodné události (mor, úroda, vzpoura)
 - Kronika by mohla skrývat akce AI, které hráč neviděl

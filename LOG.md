@@ -2,6 +2,17 @@
 
 Nejnovější záznam nahoře. Formát: datum – co se udělalo – stav testů – otázky pro Vladimíra.
 
+## 2026-11-09 – Náhodné události (v0.5.0)
+- `HAPPENINGS` v `rules.js`: od 3. kola má každý hráč na začátku svého tahu 15% šanci na událost v náhodném vlastním městě:
+  - **Bohatá úroda** (váha 3): +8 zlata.
+  - **Mor** (váha 2): jednotky ve městě a na sousedních polích (i nepřátelské obléhatele) ztratí 3 životy, ale nezemřou.
+  - **Vzpoura** (váha 2): obyčejné město bez vlastní posádky tento tah neodvede daně; s posádkou se nic nestane (hlavní město se nebouří). Dává další důvod nechávat ve městech posádky.
+- `rollHappening()` / `applyHappening()` v `game.js`; RNG je odvozené ze seedu, kola a hráče, takže stav nemusí nést stav generátoru a stejná hra dá stejné události. Událost `happening` jde přehrát (`applyEvent`) a má zvuk (nové syntetizované `boon` / `bane`).
+- UI: pruh pod záhlavím oznámí, co hráče na začátku tahu potkalo (zelený = dobré, červený = špatné), zmizí při dalším konci tahu; zápis i v kronice („Mor ve městě …“ – vyhnul jsem se 6. pádu). V dialogu nové hry je zaškrtávátko „Náhodné události“ (pamatuje se), nápověda doplněna.
+- Struktura stavu: `state.version` 11 (`happenings`); rozehrané hry z dřívějška pokračují bez událostí, aby se jim neměnila pravidla.
+- Testy: +2 logické (účinek všech tří událostí včetně potlačené vzpoury a stropu zlata, přehrání událostí; determinismus, vypnutí, žádná událost v 1. kole, četnost kolem 15 %, migrace). Smoke test vyvolá mor a ověří pruh s oznámením (`artifacts/screenshot-happening.png`, šířka 390 px).
+- Stav: `npm run check` zelený (39 logických testů + smoke).
+
 ## 2026-11-09 – Řeky (v0.5.0)
 - **Otázka pro Vladimíra:** Na otázku k víc AI soupeřům zatím nemám odpověď, tak na tom nepracuji. Další bod roadmapy „Kampaň nebo scénáře s cíli“ by zavedl jiné cíle než dobytí všech měst (např. „ubraň město 15 kol“), tedy změnu pravidel vítězství – smím přidat scénáře s vlastními cíli jako samostatný režim vedle klasické hry? Do odpovědi pracuji na vlastních vylepšeních (zapsaných v roadmapě).
 - Řeky tečou po hranách hexů (`tile.rivers` = směry k sousedům, uložené souměrně na obou polích). Generátor (`buildRivers` v `map.js`) pustí řeku z kopců/hor „z kopce“ podle výškového pole po hranách, dokud nedojde do vody, na okraj, do jiné řeky nebo na max. délku. Počet: 1 řeka na ~70 polí (malá 1, střední 2, velká 4). Řeky mají vlastní RNG, takže terén, města i silnice zůstaly pro všechny seedy stejné.
