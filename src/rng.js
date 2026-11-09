@@ -1,5 +1,5 @@
-// Deterministický generátor náhodných čísel (mulberry32).
-// Stejný seed = stejná mapa a stejné chování AI, což usnadňuje testy.
+// Deterministic random number generator (mulberry32).
+// Same seed = same map and same AI behavior, which makes testing easier.
 
 export function createRng(seed) {
   let a = seed >>> 0;

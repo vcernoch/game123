@@ -1,4 +1,4 @@
-// Jednoduchá AI: útočí, když se to vyplatí, jinak táhne k nejbližšímu cíli a verbuje.
+// Simple AI: attacks when it pays off, otherwise moves toward the nearest goal and recruits.
 import { distance, key } from './hex.js';
 import {
   reachable, attackTargets, previewAttack, moveUnit, attack, buyUnit,
@@ -6,7 +6,7 @@ import {
 } from './game.js';
 import { UNIT_TYPES, TERRAIN } from './rules.js';
 
-// Co AI ví o mapě. Na těžké obtížnosti vidí všechno, jinak jen to, co prozkoumala a vidí.
+// What the AI knows about the map. On hard it sees everything, otherwise only what it has explored and sees.
 export function aiKnowledge(state, me) {
   if (difficultyOf(state, me).seesAll) return { sees: () => true, knows: () => true };
   const vis = visibleTiles(state, me);
@@ -19,7 +19,7 @@ export function runAITurn(state) {
   recruit(state, me);
   const know = aiKnowledge(state, me);
   const garrisons = assignGarrisons(state, me, know);
-  // střelci a katapulty jdou první, ať boj na blízko dokončí oslabené cíle (soustředění palby)
+  // archers and catapults go first so melee units can finish weakened targets (focus fire)
   const ids = state.units
     .filter((u) => u.owner === me)
     .sort((a, b) => UNIT_TYPES[b.type].range - UNIT_TYPES[a.type].range || a.id - b.id)
@@ -44,8 +44,8 @@ export function runAITurn(state) {
   buildSomething(state, me);
 }
 
-// Najde nejlepší kombinaci „dojdi na pole a zaútoč“. Pozice útočníka ovlivňuje protiúder
-// (terén) i dostřel, proto se útok zkusmo vyhodnotí z každého dosažitelného pole.
+// Finds the best "move to a tile and attack" combination. The attacker's position affects the counterattack
+// (terrain) and range, so the attack is tentatively evaluated from every reachable tile.
 export function planStrike(state, unit, know = aiKnowledge(state, unit.owner)) {
   const range = UNIT_TYPES[unit.type].range;
   const targets = state.units.filter((u) => u.owner !== unit.owner && know.sees(u.q, u.r));
@@ -57,7 +57,7 @@ export function planStrike(state, unit, know = aiKnowledge(state, unit.owner)) {
     const [q, r] = k.split(',').map(Number);
     const near = targets.filter((t) => distance(t, { q, r }) <= range);
     if (!near.length) continue;
-    unit.q = q; unit.r = r; // zkusmo – hned se vrací zpět
+    unit.q = q; unit.r = r; // tentatively – restored right away
     for (const t of near) {
       const s = scoreAttack(state, unit, t) + TERRAIN[tileAt(state, q, r).terrain].defBonus;
       if (s > 0 && (!best || s > best.s)) best = { s, q, r, t };
@@ -70,8 +70,8 @@ export function planStrike(state, unit, know = aiKnowledge(state, unit.owner)) {
   return !!u && attack(state, u.id, best.t.id);
 }
 
-const WOUNDED = 0.25; // pod tímto podílem životů jednotka ustupuje
-const THREAT_RADIUS = 2; // nepřítel tak blízko města = město potřebuje posádku
+const WOUNDED = 0.25; // below this HP fraction the unit retreats
+const THREAT_RADIUS = 2; // an enemy this close to a city = the city needs a garrison
 
 export const isWounded = (u) => u.hp / UNIT_TYPES[u.type].hp <= WOUNDED;
 
@@ -79,9 +79,9 @@ function enemiesNear(state, unit, know, radius) {
   return state.units.filter((u) => u.owner !== unit.owner && know.sees(u.q, u.r) && distance(u, unit) <= radius);
 }
 
-// Ohrožená vlastní města (viditelný nepřítel do THREAT_RADIUS polí) dostanou posádku:
-// buď tam už někdo stojí, nebo nejbližší jednotka, která to stihne v tomto tahu.
-// Vrací Map id jednotky -> město.
+// Threatened own cities (a visible enemy within THREAT_RADIUS tiles) get a garrison:
+// either a unit already standing there, or the nearest unit that can get there this turn.
+// Returns a Map unit id -> city.
 export function assignGarrisons(state, me, know = aiKnowledge(state, me)) {
   const result = new Map();
   const taken = new Set();
@@ -94,7 +94,7 @@ export function assignGarrisons(state, me, know = aiKnowledge(state, me)) {
       taken.add(here.id);
       continue;
     }
-    if (here) continue; // město drží nepřítel
+    if (here) continue; // the enemy holds the city
     let best = null;
     let bestCost = Infinity;
     for (const u of state.units) {
@@ -110,14 +110,14 @@ export function assignGarrisons(state, me, know = aiKnowledge(state, me)) {
   return result;
 }
 
-// Posádka: dojde do města a zůstane v něm; z města normálně útočí (měřeno: pasivní posádka hrála hůř).
+// Garrison: moves into the city and stays; attacks from the city as usual (measured: a passive garrison played worse).
 function holdCity(state, unit, city) {
   if (unit.q !== city.q || unit.r !== city.r) moveUnit(state, unit.id, city.q, city.r);
   const u = getUnit(state, unit.id);
   if (u) tryBestAttack(state, u);
 }
 
-// Zraněná jednotka ustoupí do vlastního města, nebo co nejdál od nepřátel. Útočí jen na jistý zásah.
+// A wounded unit retreats to an own city, or as far from enemies as possible. It attacks only when it's safe.
 function retreat(state, unit, know) {
   const here = state.cities.find((c) => c.q === unit.q && c.r === unit.r && c.owner === unit.owner);
   if (!here) {
@@ -128,10 +128,10 @@ function retreat(state, unit, know) {
     for (const k of options.keys()) {
       const [q, r] = k.split(',').map(Number);
       const city = state.cities.find((c) => c.q === q && c.r === r);
-      if (city && city.owner !== unit.owner) continue; // neustupovat do cizího města
+      if (city && city.owner !== unit.owner) continue; // don't retreat into a foreign city
       const minDist = Math.min(...enemies.map((e) => distance(e, { q, r })), 9);
       let s = minDist + TERRAIN[tileAt(state, q, r).terrain].defBonus * 2;
-      if (city) s += 10; // vlastní město léčí a brání
+      if (city) s += 10; // an own city heals and protects
       if (s > bestScore) { bestScore = s; bestKey = k; }
     }
     if (bestKey) {
@@ -143,7 +143,7 @@ function retreat(state, unit, know) {
   if (u) tryBestAttack(state, u, { safeOnly: true });
 }
 
-// Stavby z přebytku zlata: ohrožené město dostane hradby, jinak trh a kasárna (hlavní město napřed).
+// Buildings from surplus gold: a threatened city gets walls, otherwise market and barracks (capital first).
 const RESERVE = 12;
 export function buildSomething(state, me) {
   const know = aiKnowledge(state, me);
@@ -166,13 +166,13 @@ function scoreAttack(state, unit, target) {
   if (p.dies && !p.kills) return -Infinity;
   let s = p.damage * 2 - p.counter * 1.5 * difficultyOf(state, unit.owner).caution;
   if (p.kills) s += 10;
-  // soustředění: raději dorazit oslabený cíl a cennější jednotky
+  // focus: prefer finishing weakened targets and more valuable units
   s += (1 - target.hp / UNIT_TYPES[target.type].hp) * 3;
   s += UNIT_TYPES[target.type].cost / 10;
   return s;
 }
 
-// safeOnly: jen útoky, které cíl zničí nebo nedostanou protiúder.
+// safeOnly: only attacks that destroy the target or take no counterattack.
 function tryBestAttack(state, unit, { safeOnly = false } = {}) {
   const targets = attackTargets(state, unit);
   let best = null;
@@ -192,7 +192,7 @@ function tryBestAttack(state, unit, { safeOnly = false } = {}) {
   return attack(state, unit.id, best.id);
 }
 
-// Cíle pohybu: známá cizí města a viditelní nepřátelé. Když žádné nejsou, AI průzkumničí.
+// Movement goals: known foreign cities and visible enemies. If there are none, the AI explores.
 export function goalsFor(state, unit, know = aiKnowledge(state, unit.owner)) {
   const goals = [];
   for (const c of state.cities) {
@@ -240,7 +240,7 @@ function evalPos(state, unit, q, r, goals, range, know) {
   }
   const t = tileAt(state, q, r);
   score += TERRAIN[t.terrain].defBonus * 0.5;
-  // lučištníci nemají rádi těsnou blízkost (viditelných) nepřátel
+  // archers dislike being adjacent to (visible) enemies
   if (range > 1) {
     for (const u of state.units) {
       if (u.owner !== unit.owner && know.sees(u.q, u.r) && distance({ q, r }, u) === 1) score -= 1.5;
@@ -249,13 +249,13 @@ function evalPos(state, unit, q, r, goals, range, know) {
   return score;
 }
 
-// Jakou jednotku AI chce: doplňuje armádu k cílovému poměru typů.
-// Vidí-li nepřátelské jezdce, chce víc kopiníků; katapulty až od 8. kola.
+// Which unit the AI wants: tops up the army toward a target type ratio.
+// If it sees enemy horsemen it wants more spearmen; catapults only from turn 8.
 export function pickRecruit(state, me, city) {
   const know = aiKnowledge(state, me);
   const enemyHorse = state.units.filter((u) => u.owner !== me && u.type === 'horseman' && know.sees(u.q, u.r)).length;
   const ratio = { warrior: 3, archer: 2, horseman: 2, spearman: 1 + 2 * enemyHorse, catapult: state.turn >= 8 ? 1 : 0 };
-  // silné stránky vlastní frakce: zlevněných jednotek chce víc
+  // own faction's strengths: wants more of the discounted units
   const favored = factionOf(state, me).unitDiscount || {};
   for (const type of Object.keys(favored)) ratio[type] += 2;
   const count = {};
@@ -266,7 +266,7 @@ export function pickRecruit(state, me, city) {
   for (const [type, want] of Object.entries(ratio)) {
     if (!want || state.gold[me] < unitCost(state, city, type)) continue;
     const need = (count[type] || 0) / want;
-    // při shodě vyhrává typ, kterého chceme víc
+    // on a tie, the type we want more of wins
     if (need < bestNeed || (need === bestNeed && want > bestWant)) { bestNeed = need; best = type; bestWant = want; }
   }
   return best;

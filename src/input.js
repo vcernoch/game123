@@ -1,13 +1,13 @@
-// Rozhodnutí, co znamená klepnutí/klik na pole. Čistá funkce bez DOM, aby šla testovat.
-// Na dotykovém displeji (confirm = true) první klepnutí na cíl jen ukáže náhled
-// a teprve druhé klepnutí na stejné pole akci provede.
+// Decides what a tap/click on a tile means. Pure function without DOM so it can be tested.
+// On a touch screen (confirm = true) the first tap on a target only shows a preview
+// and only a second tap on the same tile performs the action.
 import { key } from './hex.js';
 import {
   getUnit, unitAt, cityAt, reachable, attackTargets, visibleTiles, exploredTiles,
 } from './game.js';
 
 // ctx = { selectedId, pending: {q,r}|null, viewer, confirm }
-// Vrací jednu z akcí:
+// Returns one of these actions:
 //   { type: 'move', unitId, q, r } | { type: 'attack', unitId, targetId }
 //   { type: 'preview', kind: 'move'|'attack', q, r, targetId? }
 //   { type: 'select', unitId|null, cityId|null } | { type: 'none' }

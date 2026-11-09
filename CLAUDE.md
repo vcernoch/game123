@@ -1,46 +1,47 @@
-# Hexová říše – pokyny pro Claude
+# Hex Realm – instructions for Claude
 
-Tahová strategie v prohlížeči (čisté HTML + JS moduly, canvas, žádný build).
-Hraje se proti AI na hexové mapě. Kód a texty ve hře jsou česky.
+A turn-based strategy game in the browser (plain HTML + JS modules, canvas, no build).
+Played against an AI on a hex map. Code, comments and in-game texts are in English.
 
-## Struktura
-- `index.html`, `style.css` – stránka a UI
-- `src/hex.js` – hexová geometrie (axiální souřadnice, pointy-top)
-- `src/rng.js` – deterministické RNG (seed)
-- `src/rules.js` – herní data a balanc (terén, jednotky, ekonomika)
-- `src/map.js` – generátor mapy
-- `src/game.js` – čistá herní logika bez DOM, stav je JSON
-- `src/ai.js` – AI protivník
-- `src/render.js` – kreslení na canvas
-- `src/input.js` – co znamená klik/klepnutí na pole (čistá funkce, dotyk s potvrzením)
-- `src/sound.js` – zvukové efekty syntetizované přes WebAudio (bez nahrávek)
-- `src/stats.js` – graf síly a souhrn statistik jako SVG řetězec (čistá funkce)
-- `src/anim.js` – přehrávání herních událostí (`state.events`) jako animací
-- `src/version.js` – verze hry zobrazená v záhlaví (musí sedět s `package.json`)
-- `src/main.js` – ovládání, HUD, ukládání do localStorage, háček `window.__game` pro testy
-- `tests/logic.test.js` – testy logiky (`npm test`)
-- `tests/smoke.mjs` – headless Chrome test + screenshoty do `artifacts/` (`npm run smoke`)
-- `tools/serve.mjs` – lokální server (`npm run serve`)
+## Structure
+- `index.html`, `style.css` – page and UI
+- `src/hex.js` – hex geometry (axial coordinates, pointy-top)
+- `src/rng.js` – deterministic RNG (seed)
+- `src/rules.js` – game data and balance (terrain, units, economy)
+- `src/map.js` – map generator
+- `src/game.js` – pure game logic without DOM, state is JSON
+- `src/ai.js` – AI opponent
+- `src/render.js` – drawing on the canvas
+- `src/input.js` – what a click/tap on a tile means (pure function, touch with confirmation)
+- `src/sound.js` – sound effects synthesized via WebAudio (no recordings)
+- `src/stats.js` – strength chart and statistics summary as an SVG string (pure function)
+- `src/anim.js` – plays back game events (`state.events`) as animations
+- `src/version.js` – game version shown in the header (must match `package.json`)
+- `src/main.js` – controls, HUD, saving to localStorage, `window.__game` hook for tests
+- `tests/logic.test.js` – logic tests (`npm test`)
+- `tests/smoke.mjs` – headless Chrome test + screenshots into `artifacts/` (`npm run smoke`)
+- `tools/serve.mjs` – local server (`npm run serve`)
 
-## Autonomní vývojový běh
-Když tě spustí naplánovaná úloha, postupuj takto:
+## Autonomous development run
+When a scheduled task starts you, proceed as follows:
 
-1. Přečti `RULES.md`, `ROADMAP.md` a posledních ~5 záznamů v `LOG.md`.
-2. Pracuj ve větvi `dev` (založ ji z `main`, pokud neexistuje; jinak ji stáhni a pokračuj na ní).
-3. `npm ci` a `npm run check` – ověř, že výchozí stav je zelený. Pokud ne, nejdřív oprav.
-4. Vyber **jeden** úkol: první nezaškrtnutý v aktuální fázi `ROADMAP.md`. Pokud je fáze hotová, můžeš vymyslet
-   vlastní vylepšení – zapiš ho do roadmapy dřív, než na něm začneš pracovat.
-5. Implementuj ho. Logiku drž v `src/game.js` / `src/rules.js` (bez DOM) a přidej k ní test.
-6. `npm run check` musí projít. Prohlédni si `artifacts/screenshot.png` a `artifacts/screenshot-mobile.png`
-   (nástrojem Read), jestli UI vypadá dobře.
-7. Zvyš verzi v `package.json` a `src/version.js` (nové funkce = druhé číslo, opravy = třetí; jednou za běh)
-   a uveď ji v záznamu v `LOG.md`. Odškrtni úkol v `ROADMAP.md`, přidej záznam do `LOG.md`, commitni a pushni do `dev`.
-8. Pokud zbývá čas a kontext, můžeš vzít další úkol (max 3 za běh). Kvalita před kvantitou.
-9. Na konci pošli uživateli krátkou zprávu (česky, 2–4 věty): co přibylo, a pokud něco potřebuješ
-   od něj (rozhodnutí, sloučení do `main`), napiš to jasně na začátek.
+1. Read `RULES.md`, `ROADMAP.md` and the last ~5 entries in `LOG.md`.
+2. Work on the `dev` branch (create it from `main` if it doesn't exist; otherwise pull it and continue on it).
+3. `npm ci` and `npm run check` – verify the starting state is green. If not, fix it first.
+4. Pick **one** task: the first unchecked one in the current phase of `ROADMAP.md`. If the phase is done, you may come up
+   with your own improvement – write it into the roadmap before you start working on it.
+5. Implement it. Keep logic in `src/game.js` / `src/rules.js` (no DOM) and add a test for it.
+6. `npm run check` must pass. Look at `artifacts/screenshot.png` and `artifacts/screenshot-mobile.png`
+   (with the Read tool) to check the UI looks good.
+7. Bump the version in `package.json` and `src/version.js` (new features = second number, fixes = third; once per run)
+   and mention it in the `LOG.md` entry. Check off the task in `ROADMAP.md`, add an entry to `LOG.md`, commit and push to `dev`.
+8. If time and context remain, you may take another task (max 3 per run). Quality over quantity.
+9. At the end, send the user a short message (in English, 2–4 sentences): what was added, and if you need anything
+   from him (a decision, a merge into `main`), state it clearly at the start.
 
-## Konvence
-- ES moduly, žádné frameworky ani build krok. Externí knihovny jen s dobrým důvodem a zapsáním do LOG.md.
-- Malé, čitelné funkce; komentáře česky tam, kde to není zřejmé.
-- Stav hry musí zůstat serializovatelný do JSON. Při změně struktury zvyš `state.version` v `createGame`.
-- Hra musí fungovat na mobilu (šířka 390 px, bez vodorovného scrollu) – kontroluje to smoke test.
+## Conventions
+- ES modules, no frameworks or build step. External libraries only for a good reason and noted in LOG.md.
+- Small, readable functions; comments in English where things aren't obvious.
+- Commit messages in English.
+- Game state must stay serializable to JSON. When the structure changes, bump `state.version` in `createGame`.
+- The game must work on mobile (390 px width, no horizontal scroll) – the smoke test checks this.

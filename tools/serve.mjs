@@ -1,4 +1,4 @@
-// Mini statický server pro lokální hraní a testy: node tools/serve.mjs [port]
+// Tiny static server for local play and tests: node tools/serve.mjs [port]
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
@@ -25,5 +25,5 @@ export function startServer(port = 0) {
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const port = Number(process.argv[2]) || 8080;
   await startServer(port);
-  console.log(`Hra běží na http://127.0.0.1:${port}`);
+  console.log(`Game running at http://127.0.0.1:${port}`);
 }

@@ -1,8 +1,8 @@
-// Propojení logiky, vykreslení a ovládání v prohlížeči.
+// Wires together game logic, rendering and browser controls.
 import {
   createGame, reachable, attackTargets, moveUnit, attack, buyUnit, endTurn,
   unitAt, cityAt, getUnit, incomeOf, previewAttack, tileAt, pathTo, nextActiveUnit, cityInfo,
-  cloneState, drainEvents, migrateState, logFor, visibleTiles, exploredTiles, build, unitCost, hasBuilding,
+  cloneState, drainEvents, migrateState, logFor, isUndoableMove, visibleTiles, exploredTiles, build, unitCost, hasBuilding,
   rankOf, rankMult, buildingCost, unitMove, factionOf, riverDefense,
 } from './game.js';
 import { createAnimator } from './anim.js';
@@ -29,8 +29,9 @@ let selectedId = null;
 let selectedCityId = null;
 let hover = null;
 let aiRunning = false;
-let pending = null;        // dotyk: cíl čekající na potvrzení druhým klepnutím
-let lastPointer = 'mouse'; // typ posledního ukazatele (mouse / touch / pen)
+let pending = null;        // touch: target awaiting confirmation by a second tap
+let lastPointer = 'mouse'; // type of the last pointer (mouse / touch / pen)
+let undoStack = [];        // states before undoable moves this turn (memory only)
 const sound = createSound();
 sound.enabled = loadPrefs().sound !== false;
 const anim = createAnimator(
@@ -41,15 +42,15 @@ const anim = createAnimator(
 let lastWinner = state.winner;
 try {
   if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) anim.speed = 0;
-} catch { /* starý prohlížeč */ }
+} catch { /* old browser */ }
 
-// Jednotka na poli, jen pokud ji hráč vidí (cizí jednotky v mlze jako by nebyly).
+// Unit on a tile, only if the player can see it (enemy units in fog are treated as absent).
 function seenUnitAt(q, r) {
   const u = unitAt(state, q, r);
   return u && (u.owner === 0 || visibleTiles(state, 0).has(key(q, r))) ? u : null;
 }
 
-// Hráč nemůže jednat, dokud hraje AI nebo běží animace.
+// The player can't act while the AI is playing or an animation is running.
 const busy = () => aiRunning || anim.busy;
 
 function randomSeed() {
@@ -57,7 +58,7 @@ function randomSeed() {
 }
 
 function save() {
-  try { localStorage.setItem(SAVE_KEY, JSON.stringify(state)); } catch { /* bez úložiště */ }
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify(state)); } catch { /* no storage */ }
 }
 
 function load() {
@@ -77,13 +78,13 @@ function resize() {
   canvas.width = w * dpr;
   canvas.height = h * dpr;
   canvas.style.aspectRatio = `${w} / ${h}`;
-  canvas.style.setProperty('--zoom-w', `${Math.round(w)}px`); // přiblížená mapa v přirozené velikosti
+  canvas.style.setProperty('--zoom-w', `${Math.round(w)}px`); // zoomed map at natural size
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
 
-const fmt = (x) => (Math.round(x * 10) / 10).toLocaleString('cs-CZ');
+const fmt = (x) => (Math.round(x * 10) / 10).toLocaleString('en-US');
 
-// "Veterán ★ · XP 4/7" – hodnost a kolik zbývá do další.
+// "Veteran ★ · XP 4/7" – rank and progress to the next one.
 function rankLine(u) {
   const r = rankOf(u);
   const next = RANKS[r + 1];
@@ -130,67 +131,70 @@ function updateHud() {
   if (u) {
     const t = UNIT_TYPES[u.type];
     html += `<h3>${t.name} <span class="tag" style="background:${PLAYERS[u.owner].color}">${PLAYERS[u.owner].name}</span></h3>
-      <p>Životy ${u.hp}/${t.hp} · Útok ${fmt(t.atk * rankMult(u))} · Obrana ${fmt(t.def * rankMult(u))} · Dosah ${t.range}</p>
-      <p>Pohyb ${fmt(u.movesLeft)}/${unitMove(state, u)}${u.hasAttacked ? ' · už útočil' : ''}</p>
+      <p>HP ${u.hp}/${t.hp} · Attack ${fmt(t.atk * rankMult(u))} · Defense ${fmt(t.def * rankMult(u))} · Range ${t.range}</p>
+      <p>Move ${fmt(u.movesLeft)}/${unitMove(state, u)}${u.hasAttacked ? ' · already attacked' : ''}</p>
       <p>${rankLine(u)}</p>${t.desc ? `<p class="hint">${t.desc}</p>` : ''}`;
   }
   if (city) {
-    const owner = city.owner === null ? 'neutrální' : PLAYERS[city.owner].name;
+    const owner = city.owner === null ? 'neutral' : PLAYERS[city.owner].name;
     const ci = cityInfo(state, city);
-    html += `<h3>${city.name}</h3><p>Vlastník: ${owner}${city.capital ? ' · hlavní město' : ''}</p>
-      <p>Příjem +${ci.income} zl./kolo · Obrana posádky +${ci.defensePct} % · Léčení +${ci.heal}</p>`;
+    html += `<h3>${city.name}</h3><p>Owner: ${owner}${city.capital ? ' · capital' : ''}</p>
+      <p>Income +${ci.income} gold/turn · Garrison defense +${ci.defensePct} % · Healing +${ci.heal}</p>`;
     const built = (city.buildings || []).map((b) => `<span class="building">${BUILDINGS[b].symbol} ${BUILDINGS[b].name}</span>`);
     if (built.length) html += `<p>${built.join(' ')}</p>`;
     if (city.owner === 0 && state.current === 0 && !busy()) {
       const blocked = !!unitAt(state, city.q, city.r);
-      html += '<h4>Verbovat</h4><div class="buy">';
+      html += '<h4>Recruit</h4><div class="buy">';
       for (const [type, t] of Object.entries(UNIT_TYPES)) {
         const cost = unitCost(state, city, type);
         const dis = blocked || state.gold[0] < cost ? 'disabled' : '';
-        html += `<button data-buy="${type}" ${dis} title="${t.desc || ''}">${t.name} <small>${cost} zl.</small></button>`;
+        html += `<button data-buy="${type}" ${dis} title="${t.desc || ''}">${t.name} <small>${cost} gold</small></button>`;
       }
       html += '</div>';
-      if (blocked) html += '<p class="hint">Město je obsazené – nejdřív z něj odejdi jednotkou.</p>';
+      if (blocked) html += '<p class="hint">The city is occupied – move the unit out first.</p>';
       const todo = Object.entries(BUILDINGS).filter(([b]) => !hasBuilding(city, b));
       if (todo.length) {
-        html += '<h4>Stavět</h4><div class="buy">';
+        html += '<h4>Build</h4><div class="buy">';
         for (const [b, info] of todo) {
           const bc = buildingCost(state, 0, b);
           const dis = state.gold[0] < bc ? 'disabled' : '';
-          html += `<button data-build="${b}" class="secondary" ${dis}><span>${info.symbol} ${info.name}</span><small>${bc} zl.</small><small class="desc">${info.desc}</small></button>`;
+          html += `<button data-build="${b}" class="secondary" ${dis}><span>${info.symbol} ${info.name}</span><small>${bc} gold</small><small class="desc">${info.desc}</small></button>`;
         }
         html += '</div>';
       }
     }
   }
   if (!u && !city && hover && !exploredTiles(state, 0).has(key(hover.q, hover.r))) {
-    html = '<p>Neprozkoumané území</p>';
+    html = '<p>Unexplored territory</p>';
   } else if (!u && !city && hover && tileAt(state, hover.q, hover.r)) {
     const tile = tileAt(state, hover.q, hover.r);
     const t = TERRAIN[tile.terrain];
-    const road = tile.road ? ' · silnice (po silnici pohyb ½)' : '';
-    const river = tile.rivers && tile.rivers.length ? ` · řeka (přechod +${RIVER.crossCost} pohyb, obránce +${Math.round(RIVER.defBonus * 100)} %)` : '';
-    html = `<p>${t.name}${t.passable ? ` · pohyb ${t.cost} · obrana +${Math.round(t.defBonus * 100)} %` : ' · neprůchodné'}${road}${river}</p>`;
+    const road = tile.road ? ' · road (move cost ½ along roads)' : '';
+    const river = tile.rivers && tile.rivers.length ? ` · river (crossing +${RIVER.crossCost} move, defender +${Math.round(RIVER.defBonus * 100)} %)` : '';
+    html = `<p>${t.name}${t.passable ? ` · move ${t.cost} · defense +${Math.round(t.defBonus * 100)} %` : ' · impassable'}${road}${river}</p>`;
     const hc = cityAt(state, hover.q, hover.r);
     if (hc) {
       const ci = cityInfo(state, hc);
-      html = `<h3>${hc.name}</h3><p>Příjem +${ci.income} zl./kolo · Obrana posádky +${ci.defensePct} %</p>` + html;
+      html = `<h3>${hc.name}</h3><p>Income +${ci.income} gold/turn · Garrison defense +${ci.defensePct} %</p>` + html;
     }
   }
   if (pending && u) {
     const target = seenUnitAt(pending.q, pending.r);
     if (target && target.owner !== u.owner) {
       const pr = previewAttack(state, u, target);
-      html += `<p class="confirm">Útok${riverDefense(state, u, target) ? ' přes řeku' : ''}: −${pr.damage}${pr.kills ? ' (zničí)' : ''}, protiúder −${pr.counter}.<br>Klepni na cíl znovu pro potvrzení.</p>`;
+      html += `<p class="confirm">${riverDefense(state, u, target) ? 'Attack across a river' : 'Attack'}: −${pr.damage}${pr.kills ? ' (destroys)' : ''}, counter −${pr.counter}.<br>Tap the target again to confirm.</p>`;
     } else {
-      html += '<p class="confirm">Klepni na cíl znovu pro potvrzení pohybu.</p>';
+      html += '<p class="confirm">Tap the target again to confirm the move.</p>';
     }
   }
   if (!html) {
     const diff = DIFFICULTY[state.difficulty] || DIFFICULTY.normal;
-    html = `<p class="hint">Klikni na svou jednotku (modrá) nebo město.</p>
-      <p class="hint">Obtížnost: ${diff.name}${state.fog ? '' : ' · bez mlhy'}${state.happenings ? '' : ' · bez náhodných událostí'}</p>
-      ${state.factions && state.factions[0] ? `<p class="hint">Ty: ${factionOf(state, 0).name} · AI: ${factionOf(state, 1).name}</p>` : ''}`;
+    html = `<p class="hint">Click your unit (blue) or a city.</p>
+      <p class="hint">Difficulty: ${diff.name}${state.fog ? '' : ' · no fog'}${state.happenings ? '' : ' · no random events'}</p>
+      ${state.factions && state.factions[0] ? `<p class="hint">You: ${factionOf(state, 0).name} · AI: ${factionOf(state, 1).name}</p>` : ''}`;
+  }
+  if (undoStack.length && !busy() && state.winner === null) {
+    html += '<button data-undo class="secondary undo-btn" title="Undo last move (Z)">↶ Undo move</button>';
   }
   info.innerHTML = html;
 
@@ -198,7 +202,7 @@ function updateHud() {
     .map((l) => `<li${l.hidden ? ' class="hidden-act"' : ''}><b>${l.turn}.</b> ${l.msg}</li>`).join('');
 
   const banner = $('banner');
-  // znělka konce hry: jednou, až doběhne animace posledního tahu
+  // end-of-game jingle: once, after the last turn's animation finishes
   if (state.winner === null) lastWinner = null;
   else if (lastWinner === null && !busy()) {
     lastWinner = state.winner;
@@ -207,8 +211,8 @@ function updateHud() {
   if (state.winner !== null) {
     banner.hidden = false;
     $('banner-text').textContent = state.winner === 0
-      ? `Vítězství v ${state.turn}. kole! Dobyl jsi nepřátelská města.`
-      : `Porážka v ${state.turn}. kole. AI dobyla tvoje města.`;
+      ? `Victory in turn ${state.turn}! You captured the enemy cities.`
+      : `Defeat in turn ${state.turn}. The AI captured your cities.`;
     if (!statsShownForEnd) { $('stats-panel').open = true; statsShownForEnd = true; }
   } else {
     banner.hidden = true;
@@ -220,7 +224,7 @@ function updateHud() {
 let statsShownForEnd = false;
 let statsKey = '';
 
-// Panel statistik: graf síly a souhrn. Překresluje se jen při změně (updateHud běží často).
+// Statistics panel: power chart and summary. Redrawn only on change (updateHud runs often).
 function updateStats() {
   if (!$('stats-panel').open) return;
   const h = state.history || [];
@@ -228,12 +232,12 @@ function updateStats() {
   if (key === statsKey) return;
   statsKey = key;
   if (h.length < 2) {
-    $('stats').innerHTML = '<p class="hint">Graf se objeví po několika kolech.</p>';
+    $('stats').innerHTML = '<p class="hint">The chart appears after a few turns.</p>';
     return;
   }
   const rows = summaryRows(state).map(([label, a, b]) => `<tr><th>${label}</th><td>${a}</td><td>${b}</td></tr>`).join('');
-  $('stats').innerHTML = '<h4>Síla armád</h4>' + chartSvg(h, { title: 'Síla armád v čase' })
-    + '<h4>Počet měst</h4>' + chartSvg(h, { metric: 'cities', height: 110, title: 'Počet měst' })
+  $('stats').innerHTML = '<h4>Army strength</h4>' + chartSvg(h, { title: 'Army strength over time' })
+    + '<h4>Cities</h4>' + chartSvg(h, { metric: 'cities', height: 110, title: 'Cities' })
     + `<table class="stats-table"><tr><th></th><th>${PLAYERS[0].name}</th><th>${PLAYERS[1].name}</th></tr>${rows}</table>`;
 }
 
@@ -253,7 +257,7 @@ function onClick(ev) {
   pending = null;
   if (act.type === 'none') return;
   if (act.type === 'preview') {
-    // dotyk: ukázat trasu / odhad útoku a čekat na druhé klepnutí
+    // touch: show the path / attack estimate and wait for a second tap
     pending = { q: act.q, r: act.r };
     hover = { q: act.q, r: act.r };
     draw();
@@ -262,6 +266,7 @@ function onClick(ev) {
   if (act.type === 'attack') {
     const before = cloneState(state);
     attack(state, act.unitId, act.targetId);
+    undoStack = [];
     if (!getUnit(state, act.unitId)) selectedId = null;
     if (touch) hover = null;
     afterAction(before);
@@ -270,6 +275,9 @@ function onClick(ev) {
   if (act.type === 'move') {
     const before = cloneState(state);
     moveUnit(state, act.unitId, act.q, act.r);
+    // copy: the animation replays events directly on `before`, so it would mutate it
+    if (isUndoableMove(before, state, state.events, 0)) undoStack.push(cloneState(before));
+    else undoStack = [];
     const c = cityAt(state, act.q, act.r);
     selectedCityId = c ? c.id : null;
     if (touch) hover = null;
@@ -293,7 +301,7 @@ function onMove(ev) {
   }
 }
 
-// Zobrazí tooltip u kurzoru, ale nenechá ho přetéct přes okraj okna.
+// Shows the tooltip next to the cursor without letting it overflow the window edge.
 function placeTip(tip, ev) {
   tip.hidden = false;
   const x = Math.min(ev.clientX + 12, window.innerWidth - tip.offsetWidth - 8);
@@ -304,27 +312,27 @@ function placeTip(tip, ev) {
 
 function showTooltip(ev, hex) {
   const tip = $('tooltip');
-  if (lastPointer !== 'mouse') { tip.hidden = true; return; } // na dotyk je náhled v panelu
+  if (lastPointer !== 'mouse') { tip.hidden = true; return; } // on touch the preview is in the panel
   const sel = selectedUnit();
   const target = hex && seenUnitAt(hex.q, hex.r);
   if (sel && target && sel.owner === state.current && attackTargets(state, sel).includes(target)) {
     const p = previewAttack(state, sel, target);
-    tip.textContent = `Útok${riverDefense(state, sel, target) ? ' přes řeku' : ''}: −${p.damage}${p.kills ? ' (zničí)' : ''}, protiúder −${p.counter}`;
+    tip.textContent = `${riverDefense(state, sel, target) ? 'Attack across a river' : 'Attack'}: −${p.damage}${p.kills ? ' (destroys)' : ''}, counter −${p.counter}`;
     placeTip(tip, ev);
   } else if (hex && cityAt(state, hex.q, hex.r) && exploredTiles(state, 0).has(key(hex.q, hex.r))) {
     const city = cityAt(state, hex.q, hex.r);
     const ci = cityInfo(state, city);
-    const owner = city.owner === null ? 'neutrální' : PLAYERS[city.owner].name;
-    const gar = ci.garrison ? UNIT_TYPES[ci.garrison.type].name : 'bez posádky';
+    const owner = city.owner === null ? 'neutral' : PLAYERS[city.owner].name;
+    const gar = ci.garrison ? UNIT_TYPES[ci.garrison.type].name : 'no garrison';
     const bs = (city.buildings || []).map((b) => BUILDINGS[b].name).join(', ');
-    tip.textContent = `${city.name} (${owner}): +${ci.income} zl./kolo · obrana +${ci.defensePct} % · ${gar}${bs ? ` · ${bs}` : ''}`;
+    tip.textContent = `${city.name} (${owner}): +${ci.income} gold/turn · defense +${ci.defensePct} % · ${gar}${bs ? ` · ${bs}` : ''}`;
     placeTip(tip, ev);
   } else {
     tip.hidden = true;
   }
 }
 
-// Po akci hráče: uložit a přehrát, co se stalo (before = stav před akcí).
+// After a player action: save and replay what happened (before = state before the action).
 async function afterAction(before = null) {
   const events = drainEvents(state);
   save();
@@ -342,6 +350,7 @@ function doEndTurn() {
   $('tooltip').hidden = true;
   pending = null;
   showNotice([]);
+  undoStack = [];
   endTurn(state);
   drainEvents(state);
   aiRunning = true;
@@ -360,19 +369,19 @@ function doEndTurn() {
   }, 250);
 }
 
-// Pruh s náhodnou událostí, která hráče potkala na začátku tahu (zmizí s dalším koncem tahu).
+// Banner for a random event that hit the player at the start of the turn (cleared at the next end of turn).
 function showNotice(happened) {
   const el = $('notice');
   if (!happened.length) { el.hidden = true; return; }
   const ev = happened[0];
   const city = state.cities.find((c) => c.id === ev.cityId);
   const name = HAPPENINGS.kinds[ev.kind].name;
-  const place = city ? ` ve městě ${city.name}` : '';
+  const place = city ? ` in ${city.name}` : '';
   let text = `${name}${place}`;
-  if (ev.kind === 'harvest') text += `: +${ev.gold} zlata.`;
-  else if (ev.kind === 'plague') text += ev.hits.length ? `: nakažené jednotky ztratily životy (${ev.hits.length}).` : ', ale žádná jednotka nebyla poblíž.';
-  else if (ev.suppressed) text += ', ale posádka udržela pořádek.';
-  else text += `: město tento tah neodvedlo daně (${ev.gold} zl.).`;
+  if (ev.kind === 'harvest') text += `: +${ev.gold} gold.`;
+  else if (ev.kind === 'plague') text += ev.hits.length ? `: infected units lost HP (${ev.hits.length}).` : ', but no unit was nearby.';
+  else if (ev.suppressed) text += ', but the garrison kept order.';
+  else text += `: the city paid no taxes this turn (${ev.gold} gold).`;
   const good = ev.kind === 'harvest' || ev.suppressed;
   el.textContent = text;
   el.className = good ? 'good' : 'bad';
@@ -380,13 +389,13 @@ function showNotice(happened) {
   sound.play(soundFor(ev, 0));
 }
 
-// Poslední volba v dialogu nové hry (jen pohodlí, hra funguje i bez úložiště).
+// Last choices in the new game dialog (convenience only; the game works without storage).
 function loadPrefs() {
   try { return JSON.parse(localStorage.getItem(PREFS_KEY)) || {}; } catch { return {}; }
 }
 
 function savePrefs(prefs) {
-  try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch { /* bez úložiště */ }
+  try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch { /* no storage */ }
 }
 
 function newGame({ firstVisit = false } = {}) {
@@ -406,6 +415,7 @@ function newGame({ firstVisit = false } = {}) {
 
 function startNewGame(options) {
   state = createGame({ seed: randomSeed(), ...options });
+  undoStack = [];
   showNotice([]);
   selectedId = null;
   selectedCityId = null;
@@ -429,13 +439,13 @@ $('new-game-dialog').addEventListener('close', () => {
   startNewGame(options);
 });
 
-// zvuk: odemknout AudioContext prvním gestem a přepínač v záhlaví
+// sound: unlock AudioContext on the first gesture, plus the header toggle
 window.addEventListener('pointerdown', () => sound.unlock(), { once: true });
 window.addEventListener('keydown', () => sound.unlock(), { once: true });
 function updateSoundButton() {
   $('sound').textContent = sound.enabled ? '♪' : '♪̸';
   $('sound').setAttribute('aria-pressed', String(sound.enabled));
-  $('sound').title = sound.enabled ? 'Zvuk zapnutý (klikni pro vypnutí)' : 'Zvuk vypnutý (klikni pro zapnutí)';
+  $('sound').title = sound.enabled ? 'Sound on (click to turn off)' : 'Sound off (click to turn on)';
 }
 $('sound').addEventListener('click', () => {
   sound.enabled = !sound.enabled;
@@ -451,7 +461,7 @@ for (const type of ['pointerdown', 'pointermove']) {
 $('zoom').addEventListener('click', () => {
   const wrap = document.querySelector('.board-wrap');
   wrap.classList.toggle('zoomed');
-  $('zoom').textContent = wrap.classList.contains('zoomed') ? 'Oddálit mapu' : 'Přiblížit mapu';
+  $('zoom').textContent = wrap.classList.contains('zoomed') ? 'Zoom out' : 'Zoom map';
   $('zoom').setAttribute('aria-pressed', wrap.classList.contains('zoomed'));
 });
 canvas.addEventListener('click', onClick);
@@ -463,26 +473,28 @@ $('banner-new').addEventListener('click', () => newGame());
 $('stats-panel').addEventListener('toggle', () => { statsKey = ''; updateStats(); });
 $('next-unit').addEventListener('click', selectNextUnit);
 $('info').addEventListener('click', (ev) => {
+  if (ev.target.closest('button[data-undo]')) { undoMove(); return; }
   const bBtn = ev.target.closest('button[data-build]');
   if (bBtn && selectedCityId && !busy()) {
-    if (build(state, selectedCityId, bBtn.dataset.build)) { drainEvents(state); sound.play('build'); afterAction(); }
+    if (build(state, selectedCityId, bBtn.dataset.build)) { undoStack = []; drainEvents(state); sound.play('build'); afterAction(); }
     return;
   }
   const btn = ev.target.closest('button[data-buy]');
   if (!btn || !selectedCityId) return;
-  if (!busy() && buyUnit(state, selectedCityId, btn.dataset.buy)) { sound.play('recruit'); afterAction(); }
+  if (!busy() && buyUnit(state, selectedCityId, btn.dataset.buy)) { undoStack = []; sound.play('recruit'); afterAction(); }
 });
 window.addEventListener('keydown', (ev) => {
-  if ($('new-game-dialog').open) return; // klávesy patří dialogu
+  if ($('new-game-dialog').open) return; // keys belong to the dialog
   if (ev.key === 'Enter' || ev.key === 'e') doEndTurn();
   if (ev.key === 'Tab') { ev.preventDefault(); selectNextUnit(); }
+  if (ev.key === 'z' || ev.key === 'Z') { ev.preventDefault(); undoMove(); }
   if (ev.key === 'Escape') {
     if (busy()) { anim.skip(); return; }
     selectedId = null; selectedCityId = null; pending = null; draw();
   }
 });
 
-// Vybere další jednotku, která ještě může jednat (Tab / tlačítko).
+// Selects the next unit that can still act (Tab / button).
 function selectNextUnit() {
   if (busy() || state.winner !== null) return;
   pending = null;
@@ -494,31 +506,48 @@ function selectNextUnit() {
   draw();
 }
 
-// Háček pro automatické testy (Playwright).
+// Undoes the last undoable move (Z key / panel button); the unit stays selected.
+function undoMove() {
+  if (busy() || !undoStack.length) return;
+  const movedId = selectedId;
+  state = undoStack.pop();
+  pending = null;
+  selectedId = getUnit(state, movedId) ? movedId : null;
+  const u = selectedUnit();
+  const c = u && cityAt(state, u.q, u.r);
+  selectedCityId = c ? c.id : null;
+  sound.play('click');
+  save();
+  draw();
+}
+
+// Hook for automated tests (Playwright).
 window.__game = {
   getState: () => state,
   endTurn: doEndTurn,
+  undo: undoMove,
+  canUndo: () => undoStack.length > 0,
   nextUnit: selectNextUnit,
   selectedId: () => selectedId,
   isBusy: busy,
   version: GAME_VERSION,
   setAnimSpeed: (x) => { anim.speed = x; },
   refresh: () => { resize(); draw(); },
-  newGame: (seed, options = {}) => { state = createGame({ seed, ...options }); showNotice([]); resize(); draw(); },
+  newGame: (seed, options = {}) => { state = createGame({ seed, ...options }); undoStack = []; showNotice([]); resize(); draw(); },
   showNotice: (events) => { showNotice(events); draw(); },
 };
 
 $('size-options').innerHTML = Object.entries(MAP_SIZES).map(([id, m]) => `
-  <label><input type="radio" name="size" value="${id}" ${id === 'medium' ? 'checked' : ''}> <b>${m.name}</b> <small>${m.cols} × ${m.rows}, ${m.neutralCities + 2} měst – ${m.desc}</small></label>`).join('');
+  <label><input type="radio" name="size" value="${id}" ${id === 'medium' ? 'checked' : ''}> <b>${m.name}</b> <small>${m.cols} × ${m.rows}, ${m.neutralCities + 2} cities – ${m.desc}</small></label>`).join('');
 
-// Volby frakcí v dialogu se generují z rules.js, ať se nové frakce objeví samy.
+// Faction options in the dialog are generated from rules.js so new factions show up automatically.
 $('faction-options').innerHTML = Object.entries(FACTIONS).map(([id, f], i) => `
   <label><input type="radio" name="faction" value="${id}" ${i === 0 ? 'checked' : ''}> <b>${f.name}</b> <small>${f.desc}</small></label>`).join('');
 
 $('version').textContent = `v${GAME_VERSION}`;
-$('version').title = `Verze ${GAME_VERSION} z ${GAME_DATE}`;
+$('version').title = `Version ${GAME_VERSION} from ${GAME_DATE}`;
 
 resize();
 draw();
-// první návštěva (žádná uložená hra): dialog nové hry slouží jako hlavní menu
+// first visit (no saved game): the new game dialog acts as the main menu
 if (!hadSave) newGame({ firstVisit: true });

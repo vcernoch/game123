@@ -1,5 +1,5 @@
-// Smoke test v headless prohlížeči: hra se načte, nepadá a dá se odehrát pár tahů.
-// Vytvoří screenshot do artifacts/screenshot.png (pro kontrolu vzhledu).
+// Smoke test in a headless browser: the game loads, doesn't crash and a few turns can be played.
+// Saves a screenshot to artifacts/screenshot.png (for visual checks).
 import { chromium } from 'playwright-core';
 import { mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
@@ -8,7 +8,7 @@ import { startServer } from '../tools/serve.mjs';
 const candidates = [process.env.CHROME_PATH, '/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser'].filter(Boolean);
 const executablePath = candidates.find((p) => existsSync(p));
 if (!executablePath) {
-  console.error('Nenalezen Chrome/Chromium. Nastav CHROME_PATH.');
+  console.error('Chrome/Chromium not found. Set CHROME_PATH.');
   process.exit(2);
 }
 
@@ -23,7 +23,7 @@ try {
   page.on('console', (m) => { if (m.type() === 'error') errors.push(`console: ${m.text()}`); });
   await page.goto(url);
   await page.waitForFunction(() => window.__game);
-  // první návštěva: dialog nové hry funguje jako hlavní menu
+  // first visit: the new game dialog acts as the main menu
   await page.waitForSelector('#new-game-dialog[open]', { timeout: 2000 });
   await page.screenshot({ path: 'artifacts/screenshot-menu.png' });
   await page.click('#new-game-dialog button[value="cancel"]');
@@ -31,11 +31,11 @@ try {
   await page.evaluate(() => window.__game.setAnimSpeed(0.25));
   const shownVersion = await page.textContent('#version');
   const expected = await page.evaluate(() => window.__game.version);
-  if (shownVersion !== `v${expected}`) throw new Error(`verze v záhlaví nesedí: ${shownVersion}`);
+  if (shownVersion !== `v${expected}`) throw new Error(`header version mismatch: ${shownVersion}`);
 
-  // klik na hráčovu jednotku a na pole, kam může jít
+  // click the player's unit and a tile it can move to
   const box = await page.locator('#board').boundingBox();
-  if (!box) throw new Error('canvas není vidět');
+  if (!box) throw new Error('canvas is not visible');
 
   for (let i = 0; i < 5; i++) {
     await page.evaluate(() => window.__game.endTurn());
@@ -43,9 +43,9 @@ try {
   }
   const turn = await page.evaluate(() => window.__game.getState().turn);
   if (turn < 6 && (await page.evaluate(() => window.__game.getState().winner)) === null) {
-    throw new Error(`kola nepřibývají (turn=${turn})`);
+    throw new Error(`turns are not advancing (turn=${turn})`);
   }
-  // kronika neprozradí akce AI v mlze války: žádný řádek nesmí být záznam, který hráč neviděl
+  // the chronicle must not reveal AI actions in the fog of war: no line may be an entry the player didn't see
   const leak = await page.evaluate(() => {
     const st = window.__game.getState();
     if (st.winner !== null) return null;
@@ -54,14 +54,14 @@ try {
     const secret = new Set(st.log.filter((e) => e.seen && !e.seen.includes(0)).map(line).filter((l) => !pub.has(l)));
     return [...document.querySelectorAll('#log li')].map((li) => li.textContent).find((t) => secret.has(t)) || null;
   });
-  if (leak) throw new Error(`kronika prozrazuje akci v mlze: ${leak}`);
+  if (leak) throw new Error(`chronicle reveals an action in fog: ${leak}`);
   await page.click('#board', { position: { x: box.width / 2, y: box.height / 2 } });
 
-  // Tab vybere jednotku s pohybem a najetí na vzdálené pole ukáže trasu
+  // Tab selects a unit with moves left and hovering a distant tile shows the path
   if ((await page.evaluate(() => window.__game.getState().winner)) === null) {
     await page.keyboard.press('Tab');
     const picked = await page.evaluate(() => window.__game.selectedId());
-    if (picked === null) throw new Error('Tab nevybral žádnou jednotku');
+    if (picked === null) throw new Error('Tab selected no unit');
     const far = await page.evaluate(async () => {
       const g = await import('./src/game.js');
       const rnd = await import('./src/render.js');
@@ -74,7 +74,7 @@ try {
         if (!bestK || len > bestK.len) bestK = { q, r, len };
       }
       if (!bestK) return null;
-      // přepočet středu pole na souřadnice stránky
+      // convert the tile center to page coordinates
       const c = rnd.tileCenter(bestK.q, bestK.r);
       const { w } = rnd.canvasSize(st);
       const rect = document.getElementById('board').getBoundingClientRect();
@@ -86,7 +86,7 @@ try {
   await mkdir('artifacts', { recursive: true });
   await page.screenshot({ path: 'artifacts/screenshot.png', fullPage: true });
 
-  // najetí na město ukáže tooltip s příjmem
+  // hovering a city shows a tooltip with its income
   const cityPt = await page.evaluate(async () => {
     const rnd = await import('./src/render.js');
     const st = window.__game.getState();
@@ -99,10 +99,10 @@ try {
   await page.keyboard.press('Escape');
   await page.mouse.move(cityPt.x, cityPt.y);
   const tipText = await page.evaluate(() => !document.getElementById('tooltip').hidden && document.getElementById('tooltip').textContent);
-  if (!tipText || !tipText.includes('zl./kolo')) throw new Error(`tooltip města chybí: ${tipText}`);
+  if (!tipText || !tipText.includes('gold/turn')) throw new Error(`city tooltip missing: ${tipText}`);
   await page.screenshot({ path: 'artifacts/screenshot-city.png' });
 
-  // tah AI v plné rychlosti: zachytit snímek uprostřed animace
+  // AI turn at full speed: capture a frame mid-animation
   await page.evaluate(() => window.__game.setAnimSpeed(1));
   const unitsBefore = await page.evaluate(() => window.__game.getState().units.length);
   await page.evaluate(() => window.__game.endTurn());
@@ -110,9 +110,9 @@ try {
   await page.waitForTimeout(900);
   await page.screenshot({ path: 'artifacts/screenshot-anim.png' });
   await page.waitForFunction(() => !window.__game.isBusy(), null, { timeout: 15000 });
-  if (unitsBefore === 0) throw new Error('žádné jednotky');
+  if (unitsBefore === 0) throw new Error('no units');
 
-  // pohyb hráče: po animaci stojí jednotka na cíli
+  // player move: after the animation the unit stands on the target
   const moved = await page.evaluate(async () => {
     const g = await import('./src/game.js');
     const rnd = await import('./src/render.js');
@@ -133,10 +133,41 @@ try {
     await page.mouse.click(moved.x, moved.y);
     await page.waitForFunction(() => !window.__game.isBusy(), null, { timeout: 5000 });
     const at = await page.evaluate((id) => window.__game.getState().units.find((u) => u.id === id), moved.id);
-    if (!at || at.q !== moved.q || at.r !== moved.r) throw new Error('jednotka se nepřesunula kliknutím');
+    if (!at || at.q !== moved.q || at.r !== moved.r) throw new Error('unit did not move on click');
   }
 
-  // stavba: v čerstvé hře vyber hlavní město a postav trh tlačítkem v panelu
+  // undo move: without fog every ordinary move can be undone – via the panel button and the Z key
+  await page.evaluate(() => window.__game.newGame(777, { fog: false }));
+  const undoMove = await page.evaluate(async () => {
+    const g = await import('./src/game.js');
+    const rnd = await import('./src/render.js');
+    const st = window.__game.getState();
+    window.__game.nextUnit();
+    const u = g.getUnit(st, window.__game.selectedId());
+    const k = [...g.reachable(st, u).keys()].find((key) => {
+      const [q, r] = key.split(',').map(Number);
+      return !g.cityAt(st, q, r);
+    });
+    const [q, r] = k.split(',').map(Number);
+    const c = rnd.tileCenter(q, r);
+    const rect = document.getElementById('board').getBoundingClientRect();
+    const s = rect.width / rnd.canvasSize(st).w;
+    return { id: u.id, from: { q: u.q, r: u.r }, x: rect.left + c.x * s, y: rect.top + c.y * s };
+  });
+  const posOf = (id) => page.evaluate((i) => { const u = window.__game.getState().units.find((x) => x.id === i); return u && { q: u.q, r: u.r }; }, id);
+  for (const how of ['button', 'key']) {
+    await page.mouse.click(undoMove.x, undoMove.y);
+    await page.waitForFunction(() => !window.__game.isBusy(), null, { timeout: 5000 });
+    if (!(await page.evaluate(() => window.__game.canUndo()))) throw new Error('move without fog cannot be undone');
+    if (how === 'button') await page.locator('#info').screenshot({ path: 'artifacts/screenshot-undo.png' });
+    if (how === 'button') await page.click('#info button[data-undo]');
+    else await page.keyboard.press('z');
+    const pos = await posOf(undoMove.id);
+    if (!pos || pos.q !== undoMove.from.q || pos.r !== undoMove.from.r) throw new Error(`undo move (${how}) did not return the unit`);
+    if (await page.evaluate(() => window.__game.canUndo())) throw new Error('an entry remained on the stack after undo');
+  }
+
+  // building: in a fresh game select the capital and build a market via the panel button
   await page.evaluate(() => { window.__game.newGame(12345); window.__game.getState().gold[0] = 99; });
   const capPt = await page.evaluate(async () => {
     const rnd = await import('./src/render.js');
@@ -149,18 +180,18 @@ try {
   });
   await page.mouse.click(capPt.x, capPt.y);
   const marketBtn = page.locator('button[data-build="market"]');
-  if (!(await marketBtn.count())) throw new Error('v panelu města chybí tlačítko stavby');
+  if (!(await marketBtn.count())) throw new Error('city panel is missing the build button');
   await marketBtn.click();
   const hasMarket = await page.evaluate(() => window.__game.getState().cities.find((c) => c.owner === 0 && c.capital).buildings.includes('market'));
-  if (!hasMarket) throw new Error('trh se nepostavil');
+  if (!hasMarket) throw new Error('market was not built');
   await page.screenshot({ path: 'artifacts/screenshot-city-panel.png' });
 
-  // přepínač zvuku
+  // sound toggle
   await page.click('#sound');
-  if ((await page.getAttribute('#sound', 'aria-pressed')) !== 'false') throw new Error('zvuk nejde vypnout');
+  if ((await page.getAttribute('#sound', 'aria-pressed')) !== 'false') throw new Error('sound cannot be turned off');
   await page.click('#sound');
 
-  // dialog nové hry: těžká obtížnost bez mlhy
+  // new game dialog: hard difficulty without fog
   await page.click('#new-game');
   await page.waitForSelector('#new-game-dialog[open]');
   await page.check('input[name="difficulty"][value="hard"]');
@@ -172,9 +203,9 @@ try {
     const s = window.__game.getState();
     return { d: s.difficulty, fog: s.fog, open: document.getElementById('new-game-dialog').open };
   });
-  if (opts.d !== 'hard' || opts.fog !== false || opts.open) throw new Error(`dialog nové hry: ${JSON.stringify(opts)}`);
+  if (opts.d !== 'hard' || opts.fog !== false || opts.open) throw new Error(`new game dialog: ${JSON.stringify(opts)}`);
 
-  // konec hry: malá mapa dohraná AI za oba hráče, pak obrazovka se statistikami
+  // game over: small map played out by the AI for both players, then the statistics screen
   await page.evaluate(async () => {
     const g = await import('./src/game.js');
     const ai = await import('./src/ai.js');
@@ -191,20 +222,20 @@ try {
     charts: document.querySelectorAll('#stats svg.chart').length,
   }));
   if (end.winner === null || !end.banner || !end.statsOpen || end.charts !== 2) {
-    throw new Error(`konec hry / statistiky: ${JSON.stringify(end)}`);
+    throw new Error(`game over / statistics: ${JSON.stringify(end)}`);
   }
   await page.screenshot({ path: 'artifacts/screenshot-end.png', fullPage: true });
 
-  // mobilní šířka – žádný vodorovný scroll
+  // mobile width – no horizontal scroll
   await page.setViewportSize({ width: 390, height: 844 });
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
-  if (overflow) throw new Error('na mobilu je vodorovný scroll');
+  if (overflow) throw new Error('horizontal scroll on mobile');
   await page.screenshot({ path: 'artifacts/screenshot-mobile.png', fullPage: true });
 
-  // dotykový telefon: přiblížená mapa, klepnutí = náhled, druhé klepnutí = pohyb
+  // touch phone: zoomed map, tap = preview, second tap = move
   const touchCtx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
   const phone = await touchCtx.newPage();
-  phone.on('pageerror', (e) => errors.push(`pageerror (dotyk): ${e.message}`));
+  phone.on('pageerror', (e) => errors.push(`pageerror (touch): ${e.message}`));
   await phone.goto(url);
   await phone.waitForFunction(() => window.__game);
   await phone.waitForSelector('#new-game-dialog[open]', { timeout: 2000 });
@@ -230,23 +261,23 @@ try {
   });
   let pt = await tilePoint(plan.from.q, plan.from.r);
   await phone.touchscreen.tap(pt.x, pt.y);
-  if ((await phone.evaluate(() => window.__game.selectedId())) !== plan.id) throw new Error('dotyk: jednotka se nevybrala');
+  if ((await phone.evaluate(() => window.__game.selectedId())) !== plan.id) throw new Error('touch: unit was not selected');
   pt = await tilePoint(plan.to.q, plan.to.r);
   await phone.touchscreen.tap(pt.x, pt.y);
   const afterFirst = await phone.evaluate((id) => window.__game.getState().units.find((u) => u.id === id), plan.id);
-  if (afterFirst.q !== plan.from.q || afterFirst.r !== plan.from.r) throw new Error('dotyk: pohyb proběhl bez potvrzení');
-  if (!(await phone.$('#info .confirm'))) throw new Error('dotyk: chybí výzva k potvrzení');
+  if (afterFirst.q !== plan.from.q || afterFirst.r !== plan.from.r) throw new Error('touch: move happened without confirmation');
+  if (!(await phone.$('#info .confirm'))) throw new Error('touch: confirmation prompt missing');
   await phone.screenshot({ path: 'artifacts/screenshot-touch.png' });
   await phone.touchscreen.tap(pt.x, pt.y);
   await phone.waitForFunction(() => !window.__game.isBusy(), null, { timeout: 5000 });
   const afterSecond = await phone.evaluate((id) => window.__game.getState().units.find((u) => u.id === id), plan.id);
-  if (afterSecond.q !== plan.to.q || afterSecond.r !== plan.to.r) throw new Error('dotyk: druhé klepnutí nepohnulo jednotkou');
+  if (afterSecond.q !== plan.to.q || afterSecond.r !== plan.to.r) throw new Error('touch: second tap did not move the unit');
   if (await phone.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1)) {
-    throw new Error('dotyk: přiblížená mapa způsobila vodorovný scroll stránky');
+    throw new Error('touch: zoomed map caused horizontal page scroll');
   }
   await touchCtx.close();
 
-  // náhodná událost: mor u hlavního města ukáže pruh s oznámením a ubere životy
+  // random event: plague at the capital shows the notice banner and removes HP
   const plague = await page.evaluate(async () => {
     const g = await import('./src/game.js');
     window.__game.newGame(777, { fog: false });
@@ -257,10 +288,10 @@ try {
     return { hits: ev.hits.length, text: document.getElementById('notice').textContent,
       hidden: document.getElementById('notice').hidden };
   });
-  if (plague.hidden || !plague.text.includes('Mor') || !plague.hits) throw new Error(`událost: ${JSON.stringify(plague)}`);
+  if (plague.hidden || !plague.text.includes('Plague') || !plague.hits) throw new Error(`happening: ${JSON.stringify(plague)}`);
   await page.screenshot({ path: 'artifacts/screenshot-happening.png' });
 
-  // řeky: velká mapa bez mlhy, najetí na pole u řeky ukáže popis v panelu
+  // rivers: large map without fog, hovering a river tile shows its description in the panel
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.evaluate(() => { window.__game.newGame(4242, { size: 'large', fog: false }); });
   const riverTile = await page.evaluate(async () => {
@@ -274,14 +305,14 @@ try {
     const k = rect.width / rnd.canvasSize(st).w;
     return { x: rect.left + c.x * k, y: rect.top + c.y * k };
   });
-  if (!riverTile) throw new Error('řeky: velká mapa nemá žádnou řeku');
+  if (!riverTile) throw new Error('rivers: large map has no river');
   await page.mouse.move(riverTile.x, riverTile.y);
   const riverInfo = await page.textContent('#info');
-  if (!riverInfo.includes('řeka')) throw new Error(`řeky: panel nepopisuje řeku (${riverInfo})`);
+  if (!riverInfo.includes('river')) throw new Error(`rivers: panel does not describe the river (${riverInfo})`);
   await page.screenshot({ path: 'artifacts/screenshot-rivers.png' });
 
   if (errors.length) throw new Error(errors.join('\n'));
-  console.log(`SMOKE OK – kolo ${turn}, screenshoty v artifacts/`);
+  console.log(`SMOKE OK – turn ${turn}, screenshots in artifacts/`);
 } catch (e) {
   failed = true;
   console.error('SMOKE FAIL:', e.message);

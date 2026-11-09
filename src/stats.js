@@ -1,10 +1,10 @@
-// Graf síly armád v čase jako SVG řetězec (čistá funkce bez DOM, testovatelná).
+// Army strength over time chart as an SVG string (pure function without DOM, testable).
 import { PLAYERS } from './rules.js';
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 // history: [{ turn, power: [p0, p1], ... }]; metric: 'power' | 'cities' | 'gold'
-export function chartSvg(history, { metric = 'power', width = 256, height = 150, title = 'Síla armád' } = {}) {
+export function chartSvg(history, { metric = 'power', width = 256, height = 150, title = 'Army strength' } = {}) {
   const pad = { l: 30, r: 8, t: 22, b: 20 };
   const w = width - pad.l - pad.r;
   const h = height - pad.t - pad.b;
@@ -27,21 +27,21 @@ export function chartSvg(history, { metric = 'power', width = 256, height = 150,
   <line x1="${pad.l}" y1="${pad.t}" x2="${pad.l}" y2="${pad.t + h}" class="axis"/>
   <text x="${pad.l - 4}" y="${pad.t + 4}" text-anchor="end">${maxV}</text>
   <text x="${pad.l - 4}" y="${pad.t + h}" text-anchor="end">0</text>
-  <text x="${pad.l}" y="${height - 6}">kolo ${t0}</text>
-  <text x="${pad.l + w}" y="${height - 6}" text-anchor="end">kolo ${t1}</text>
+  <text x="${pad.l}" y="${height - 6}">turn ${t0}</text>
+  <text x="${pad.l + w}" y="${height - 6}" text-anchor="end">turn ${t1}</text>
   ${legend}
   ${lines.join('\n  ')}
 </svg>`;
 }
 
-// Souhrn pro konec hry: řádky tabulky [popisek, hodnota hráče 0, hodnota hráče 1].
+// End-of-game summary: table rows [label, player 0 value, player 1 value].
 export function summaryRows(state) {
   const st = state.stats || { kills: [0, 0], losses: [0, 0], captures: [0, 0] };
   const peak = (i) => Math.max(0, ...(state.history || []).map((e) => e.power[i]));
   return [
-    ['Zničené jednotky', st.kills[0], st.kills[1]],
-    ['Ztracené jednotky', st.losses[0], st.losses[1]],
-    ['Dobytá města', st.captures[0], st.captures[1]],
-    ['Největší síla armády', peak(0), peak(1)],
+    ['Units destroyed', st.kills[0], st.kills[1]],
+    ['Units lost', st.losses[0], st.losses[1]],
+    ['Cities captured', st.captures[0], st.captures[1]],
+    ['Peak army strength', peak(0), peak(1)],
   ];
 }

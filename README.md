@@ -1,15 +1,15 @@
-# Hexová říše
+# Hex Realm
 
-Tahová strategie v prohlížeči na hexové mapě proti AI. Čisté HTML a JavaScript, bez instalace.
+A turn-based strategy game in the browser on a hex map against an AI. Plain HTML and JavaScript, no installation.
 
-**Hrát:** https://vcernoch.github.io/game123/ (po zapnutí GitHub Pages)
+**Play:** https://vcernoch.github.io/game123/ (once GitHub Pages is enabled)
 
-## Lokálně
+## Locally
 ```
 npm install
 npm run serve     # http://127.0.0.1:8080
-npm run check     # testy logiky + test v prohlížeči
+npm run check     # logic tests + browser test
 ```
 
-Hru vyvíjí převážně Claude v naplánovaných bězích. Postup a mantinely jsou v `CLAUDE.md` a `RULES.md`,
-plán v `ROADMAP.md`, historie v `LOG.md`. Nové věci přibývají ve větvi `dev`.
+The game is developed mostly by Claude in scheduled runs. The process and guardrails are in `CLAUDE.md` and `RULES.md`,
+the plan in `ROADMAP.md`, the history in `LOG.md`. New things land on the `dev` branch.

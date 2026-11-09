@@ -1,7 +1,7 @@
-// Zvukové efekty generované přes WebAudio – žádné nahrávky, vše se syntetizuje.
-// Modul jde importovat i v Node (testy): AudioContext vzniká až při prvním přehrání.
+// Sound effects generated with WebAudio – no recordings, everything is synthesized.
+// The module can be imported in Node too (tests): the AudioContext is created on first play.
 
-// Která herní událost zní jak. viewer = hráč u obrazovky (jeho akce znějí o něco výrazněji).
+// Which game event sounds how. viewer = player at the screen (their actions sound a bit more prominent).
 export function soundFor(ev, viewer = 0) {
   switch (ev.type) {
     case 'move': return 'step';
@@ -20,7 +20,7 @@ export function soundFor(ev, viewer = 0) {
   }
 }
 
-// Omezovač: stejný zvuk nejvýš jednou za `gap` ms (při přeskočené animaci by jinak zazněly naráz desítky).
+// Limiter: the same sound at most once per `gap` ms (otherwise dozens would play at once when an animation is skipped).
 export function createLimiter(gap = 90) {
   const last = new Map();
   return (name, now) => {
@@ -30,7 +30,7 @@ export function createLimiter(gap = 90) {
   };
 }
 
-// Popis zvuků: posloupnost tónů / šumu. f = frekvence (Hz), d = délka (s), t = začátek (s), w = vlna.
+// Sound definitions: sequence of tones / noise. f = frequency (Hz), d = duration (s), t = start (s), w = waveform.
 const SOUNDS = {
   step:    [{ noise: true, d: 0.05, v: 0.12, f: 900 }],
   hit:     [{ noise: true, d: 0.09, v: 0.35, f: 1800 }, { f: 140, d: 0.12, v: 0.3, w: 'square', slide: 70 }],
@@ -104,13 +104,13 @@ export function createSound() {
       if (!limit(name, performance.now())) return;
       const now = ctx.currentTime + 0.01;
       for (const n of SOUNDS[name]) (n.noise ? noise : tone)(n, now + (n.t || 0));
-    } catch { /* zvuk není podstatný pro hru */ }
+    } catch { /* sound isn't essential to the game */ }
   };
 
-  // Prohlížeče pustí zvuk až po gestu uživatele – kontext se odemkne při prvním kliknutí/klávese.
+  // Browsers only allow audio after a user gesture – the context is unlocked on the first click/key.
   api.unlock = () => {
     if (!api.enabled) return;
-    try { if (ensure() && ctx.state === 'suspended') ctx.resume(); } catch { /* nic */ }
+    try { if (ensure() && ctx.state === 'suspended') ctx.resume(); } catch { /* nothing */ }
   };
 
   return api;

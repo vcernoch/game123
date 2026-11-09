@@ -1,40 +1,42 @@
-# Roadmapa – Hexová říše
+# Roadmap – Hex Realm
 
-Odškrtávej `[x]` po dokončení. Nové nápady přidávej na konec příslušné fáze nebo do „Nápady“.
+Check off `[x]` when done. Add new ideas to the end of the relevant phase or to "Ideas".
 
-## Fáze 0 – základ ✅
-- [x] Hexová mapa s terénem (pláně, les, kopce, hory, voda)
-- [x] Jednotky: válečník, lučištník, jezdec; pohyb, útok, protiúder
-- [x] Města, příjem zlata, verbování, dobývání
-- [x] Jednoduchá AI, vítězství/porážka
-- [x] Ukládání do localStorage, testy logiky, smoke test v prohlížeči
+## Phase 0 – foundation ✅
+- [x] Hex map with terrain (Plains, Forest, Hills, Mountains, Water)
+- [x] Units: Warrior, Archer, Horseman; movement, attack, counterattack
+- [x] Cities, gold income, recruiting, conquest
+- [x] Simple AI, victory/defeat
+- [x] Saving to localStorage, logic tests, browser smoke test
 
-## Fáze 1 – hratelnost ✅
-- [x] Šipka/cesta ukazující trasu při najetí na cílové pole
-- [x] Animace pohybu a útoku (krátké, aby AI tah byl čitelný)
-- [x] Mlha války: vidíš jen okolí svých jednotek a měst
-- [x] Tlačítko „další jednotka s pohybem“ (Tab)
-- [x] Zobrazení příjmu a obrany u města při najetí myší
-- [x] Výběr obtížnosti AI (snadná / normální / těžká)
-- [x] Ovládání dotykem na mobilu (větší zásahová plocha, potvrzení útoku)
+## Phase 1 – playability ✅
+- [x] Arrow/path showing the route when hovering over the target tile
+- [x] Movement and attack animations (short, so the AI turn is readable)
+- [x] Fog of war: you only see the surroundings of your units and cities
+- [x] "Next unit with moves" button (Tab)
+- [x] Show city income and defense on mouse hover
+- [x] AI difficulty selection (Easy / Normal / Hard)
+- [x] Touch controls on mobile (larger hit area, attack confirmation)
 
-## Fáze 2 – hloubka ✅
-- [x] Budovy ve městech (hradby, trh, kasárna)
-- [x] Zkušenosti jednotek a povýšení
-- [x] Nové jednotky: obléhací stroj, kopiník (bonus proti jezdcům)
-- [x] Silnice nebo řeky ovlivňující pohyb (silnice; řeky zatím ne – viz Nápady)
-- [x] Lepší AI: obrana vlastních měst, soustředění sil, ústup zraněných
-- [x] Více frakcí s odlišnými bonusy
+## Phase 2 – depth ✅
+- [x] Buildings in cities (Walls, Market, Barracks)
+- [x] Unit experience and promotion
+- [x] New units: siege engine, Spearman (bonus against Horsemen)
+- [x] Roads or rivers affecting movement (roads; rivers not yet – see Ideas)
+- [x] Better AI: defending own cities, concentrating forces, retreating when wounded
+- [x] More factions with different bonuses
 
-## Fáze 3 – obsah a lesk
-- [x] Hlavní menu, volba velikosti mapy
-- [ ] Více AI soupeřů (kód teď počítá se dvěma hráči – větší přestavba, vč. vítězství a diplomacie)
-- [x] Zvukové efekty generované přes WebAudio
-- [x] Statistiky na konci hry (graf síly v čase)
-- [ ] Kampaň nebo scénáře s cíli (čeká na Vladimíra – jiné cíle = změna pravidel vítězství, viz LOG.md)
-- [x] Řeky na hranách hexů: přechod stojí pohyb navíc, mosty na silnicích, bonus obránci (vlastní vylepšení)
-- [x] Náhodné události na začátku tahu: úroda, mor, vzpoura; dají se vypnout (vlastní vylepšení z Nápadů)
-- [x] Kronika skrývá akce AI, které hráč v mlze války neviděl (vlastní vylepšení z Nápadů)
+## Phase 3 – content and polish
+- [x] Main menu, map size selection
+- [ ] More AI opponents (the code currently assumes two players – a bigger rework, incl. victory and diplomacy)
+- [x] Sound effects generated via WebAudio
+- [x] End-of-game statistics (strength chart over time)
+- [ ] Campaign or scenarios with objectives (waiting for Vladimír – different objectives = change to victory rules, see LOG.md)
+- [x] Rivers on hex edges: crossing costs extra movement, bridges on roads, defender bonus (own improvement)
+- [x] Random events at the start of a turn: harvest, plague, revolt; can be turned off (own improvement from Ideas)
+- [x] The chronicle hides AI actions the player didn't see in the fog of war (own improvement from Ideas)
+- [x] Undo move (Z): a move that revealed nothing new can be taken back (own improvement)
+- [x] Whole project in English: game UI, code comments, tests and docs (Vladimír's request)
 
-## Nápady (neřazené)
-- Diplomacie s více AI
+## Ideas (unordered)
+- Diplomacy with multiple AIs
