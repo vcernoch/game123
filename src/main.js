@@ -3,7 +3,7 @@ import {
   createGame, reachable, attackTargets, moveUnit, attack, buyUnit, endTurn,
   unitAt, cityAt, getUnit, incomeOf, previewAttack, tileAt, pathTo, nextActiveUnit, cityInfo,
   cloneState, drainEvents, migrateState, logFor, isUndoableMove, canFortify, fortify, activeUnits, territoryOwner, cityResources, unitSummary, planRoute, setOrder, runOrders, cancelOrder, visibleTiles, exploredTiles, build, unitCost, hasBuilding,
-  rankOf, rankMult, buildingCost, unitMove, factionOf, riverDefense, zocTiles, exportGame, importGame, saveFileName,
+  rankOf, rankMult, buildingCost, unitMove, factionOf, riverDefense, zocTiles, threatTiles, exportGame, importGame, saveFileName,
 } from './game.js';
 import { createAnimator } from './anim.js';
 import { decideTap } from './input.js';
@@ -43,6 +43,7 @@ const anim = createAnimator(
   (ev) => sound.play(soundFor(ev, 0)),
 );
 let lastWinner = state.winner;
+let showThreats = false; // threat overlay, set from the preferences below
 try {
   if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) anim.speed = 0;
 } catch { /* old browser */ }
@@ -132,6 +133,7 @@ function drawBoard() {
     selectedId,
     reachable: mine ? reachable(state, u) : null,
     zoc: mine ? zocTiles(state, 0) : null,
+    threats: showThreats && state.winner === null ? threatTiles(shown, 0) : null,
     targets: mine ? new Set(attackTargets(state, u).map((t) => t.id)) : null,
     hover,
     ...pathView(u, mine),
@@ -692,11 +694,27 @@ window.addEventListener('keydown', (ev) => {
   else if (act.type === 'fortify') fortifySelected();
   else if (act.type === 'recruit') recruitSelected(act.unitType);
   else if (act.type === 'help') $('keys-dialog').showModal();
+  else if (act.type === 'threats') toggleThreats();
   else if (act.type === 'escape') {
     if (busy()) { anim.skip(); return; }
     selectedId = null; selectedCityId = null; pending = null; draw();
   }
 });
+
+// Threat overlay on/off (T / ⚠ button); remembered in the preferences.
+function toggleThreats() {
+  showThreats = !showThreats;
+  savePrefs({ ...loadPrefs(), threats: showThreats });
+  updateThreatButton();
+  draw();
+}
+
+function updateThreatButton() {
+  $('threats').setAttribute('aria-pressed', String(showThreats));
+}
+$('threats').addEventListener('click', toggleThreats);
+showThreats = loadPrefs().threats === true;
+updateThreatButton();
 
 // Recruits in the selected own city (number keys and the panel buttons).
 function recruitSelected(type) {
@@ -757,6 +775,7 @@ window.__game = {
   refresh: () => { resize(); draw(); },
   newGame: (seed, options = {}) => { state = createGame({ seed, ...options }); undoStack = []; showNotice([]); resize(); draw(); },
   showNotice: (events) => { showNotice(events); draw(); },
+  threatsShown: () => showThreats,
   exportText: () => exportGame(state, GAME_VERSION),
   loadText: loadFromText,
 };

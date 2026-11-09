@@ -2,6 +2,15 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-09 – Threat overlay → v0.12.0
+- **Still open for Vladimír:** more AI opponents and scenarios with their own objectives wait for your "more AI yes" / "scenarios yes". `dev` is now several versions ahead of `main` (v0.9.0–v0.12.0) – please merge it.
+- `threatTiles(state, player)` in `game.js`: for every enemy unit the player can see, the tiles it could attack next turn (walk with full movement by the normal rules incl. terrain, rivers and our zone of control, then strike within range). Result = number of attackers per tile; only explored passable tiles, so nothing hidden is revealed.
+- UI: the ⚠ button next to ♪ in the header or the T key shades threatened tiles red (darker where several enemies reach). The setting is remembered in the preferences. T added to the shortcut table / overlay, help text updated.
+- No state structure change.
+- Tests: +1 logic (warrior reach = distance 3 also after it has moved, archer reach 4, overlapping counts, mountain wall stops it, hidden enemies and unexplored tiles are never marked). Smoke test toggles with T and with the button (`artifacts/screenshot-threats.png`).
+- Status: `npm run check` green (57 logic tests + smoke).
+- Run summary: phase 6 (own improvements) done – zone of control, save files, threat overlay. Version 0.12.0.
+
 ## 2026-11-09 – Save to file / load from file
 - New "Save file" panel in the sidebar: **⬇ Save to file** downloads the game as `hex-realm-turn-N-YYYY-MM-DD.json`, **⬆ Load from file** opens it again (also available in the new game dialog, which doubles as the main menu). Everything stays in the browser – no server.
 - `exportGame` / `importGame` / `saveFileName` / `stateProblem` in `game.js`. A file is `{ format: 'hex-realm-save', gameVersion, saved, state }`; a bare state (as in localStorage) is accepted too. Import never throws: it reports invalid JSON, a foreign file, a save from a newer version, an unknown format or damaged contents (bad tiles, units off the map or on one tile, bad gold / current player…) and the current game stays. Older saves are migrated as usual. Pending animation events are not saved.

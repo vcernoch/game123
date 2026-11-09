@@ -472,6 +472,33 @@ export function zocTiles(state, player) {
   return zoc;
 }
 
+// Enemy threat for the threat overlay: Map key -> number of enemy units (visible to the player) that
+// could attack the tile next turn – walking with full movement, then shooting/striking within range.
+// Only explored passable tiles are returned, so the overlay doesn't reveal unknown land.
+export function threatTiles(state, player) {
+  const out = new Map();
+  const visible = visibleTiles(state, player);
+  const explored = exploredTiles(state, player);
+  for (const e of state.units) {
+    if (e.owner === player || !visible.has(key(e.q, e.r))) continue;
+    const ghost = { ...e, movesLeft: unitMove(state, e) };
+    const spots = [key(e.q, e.r), ...searchMoves(state, ghost).result.keys()];
+    const range = UNIT_TYPES[e.type].range;
+    const hit = new Set();
+    for (const k of spots) {
+      const [q, r] = k.split(',').map(Number);
+      for (let dq = -range; dq <= range; dq++) {
+        for (let dr = Math.max(-range, -dq - range); dr <= Math.min(range, -dq + range); dr++) {
+          const t = key(q + dq, r + dr);
+          if (explored.has(t) && isPassable(state, q + dq, r + dr)) hit.add(t);
+        }
+      }
+    }
+    for (const t of hit) out.set(t, (out.get(t) || 0) + 1);
+  }
+  return out;
+}
+
 // Reachable tiles: Map key -> movement cost.
 export function reachable(state, unit) {
   return searchMoves(state, unit).result;

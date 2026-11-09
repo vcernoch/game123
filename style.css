@@ -24,6 +24,7 @@ header {
 h1 { margin: 0; font-size: 20px; color: var(--accent); letter-spacing: 0.5px; }
 .icon-btn { font-size: 14px; padding: 2px 8px; margin-left: 4px; background: #3c434f; color: var(--text); vertical-align: middle; }
 .icon-btn[aria-pressed="false"] { color: var(--muted); }
+#threats[aria-pressed="true"] { background: #a8372f; color: #fff; }
 h1 small { font-size: 12px; font-weight: 500; color: var(--muted); letter-spacing: 0; margin-left: 4px; }
 .stats { display: flex; gap: 18px; }
 .stats small { color: #8fd48f; }

@@ -7,7 +7,7 @@ import {
   visibleTiles, exploredTiles, build, unitCost, rankOf, stepCost, getUnit,
   buildingCost, unitMove, factionOf, armyPower, riverBetween, riverDefense,
   rollHappening, applyHappening, cityIncome, logFor, isUndoableMove, canFortify, fortify, activeUnits, territoryMap, territoryOwner, planRoute, setOrder, runOrders, cancelOrder, cityHeal, citySight, cityResources, unitSummary, zocTiles,
-  exportGame, importGame, saveFileName, stateProblem, SAVE_FORMAT,
+  exportGame, importGame, saveFileName, stateProblem, SAVE_FORMAT, threatTiles,
 } from '../src/game.js';
 import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
@@ -1437,4 +1437,45 @@ test('save file: broken, foreign, newer and old files', () => {
   const m = importGame(JSON.stringify(old));
   assert.equal(m.state.version, STATE_VERSION);
   assert.equal(m.state.zoc, false);
+});
+
+test('threat overlay: tiles visible enemies could attack next turn', () => {
+  const s = createGame({ seed: 3, fog: false });
+  for (const t of Object.values(s.tiles)) { t.terrain = 'plains'; delete t.road; delete t.rivers; }
+  s.factions = [null, null];
+  s.units = [];
+  const foe = { id: 901, type: 'warrior', owner: 1, q: 7, r: 4, hp: 10, movesLeft: 0, hasAttacked: true, xp: 0 };
+  s.units.push(foe);
+  // a warrior walks 2 and strikes 1 tile: everything within distance 3, even if it already moved this turn
+  let threat = threatTiles(s, 0);
+  for (const t of Object.values(s.tiles)) {
+    assert.equal(threat.has(key(t.q, t.r)), distance(t, foe) <= 3, `tile ${t.q},${t.r}`);
+  }
+  // an archer walks 2 and shoots 2 (reach 4); where both reach, the count is 2
+  const archer = { id: 902, type: 'archer', owner: 1, q: 11, r: 1, hp: 8, movesLeft: 2, hasAttacked: false, xp: 0 };
+  s.units.push(archer);
+  threat = threatTiles(s, 0);
+  for (const t of Object.values(s.tiles)) {
+    const expected = (distance(t, foe) <= 3 ? 1 : 0) + (distance(t, archer) <= 4 ? 1 : 0);
+    assert.equal(threat.get(key(t.q, t.r)) || 0, expected, `tile ${t.q},${t.r}`);
+  }
+  assert.ok([...threat.values()].includes(2), 'some tiles are threatened twice');
+  // the enemy's own threat map is about our units: none here
+  assert.equal(threatTiles(s, 1).size, 0);
+  // terrain and units count: a mountain wall stops the walk, own units block and their zone stops it
+  const wall = Object.values(s.tiles).filter((t) => t.q === 5);
+  wall.forEach((t) => { t.terrain = 'mountain'; });
+  s.units = [foe];
+  threat = threatTiles(s, 0);
+  assert.ok(!threat.has(key(4, 4)), 'cannot strike over the mountain wall');
+  assert.ok(!threat.has(key(5, 4)), 'mountains are not threatened tiles');
+  wall.forEach((t) => { t.terrain = 'plains'; });
+  // fog: a hidden enemy is no threat, unexplored tiles are never marked
+  const f = createGame({ seed: 3, fog: true });
+  const hidden = f.units.filter((u) => u.owner === 1).filter((u) => !visibleTiles(f, 0).has(key(u.q, u.r)));
+  assert.ok(hidden.length > 0);
+  const ft = threatTiles(f, 0);
+  const explored = exploredTiles(f, 0);
+  for (const k of ft.keys()) assert.ok(explored.has(k));
+  assert.equal(ft.size, 0, 'at the start the enemy is out of sight');
 });

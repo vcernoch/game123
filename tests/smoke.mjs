@@ -441,6 +441,16 @@ try {
   if (!zocTip.includes('zone of control')) throw new Error(`zoc: tooltip does not mention the zone (${zocTip})`);
   await page.screenshot({ path: 'artifacts/screenshot-zoc.png' });
 
+  // threat overlay: T turns it on (the enemy's reach is shaded), the ⚠ button turns it off
+  await page.mouse.move(5, 5);
+  await page.keyboard.press('t');
+  const threatOn = await page.evaluate(() => ({ on: window.__game.threatsShown(),
+    pressed: document.getElementById('threats').getAttribute('aria-pressed') }));
+  if (!threatOn.on || threatOn.pressed !== 'true') throw new Error(`threats: T did not turn the overlay on ${JSON.stringify(threatOn)}`);
+  await page.screenshot({ path: 'artifacts/screenshot-threats.png' });
+  await page.click('#threats');
+  if (await page.evaluate(() => window.__game.threatsShown())) throw new Error('threats: the button did not turn the overlay off');
+
   // save file: the button downloads the game, loading the file through the file input restores it,
   // a broken file shows an error and keeps the current game
   await page.evaluate(() => { window.__game.newGame(55, { fog: false }); window.__game.endTurn(); });

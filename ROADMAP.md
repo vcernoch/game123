@@ -50,10 +50,10 @@ Check off `[x]` when done. Add new ideas to the end of the relevant phase or to 
 - [x] Unit tooltip: hovering any visible unit shows its stats, HP, rank and state
 - [x] Keyboard shortcuts: number keys recruit in the selected city, `?` shows a shortcut overlay
 
-## Phase 6 – tactics and saves (own improvements)
+## Phase 6 – tactics and saves (own improvements) ✅
 - [x] Zone of control: a unit that steps next to a visible enemy must stop (stop sign on the tile); leaving is free
 - [x] Save to file and load from file (export / import the game as JSON, validated and migrated)
-- [ ] Threat overlay (T): highlight tiles that visible enemy units could attack next turn
+- [x] Threat overlay (T): highlight tiles that visible enemy units could attack next turn
 
 ## Ideas (unordered)
 - Diplomacy with multiple AIs

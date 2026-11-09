@@ -78,6 +78,7 @@ export function render(ctx, state, view = {}) {
 
   drawBorders(ctx, state, known);
   drawRivers(ctx, state, known, seen);
+  if (view.threats) drawThreats(ctx, view.threats);
   for (const c of zocStops) drawZocStop(ctx, c.x, c.y + HEX_SIZE * 0.45);
 
   if (view.hover && state.tiles[key(view.hover.q, view.hover.r)]) {
@@ -268,6 +269,22 @@ function drawRoad(ctx, state, t, c) {
 // when the neighbor is off the map). Bridge = road on both sides of the edge.
 // City borders: on each territory tile, the edges towards a different territory (or none) are drawn
 // slightly inset in the colour of the city's owner, so neighbouring borders sit side by side.
+// Threat overlay: red shade on tiles enemies could attack next turn, stronger with more attackers.
+function drawThreats(ctx, threats) {
+  ctx.save();
+  for (const [k, n] of threats) {
+    const [q, r] = k.split(',').map(Number);
+    const c = tileCenter(q, r);
+    hexPath(ctx, c.x, c.y, HEX_SIZE - 3);
+    ctx.fillStyle = `rgba(225,40,40,${Math.min(0.5, 0.22 + 0.12 * (n - 1))})`;
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,90,90,0.7)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 // A small stop sign (octagon with a white bar) low in the tile: "the move ends here".
 function drawZocStop(ctx, x, y) {
   const r = Math.max(5, HEX_SIZE * 0.2);
