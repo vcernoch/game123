@@ -2,6 +2,19 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-09 – More buildings (v0.10.0)
+- At Vladimír's request, four new city buildings (`BUILDINGS` / `BUILDING_EFFECTS` in `rules.js`):
+  - **Watchtower** (15 gold): the city sees 2 tiles farther (`citySight`).
+  - **Infirmary** (20 gold): units in the city heal +3 more per turn (`cityHeal`), and plague in that city is contained (no damage).
+  - **Temple** (25 gold): +1 gold per turn and the city never revolts, even without a garrison.
+  - **Academy** (35 gold): units recruited in the city start with 3 XP, i.e. as Veterans (`spawnUnit` takes the XP, so the spawn event replays exactly).
+- Contained plague / revolt events carry `reason` ('infirmary' / 'temple' / 'garrison'); the banner and chronicle say what stopped them.
+- Each building has a small marker on the city (tower, sun, red cross, blue star). Help text updated; build buttons are generated from `rules.js` as before.
+- AI: after market and barracks, with plenty of gold to spare (cost + 2× reserve) it builds an academy in the capital, temples in other cities and infirmaries. Measured with the temporary AI-vs-AI script (new vs. previous AI, 100 seeds × both sides): 99 of 198 decided games – neutral.
+- No state structure change (buildings were already a list per city).
+- Tests: +1 logic (sight, income, revolt and plague contained, extra healing, academy recruits are Veterans incl. event replay, cities without an academy recruit Recruits).
+- Status: `npm run check` green (49 logic tests + smoke).
+
 ## 2026-11-09 – Multi-turn move orders → v0.9.0
 - **Question for Vladimír (still open):** more AI opponents / scenarios with their own objectives change the victory rules – say "scenarios yes" or "more AI yes" if you want them. Please also merge `dev` into `main` (v0.9.0).
 - `planRoute()` in `game.js`: cheapest route to any known tile using only what the player knows (explored tiles, blocked by enemies the player can see, own units can be walked through) plus the number of turns by the same rules as `reachable()`.

@@ -43,6 +43,7 @@ Check off `[x]` when done. Add new ideas to the end of the relevant phase or to 
 - [x] End-turn reminder: the button shows how many units can still act, a second press confirms
 - [x] City borders: tiles around each city drawn as territory in the owner's colour; resting in own territory heals more
 - [x] Multi-turn move orders: a far target becomes the unit's destination and it keeps walking at the start of each turn
+- [x] More buildings: watchtower, infirmary, temple, academy (Vladimír's request)
 
 ## Ideas (unordered)
 - Diplomacy with multiple AIs

@@ -30,8 +30,15 @@ export const BUILDINGS = {
   walls:    { name: 'Walls',   cost: 20, symbol: '▣', desc: 'garrison +50 % defense' },
   market:   { name: 'Market',  cost: 25, symbol: '¤', desc: '+2 gold per turn' },
   barracks: { name: 'Barracks', cost: 20, symbol: '⚑', desc: 'recruiting 3 gold cheaper' },
+  watchtower: { name: 'Watchtower', cost: 15, symbol: '♜', desc: 'the city sees 2 tiles farther' },
+  infirmary: { name: 'Infirmary', cost: 20, symbol: '✚', desc: 'units here heal +3 more, plague is contained' },
+  temple:   { name: 'Temple',  cost: 25, symbol: '☼', desc: '+1 gold per turn, the city never revolts' },
+  academy:  { name: 'Academy', cost: 35, symbol: '✪', desc: 'units recruited here start as Veterans' },
 };
-export const BUILDING_EFFECTS = { wallsDefense: 0.5, marketIncome: 2, barracksDiscount: 3 };
+export const BUILDING_EFFECTS = {
+  wallsDefense: 0.5, marketIncome: 2, barracksDiscount: 3,
+  watchtowerSight: 2, infirmaryHeal: 3, templeIncome: 1, academyXp: 3,
+};
 
 // Experience: XP for attacking (+ for a kill) and for surviving an attack. Rank raises attack and defense.
 export const RANKS = [

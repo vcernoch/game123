@@ -383,7 +383,8 @@ function drawCity(ctx, city) {
   ctx.restore();
 }
 
-// Small building markers: walls = stone rim, market = coin, barracks = flag.
+// Small building markers: walls = stone rim, market = coin, barracks = flag, watchtower = tower,
+// temple = sun, infirmary = red cross, academy = blue star.
 function drawBuildings(ctx, city, x, y) {
   const has = (b) => city.buildings && city.buildings.includes(b);
   if (has('walls')) {
@@ -417,6 +418,66 @@ function drawBuildings(ctx, city, x, y) {
     ctx.closePath();
     ctx.fillStyle = '#e04848';
     ctx.fill();
+  }
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+  if (has('watchtower')) {
+    // a narrow stone tower with battlements, left of the houses
+    const tx = x - 23;
+    const ty = y - 4;
+    ctx.fillStyle = '#c9c2b2';
+    ctx.beginPath();
+    ctx.rect(tx - 2.5, ty - 6, 5, 11);
+    ctx.rect(tx - 4, ty - 9, 8, 3);
+    ctx.fill();
+    ctx.stroke();
+  }
+  if (has('temple')) {
+    // a small sun
+    const tx = x + 23;
+    const ty = y - 4;
+    ctx.beginPath();
+    ctx.arc(tx, ty, 3.5, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffd34d';
+    ctx.fill();
+    ctx.stroke();
+    ctx.strokeStyle = '#ffd34d';
+    ctx.lineWidth = 1.2;
+    for (let i = 0; i < 8; i++) {
+      const a = (Math.PI / 4) * i;
+      ctx.beginPath();
+      ctx.moveTo(tx + Math.cos(a) * 5, ty + Math.sin(a) * 5);
+      ctx.lineTo(tx + Math.cos(a) * 7, ty + Math.sin(a) * 7);
+      ctx.stroke();
+    }
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+  }
+  if (has('infirmary')) {
+    // a red cross on white
+    const tx = x - 17;
+    const ty = y + 21;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(tx - 4.5, ty - 4.5, 9, 9);
+    ctx.strokeRect(tx - 4.5, ty - 4.5, 9, 9);
+    ctx.fillStyle = '#d83a3a';
+    ctx.fillRect(tx - 1.2, ty - 3.5, 2.4, 7);
+    ctx.fillRect(tx - 3.5, ty - 1.2, 7, 2.4);
+  }
+  if (has('academy')) {
+    // a blue star (veterans are trained here)
+    const tx = x + 17;
+    const ty = y + 21;
+    ctx.beginPath();
+    for (let i = 0; i < 10; i++) {
+      const r = i % 2 ? 2.2 : 5;
+      const a = -Math.PI / 2 + (Math.PI / 5) * i;
+      ctx.lineTo(tx + Math.cos(a) * r, ty + Math.sin(a) * r);
+    }
+    ctx.closePath();
+    ctx.fillStyle = '#7fb2ff';
+    ctx.fill();
+    ctx.stroke();
   }
 }
 

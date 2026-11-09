@@ -477,8 +477,9 @@ function showNotice(happened, extra = []) {
   const place = city ? ` in ${city.name}` : '';
   let text = `${name}${place}`;
   if (ev.kind === 'harvest') text += `: +${ev.gold} gold.`;
+  else if (ev.kind === 'plague' && ev.suppressed) text += ', but the infirmary contained it.';
   else if (ev.kind === 'plague') text += ev.hits.length ? `: infected units lost HP (${ev.hits.length}).` : ', but no unit was nearby.';
-  else if (ev.suppressed) text += ', but the garrison kept order.';
+  else if (ev.suppressed) text += ev.reason === 'temple' ? ', but the temple kept the peace.' : ', but the garrison kept order.';
   else text += `: the city paid no taxes this turn (${ev.gold} gold).`;
   const good = ev.kind === 'harvest' || ev.suppressed;
   if (extra.length) text += ` ${extra.join(' ')}`;

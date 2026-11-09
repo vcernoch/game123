@@ -205,7 +205,7 @@ export function visibleTiles(state, player) {
     const onHills = tileAt(state, u.q, u.r).terrain === 'hills';
     look(u.q, u.r, UNIT_TYPES[u.type].sight + (onHills ? VISION.hillsBonus : 0));
   }
-  for (const c of state.cities) if (c.owner === player) look(c.q, c.r, VISION.city);
+  for (const c of state.cities) if (c.owner === player) look(c.q, c.r, citySight(c));
   return seen;
 }
 
@@ -327,7 +327,19 @@ export function terrainDefense(state, unit, tile) {
 export function cityIncome(city, state = null) {
   const base = city.capital ? ECONOMY.capitalIncome : ECONOMY.cityIncome;
   const faction = state && city.owner !== null ? factionOf(state, city.owner).cityIncome || 0 : 0;
-  return base + faction + (hasBuilding(city, 'market') ? BUILDING_EFFECTS.marketIncome : 0);
+  const market = hasBuilding(city, 'market') ? BUILDING_EFFECTS.marketIncome : 0;
+  const temple = hasBuilding(city, 'temple') ? BUILDING_EFFECTS.templeIncome : 0;
+  return base + faction + market + temple;
+}
+
+// Healing per turn for a unit standing in its own city (an infirmary heals more).
+export function cityHeal(city) {
+  return ECONOMY.healInCity + (hasBuilding(city, 'infirmary') ? BUILDING_EFFECTS.infirmaryHeal : 0);
+}
+
+// How far a city sees (a watchtower sees farther).
+export function citySight(city) {
+  return VISION.city + (hasBuilding(city, 'watchtower') ? BUILDING_EFFECTS.watchtowerSight : 0);
 }
 
 // Garrison defense multiplier in an own city (city + walls, if any).
@@ -363,7 +375,7 @@ export function cityInfo(state, city) {
   return {
     income: cityIncome(city, state),
     defensePct: Math.round((defMult - 1) * 100),
-    heal: ECONOMY.healInCity,
+    heal: cityHeal(city),
     garrison: garrison && garrison.owner === city.owner ? garrison : null,
   };
 }
@@ -693,7 +705,7 @@ function hpFactor(unit) {
 
 // ---------- actions (return true/false on success) ----------
 
-export function spawnUnit(state, type, owner, q, r) {
+export function spawnUnit(state, type, owner, q, r, xp = 0) {
   const t = UNIT_TYPES[type];
   const unit = {
     id: state.nextUnitId++,
@@ -704,7 +716,7 @@ export function spawnUnit(state, type, owner, q, r) {
     hp: t.hp,
     movesLeft: 0,
     hasAttacked: true,
-    xp: 0,
+    xp,
   };
   state.units.push(unit);
   emit(state, { type: 'spawn', unit: { ...unit } });
@@ -798,7 +810,8 @@ export function buyUnit(state, cityId, type) {
   const cost = unitCost(state, city, type);
   if (state.gold[state.current] < cost || unitAt(state, city.q, city.r)) return false;
   state.gold[state.current] -= cost;
-  spawnUnit(state, type, state.current, city.q, city.r);
+  const xp = hasBuilding(city, 'academy') ? BUILDING_EFFECTS.academyXp : 0; // academy: starts as a Veteran
+  spawnUnit(state, type, state.current, city.q, city.r, xp);
   addLog(state, `${PLAYERS[state.current].name}: recruited ${t.name} (${city.name})`, { by: state.current, at: [city] });
   return true;
 }
@@ -823,7 +836,7 @@ export function endTurn(state) {
   for (const u of state.units.filter((x) => x.owner === state.current)) {
     const city = cityAt(state, u.q, u.r);
     const restHeal = territoryOwner(state, u.q, u.r) === u.owner ? TERRITORY.healIdle : ECONOMY.healIdle;
-    const heal = city && city.owner === u.owner ? ECONOMY.healInCity : u.moved ? 0 : restHeal;
+    const heal = city && city.owner === u.owner ? cityHeal(city) : u.moved ? 0 : restHeal;
     u.hp = Math.min(UNIT_TYPES[u.type].hp, u.hp + heal);
   }
   state.current = (state.current + 1) % PLAYERS.length;
@@ -878,6 +891,10 @@ export function applyHappening(state, player, kind, city) {
     ev.gold = info.gold;
     state.gold[player] += info.gold;
     addLog(state, `${who}: ${info.name} in ${city.name} (+${info.gold} gold)`, where);
+  } else if (kind === 'plague' && hasBuilding(city, 'infirmary')) {
+    ev.suppressed = true;
+    ev.reason = 'infirmary';
+    addLog(state, `${who}: ${info.name} in ${city.name} – the infirmary contained it`, where);
   } else if (kind === 'plague') {
     for (const u of state.units) {
       if (distance(u, city) > 1 || u.hp <= 1) continue;
@@ -889,8 +906,13 @@ export function applyHappening(state, player, kind, city) {
     addLog(state, `${who}: ${info.name} in ${city.name}${ev.hits.length ? ` – units infected: ${ev.hits.length}` : ''}`, where);
   } else if (kind === 'revolt') {
     const g = unitAt(state, city.q, city.r);
-    if (g && g.owner === player) {
+    if (hasBuilding(city, 'temple')) {
       ev.suppressed = true;
+      ev.reason = 'temple';
+      addLog(state, `${who}: ${info.name} in ${city.name} – the temple kept the peace`, where);
+    } else if (g && g.owner === player) {
+      ev.suppressed = true;
+      ev.reason = 'garrison';
       addLog(state, `${who}: ${info.name} in ${city.name} – the garrison kept order`, where);
     } else {
       ev.gold = -Math.min(state.gold[player], cityIncome(city, state));

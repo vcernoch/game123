@@ -6,7 +6,7 @@ import {
   drainEvents, applyEvent, migrateState, STATE_VERSION,
   visibleTiles, exploredTiles, build, unitCost, rankOf, stepCost, getUnit,
   buildingCost, unitMove, factionOf, armyPower, riverBetween, riverDefense,
-  rollHappening, applyHappening, cityIncome, logFor, isUndoableMove, canFortify, fortify, activeUnits, territoryMap, territoryOwner, planRoute, setOrder, runOrders, cancelOrder,
+  rollHappening, applyHappening, cityIncome, logFor, isUndoableMove, canFortify, fortify, activeUnits, territoryMap, territoryOwner, planRoute, setOrder, runOrders, cancelOrder, cityHeal, citySight,
 } from '../src/game.js';
 import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
@@ -1197,4 +1197,55 @@ test('move orders: a tap on a far known tile gives an order (touch needs confirm
   if (!reach.has(key(enemyCap.q, enemyCap.r))) assert.equal(decideTap(s, { selectedId: u.id }, enemyCap.q, enemyCap.r).type, 'goto');
   const myCity = s.cities.find((c) => c.owner === 0);
   if (myCity.q !== u.q || myCity.r !== u.r) assert.notEqual(decideTap(s, { selectedId: u.id }, myCity.q, myCity.r).type, 'goto');
+});
+
+test('new buildings: watchtower, infirmary, temple, academy', () => {
+  const s = createGame({ seed: 17 });
+  const cap = s.cities.find((c) => c.owner === 0 && c.capital);
+  s.gold[0] = 500;
+  s.units = s.units.filter((u) => u.owner !== 0);
+  // watchtower: the city sees farther
+  const seenBefore = visibleTiles(s, 0).size;
+  assert.ok(build(s, cap.id, 'watchtower'));
+  assert.equal(citySight(cap), 4);
+  assert.ok(visibleTiles(s, 0).size > seenBefore);
+  // temple: +1 gold, revolt suppressed even without a garrison
+  const income = cityIncome(cap, s);
+  assert.ok(build(s, cap.id, 'temple'));
+  assert.equal(cityIncome(cap, s), income + BUILDING_EFFECTS.templeIncome);
+  const city = s.cities.find((c) => c.owner === null);
+  city.owner = 0;
+  city.buildings = ['temple'];
+  const goldBefore = s.gold[0];
+  const rev = applyHappening(s, 0, 'revolt', city);
+  assert.ok(rev.suppressed && rev.reason === 'temple');
+  assert.equal(s.gold[0], goldBefore);
+  // infirmary: more healing, plague contained
+  assert.ok(build(s, cap.id, 'infirmary'));
+  assert.equal(cityHeal(cap), ECONOMY.healInCity + BUILDING_EFFECTS.infirmaryHeal);
+  assert.equal(cityInfo(s, cap).heal, cityHeal(cap));
+  const w = { id: 900, type: 'warrior', owner: 0, q: cap.q, r: cap.r, hp: 2, movesLeft: 2, hasAttacked: false, xp: 0, moved: true };
+  s.units.push(w);
+  const plague = applyHappening(s, 0, 'plague', cap);
+  assert.ok(plague.suppressed && plague.reason === 'infirmary' && plague.hits.length === 0);
+  assert.equal(w.hp, 2);
+  endTurn(s);
+  assert.equal(w.hp, 2 + cityHeal(cap));
+  endTurn(s);
+  // academy: recruits start as Veterans (and the replayed spawn event agrees)
+  s.units = s.units.filter((u) => u.id !== w.id);
+  assert.ok(build(s, cap.id, 'academy'));
+  drainEvents(s);
+  const copy = cloneState(s);
+  assert.ok(buyUnit(s, cap.id, 'archer'));
+  const a = unitAt(s, cap.q, cap.r);
+  assert.equal(a.xp, BUILDING_EFFECTS.academyXp);
+  assert.equal(rankOf(a), 1);
+  for (const ev of drainEvents(s)) applyEvent(copy, ev);
+  assert.equal(unitAt(copy, cap.q, cap.r).xp, a.xp);
+  // a city without an academy recruits Recruits
+  const other = s.cities.find((c) => c.owner === 0 && !c.capital);
+  other.buildings = [];
+  assert.ok(buyUnit(s, other.id, 'warrior'));
+  assert.equal(unitAt(s, other.q, other.r).xp, 0);
 });

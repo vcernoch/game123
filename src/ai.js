@@ -159,6 +159,16 @@ export function buildSomething(state, me) {
       if (!hasBuilding(city, b) && state.gold[me] >= buildingCost(state, me, b) + RESERVE) build(state, city.id, b);
     }
   }
+  // the later buildings only with plenty of gold to spare, where they make most sense
+  const rich = (b) => state.gold[me] >= buildingCost(state, me, b) + 2 * RESERVE;
+  const capital = mine.find((c) => c.capital);
+  if (capital && !hasBuilding(capital, 'academy') && rich('academy')) build(state, capital.id, 'academy');
+  for (const city of mine) {
+    if (!city.capital && !hasBuilding(city, 'temple') && rich('temple')) build(state, city.id, 'temple');
+  }
+  for (const city of mine) {
+    if (!hasBuilding(city, 'infirmary') && rich('infirmary')) build(state, city.id, 'infirmary');
+  }
 }
 
 function scoreAttack(state, unit, target) {
