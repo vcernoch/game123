@@ -36,6 +36,15 @@
         <h3>Chronicle</h3>
         <ul id="log"></ul>
       </section>
+      <details id="file-panel">
+        <summary>Save file</summary>
+        <p class="hint">The game saves itself in this browser. To keep a copy or move it to another device, save it to a file.</p>
+        <div class="file-actions">
+          <button id="save-file" class="secondary">⬇ Save to file</button>
+          <button id="load-file" class="secondary">⬆ Load from file</button>
+        </div>
+        <p id="file-status" role="status" hidden></p>
+      </details>
       <details>
         <summary>How to play</summary>
         <p>Click your blue unit, then a highlighted tile to move or an enemy with a yellow ring to attack. On a touch screen the first tap shows the path or a battle estimate and the second tap confirms it; the “Zoom map” button gives you bigger tiles.
@@ -46,6 +55,7 @@
     </aside>
   </main>
   <div id="tooltip" hidden></div>
+  <input type="file" id="file-input" accept=".json,application/json" hidden>
   <dialog id="keys-dialog" aria-labelledby="keys-title">
     <h2 id="keys-title">Keyboard shortcuts</h2>
     <dl id="keys-list"></dl>
@@ -73,6 +83,7 @@
       <p class="hint" id="new-game-warning">The current game will be lost.</p>
       <div class="dialog-actions">
         <button value="cancel" class="secondary" formnovalidate>Cancel</button>
+        <button value="load" class="secondary" id="dialog-load" formnovalidate>⬆ Load from file</button>
         <button value="start" id="start-game">Start game</button>
       </div>
     </form>

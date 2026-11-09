@@ -2,6 +2,13 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-09 – Save to file / load from file
+- New "Save file" panel in the sidebar: **⬇ Save to file** downloads the game as `hex-realm-turn-N-YYYY-MM-DD.json`, **⬆ Load from file** opens it again (also available in the new game dialog, which doubles as the main menu). Everything stays in the browser – no server.
+- `exportGame` / `importGame` / `saveFileName` / `stateProblem` in `game.js`. A file is `{ format: 'hex-realm-save', gameVersion, saved, state }`; a bare state (as in localStorage) is accepted too. Import never throws: it reports invalid JSON, a foreign file, a save from a newer version, an unknown format or damaged contents (bad tiles, units off the map or on one tile, bad gold / current player…) and the current game stays. Older saves are migrated as usual. Pending animation events are not saved.
+- No state structure change.
+- Tests: +2 logic (export → import round trip incl. continuing the game, file name; broken / foreign / newer / damaged / old files). Smoke test clicks Save, checks the download, loads it back through the file input, tries a broken file and checks the panel at 390 px (`artifacts/screenshot-file.png`).
+- Status: `npm run check` green (56 logic tests + smoke).
+
 ## 2026-11-09 – Zone of control
 - New rule: a unit that steps onto a tile next to an enemy unit **it can see** must stop there (it can still attack); moving away from a starting tile inside the zone is free. Hidden enemies in the fog have no zone, so a unit stopping never reveals anything. `zocTiles(state, player)` in `game.js`; `searchMoves` doesn't expand from zone tiles, so `reachable`, `pathTo`, `moveUnit`, move orders and the AI all follow the rule automatically. Multi-turn routes (`planRoute`) ignore it – orders stop anyway when an enemy comes into sight.
 - UI: reachable tiles in the zone get a small red stop sign; the mouse tooltip says "Enemy zone of control – the move ends here", the tile panel mentions it too. Help text updated.

@@ -7,6 +7,7 @@ import {
   visibleTiles, exploredTiles, build, unitCost, rankOf, stepCost, getUnit,
   buildingCost, unitMove, factionOf, armyPower, riverBetween, riverDefense,
   rollHappening, applyHappening, cityIncome, logFor, isUndoableMove, canFortify, fortify, activeUnits, territoryMap, territoryOwner, planRoute, setOrder, runOrders, cancelOrder, cityHeal, citySight, cityResources, unitSummary, zocTiles,
+  exportGame, importGame, saveFileName, stateProblem, SAVE_FORMAT,
 } from '../src/game.js';
 import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
@@ -1386,4 +1387,54 @@ test('zone of control: hidden enemies have none, old games keep playing without 
   assert.equal(m.zoc, false);
   assert.equal(zocTiles(m, 0).size, 0);
   assert.equal(createGame({ seed: 3 }).zoc, true);
+});
+
+test('save file: export and import give back the same game', () => {
+  const s = createGame({ seed: 8, size: 'small' });
+  for (let i = 0; i < 6; i++) endTurn(s);
+  s.events.push({ type: 'move', unitId: 1, path: [] });
+  const text = exportGame(s, '1.2.3', '2026-11-09T10:00:00.000Z');
+  const file = JSON.parse(text);
+  assert.equal(file.format, SAVE_FORMAT);
+  assert.equal(file.gameVersion, '1.2.3');
+  assert.equal(file.saved, '2026-11-09T10:00:00.000Z');
+  assert.equal(s.events.length, 1, 'exporting does not touch the game');
+  const { state, error } = importGame(text);
+  assert.equal(error, undefined);
+  const expected = cloneState(s);
+  expected.events = [];
+  assert.deepEqual(state, expected);
+  // the bare state (as kept in localStorage) is accepted too, and the game goes on
+  const bare = importGame(JSON.stringify(expected));
+  assert.deepEqual(bare.state, expected);
+  endTurn(bare.state);
+  assert.equal(bare.state.turn, s.turn + (s.current === 1 ? 1 : 0));
+  assert.equal(saveFileName(s, new Date('2026-11-09T10:00:00Z')), `hex-realm-turn-${s.turn}-2026-11-09.json`);
+});
+
+test('save file: broken, foreign, newer and old files', () => {
+  const s = createGame({ seed: 8 });
+  const err = (text) => importGame(text).error || '';
+  assert.match(err('not json {'), /not valid JSON/);
+  assert.match(err('42'), /does not contain/);
+  assert.match(err(JSON.stringify({ format: 'other-game', state: s })), /not a Hex Realm/);
+  assert.match(err(JSON.stringify({ hello: 1 })), /does not contain/);
+  assert.match(err(JSON.stringify({ ...s, version: STATE_VERSION + 1 })), /newer version/);
+  assert.match(err(JSON.stringify({ ...s, version: 0 })), /unknown format/);
+  // damaged contents are reported, not loaded
+  const damaged = (change) => { const c = cloneState(s); change(c); return err(exportGame(c)); };
+  assert.match(damaged((c) => { c.units[1].q = c.units[0].q; c.units[1].r = c.units[0].r; }), /damaged \(two units/);
+  assert.match(damaged((c) => { c.units[0].q = 999; }), /damaged \(unit .* off the map/);
+  assert.match(damaged((c) => { c.units[0].type = 'dragon'; }), /damaged \(bad unit/);
+  assert.match(damaged((c) => { c.gold = [1]; }), /damaged \(bad gold/);
+  assert.match(damaged((c) => { c.current = 5; }), /damaged \(bad current/);
+  assert.match(damaged((c) => { c.tiles = null; }), /damaged/);
+  assert.equal(stateProblem(s), null);
+  // an old save is migrated on import (version 15 = before the zone of control)
+  const old = cloneState(s);
+  old.version = 15;
+  delete old.zoc;
+  const m = importGame(JSON.stringify(old));
+  assert.equal(m.state.version, STATE_VERSION);
+  assert.equal(m.state.zoc, false);
 });

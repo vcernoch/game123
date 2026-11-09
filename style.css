@@ -116,7 +116,8 @@ legend { color: var(--muted); padding: 0 4px; }
 fieldset label { display: block; padding: 6px 0; cursor: pointer; }
 fieldset small, .check small { display: block; color: var(--muted); margin-left: 24px; }
 .check { display: block; cursor: pointer; }
-.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.dialog-actions button[value="load"] { order: -1; margin-right: auto; }
 @media (max-width: 760px) {
   main { grid-template-columns: 1fr; padding: 16px; }
   .actions { margin-left: 0; }
@@ -138,3 +139,8 @@ kbd { font: 600 11px ui-monospace, monospace; background: #3c434f; color: var(--
 #keys-list dd { margin: 0; color: var(--muted); }
 #keys-dialog form { display: flex; justify-content: flex-end; }
 .keys-btn { margin-top: 8px; }
+.file-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.file-actions button { flex: 1 1 140px; }
+#file-status { margin: 8px 0 0; font-size: 14px; overflow-wrap: anywhere; }
+#file-status.ok { color: #8fd18f; }
+#file-status.bad { color: #ff9a8a; }

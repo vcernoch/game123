@@ -441,6 +441,37 @@ try {
   if (!zocTip.includes('zone of control')) throw new Error(`zoc: tooltip does not mention the zone (${zocTip})`);
   await page.screenshot({ path: 'artifacts/screenshot-zoc.png' });
 
+  // save file: the button downloads the game, loading the file through the file input restores it,
+  // a broken file shows an error and keeps the current game
+  await page.evaluate(() => { window.__game.newGame(55, { fog: false }); window.__game.endTurn(); });
+  await page.waitForFunction(() => !window.__game.isBusy());
+  const before = await page.evaluate(() => ({ turn: window.__game.getState().turn, units: window.__game.getState().units.length }));
+  await page.evaluate(() => { document.getElementById('file-panel').open = true; });
+  const [download] = await Promise.all([page.waitForEvent('download'), page.click('#save-file')]);
+  if (!/^hex-realm-turn-\d+-\d{4}-\d\d-\d\d\.json$/.test(download.suggestedFilename())) {
+    throw new Error(`save file: odd file name ${download.suggestedFilename()}`);
+  }
+  const { readFile } = await import('node:fs/promises');
+  const saved = await readFile(await download.path(), 'utf8');
+  if (JSON.parse(saved).format !== 'hex-realm-save') throw new Error('save file: wrong format field');
+  await page.evaluate(() => window.__game.newGame(56, { fog: false }));
+  await page.setInputFiles('#file-input', { name: 'game.json', mimeType: 'application/json', buffer: Buffer.from(saved) });
+  await page.waitForFunction((t) => window.__game.getState().turn === t, before.turn);
+  const loaded = await page.evaluate(() => ({ turn: window.__game.getState().turn, units: window.__game.getState().units.length,
+    seed: window.__game.getState().seed, status: document.getElementById('file-status').textContent }));
+  if (loaded.seed !== 55 || loaded.units !== before.units || !loaded.status.includes('Loaded')) {
+    throw new Error(`save file: load did not restore the game ${JSON.stringify(loaded)}`);
+  }
+  await page.setInputFiles('#file-input', { name: 'bad.json', mimeType: 'application/json', buffer: Buffer.from('{"oops":') });
+  await page.waitForFunction(() => document.getElementById('file-status').className === 'bad');
+  if ((await page.evaluate(() => window.__game.getState().seed)) !== 55) throw new Error('save file: a broken file replaced the game');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.evaluate(() => document.getElementById('file-panel').scrollIntoView());
+  if (await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1)) {
+    throw new Error('save file: panel causes horizontal scroll on mobile');
+  }
+  await page.screenshot({ path: 'artifacts/screenshot-file.png' });
+
   if (errors.length) throw new Error(errors.join('\n'));
   console.log(`SMOKE OK – turn ${turn}, screenshots in artifacts/`);
 } catch (e) {

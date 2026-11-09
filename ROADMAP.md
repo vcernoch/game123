@@ -52,7 +52,7 @@ Check off `[x]` when done. Add new ideas to the end of the relevant phase or to 
 
 ## Phase 6 – tactics and saves (own improvements)
 - [x] Zone of control: a unit that steps next to a visible enemy must stop (stop sign on the tile); leaving is free
-- [ ] Save to file and load from file (export / import the game as JSON, validated and migrated)
+- [x] Save to file and load from file (export / import the game as JSON, validated and migrated)
 - [ ] Threat overlay (T): highlight tiles that visible enemy units could attack next turn
 
 ## Ideas (unordered)

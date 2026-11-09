@@ -3,7 +3,7 @@ import {
   createGame, reachable, attackTargets, moveUnit, attack, buyUnit, endTurn,
   unitAt, cityAt, getUnit, incomeOf, previewAttack, tileAt, pathTo, nextActiveUnit, cityInfo,
   cloneState, drainEvents, migrateState, logFor, isUndoableMove, canFortify, fortify, activeUnits, territoryOwner, cityResources, unitSummary, planRoute, setOrder, runOrders, cancelOrder, visibleTiles, exploredTiles, build, unitCost, hasBuilding,
-  rankOf, rankMult, buildingCost, unitMove, factionOf, riverDefense, zocTiles,
+  rankOf, rankMult, buildingCost, unitMove, factionOf, riverDefense, zocTiles, exportGame, importGame, saveFileName,
 } from './game.js';
 import { createAnimator } from './anim.js';
 import { decideTap } from './input.js';
@@ -567,6 +567,65 @@ $('new-game-dialog').addEventListener('close', () => {
   savePrefs({ ...loadPrefs(), ...options });
   startNewGame(options);
 });
+// "Load from file" in the new game dialog (it doubles as the main menu)
+$('new-game-dialog').addEventListener('close', () => {
+  if ($('new-game-dialog').returnValue === 'load') $('file-input').click();
+});
+
+// ---------- save files ----------
+
+function fileStatus(text, ok) {
+  const el = $('file-status');
+  el.textContent = text;
+  el.className = ok ? 'ok' : 'bad';
+  el.hidden = false;
+}
+
+function saveToFile() {
+  if (busy()) return;
+  const blob = new Blob([exportGame(state, GAME_VERSION)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = saveFileName(state);
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  fileStatus(`Saved as ${a.download}`, true);
+}
+
+// Loads a game from file text; returns true on success. The current game is replaced only if the
+// file is valid.
+function loadFromText(text) {
+  if (busy()) return false;
+  const { state: loaded, error } = importGame(text);
+  if (error) {
+    $('file-panel').open = true;
+    fileStatus(error, false);
+    return false;
+  }
+  state = loaded;
+  undoStack = [];
+  selectedId = null;
+  selectedCityId = null;
+  lastWinner = state.winner;
+  showNotice([]);
+  save();
+  resize();
+  draw();
+  fileStatus(`Loaded: turn ${state.turn}`, true);
+  return true;
+}
+
+$('save-file').addEventListener('click', saveToFile);
+$('load-file').addEventListener('click', () => $('file-input').click());
+$('file-input').addEventListener('change', async (ev) => {
+  const file = ev.target.files && ev.target.files[0];
+  ev.target.value = ''; // the same file can be picked again
+  if (!file) return;
+  if (file.size > 5e6) { $('file-panel').open = true; fileStatus('The file is too big for a saved game.', false); return; }
+  loadFromText(await file.text());
+});
 
 // sound: unlock AudioContext on the first gesture, plus the header toggle
 window.addEventListener('pointerdown', () => sound.unlock(), { once: true });
@@ -698,6 +757,8 @@ window.__game = {
   refresh: () => { resize(); draw(); },
   newGame: (seed, options = {}) => { state = createGame({ seed, ...options }); undoStack = []; showNotice([]); resize(); draw(); },
   showNotice: (events) => { showNotice(events); draw(); },
+  exportText: () => exportGame(state, GAME_VERSION),
+  loadText: loadFromText,
 };
 
 $('size-options').innerHTML = Object.entries(MAP_SIZES).map(([id, m]) => `

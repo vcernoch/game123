@@ -1045,3 +1045,74 @@ export function logFor(state, viewer) {
   for (const e of out) if (e.hidden) e.msg = `Enemy actions in the fog of war (${e.count})`;
   return out;
 }
+
+// ---------- save files ----------
+// A save file is JSON: { format, gameVersion, saved, state }. importGame also accepts a bare state
+// (the shape kept in localStorage). Imported states are migrated and checked before use.
+
+export const SAVE_FORMAT = 'hex-realm-save';
+
+export function exportGame(state, gameVersion = '', saved = new Date().toISOString()) {
+  const clean = cloneState(state);
+  clean.events = []; // pending animations don't belong in a file
+  return JSON.stringify({ format: SAVE_FORMAT, gameVersion, saved, state: clean });
+}
+
+// File name for a save: hex-realm-turn-7-2026-11-09.json
+export function saveFileName(state, date = new Date()) {
+  return `hex-realm-turn-${state.turn}-${date.toISOString().slice(0, 10)}.json`;
+}
+
+// Parses a save file. Returns { state } or { error: 'reason in English' }; never throws.
+export function importGame(text) {
+  let data;
+  try { data = JSON.parse(text); } catch { return { error: 'The file is not valid JSON.' }; }
+  if (!data || typeof data !== 'object') return { error: 'The file does not contain a saved game.' };
+  if (data.format !== undefined && data.format !== SAVE_FORMAT) return { error: 'This is not a Hex Realm save file.' };
+  const raw = data.format === SAVE_FORMAT ? data.state : data;
+  if (!raw || typeof raw !== 'object' || typeof raw.version !== 'number') {
+    return { error: 'The file does not contain a saved game.' };
+  }
+  if (raw.version > STATE_VERSION) return { error: 'The save comes from a newer version of the game.' };
+  let state;
+  let problem = null;
+  try {
+    state = migrateState(raw);
+    if (state) problem = stateProblem(state);
+  } catch {
+    problem = 'it cannot be read';
+  }
+  if (problem) return { error: `The saved game is damaged (${problem}).` };
+  if (!state) return { error: 'The saved game has an unknown format.' };
+  state.events = [];
+  return { state };
+}
+
+// Basic sanity check of a state's shape; returns a short description of the first problem or null.
+export function stateProblem(s) {
+  const isInt = (x) => Number.isInteger(x);
+  if (!s.tiles || typeof s.tiles !== 'object' || Array.isArray(s.tiles)) return 'no map';
+  for (const [k, t] of Object.entries(s.tiles)) {
+    if (!t || k !== key(t.q, t.r) || !TERRAIN[t.terrain]) return `bad tile ${k}`;
+  }
+  if (!Array.isArray(s.cities) || !s.cities.length) return 'no cities';
+  if (!Array.isArray(s.units)) return 'no units';
+  if (!Array.isArray(s.gold) || s.gold.length !== PLAYERS.length || !s.gold.every(Number.isFinite)) return 'bad gold';
+  if (!isInt(s.turn) || s.turn < 1) return 'bad turn';
+  if (!isInt(s.current) || s.current < 0 || s.current >= PLAYERS.length) return 'bad current player';
+  const validOwner = (o) => o === null || (isInt(o) && o >= 0 && o < PLAYERS.length);
+  for (const c of s.cities) {
+    if (!c || !s.tiles[key(c.q, c.r)] || !validOwner(c.owner)) return `bad city ${c && c.name}`;
+  }
+  const taken = new Set();
+  for (const u of s.units) {
+    if (!u || !UNIT_TYPES[u.type] || !isInt(u.owner) || u.owner < 0 || u.owner >= PLAYERS.length) return 'bad unit';
+    const k = key(u.q, u.r);
+    if (!s.tiles[k] || !TERRAIN[s.tiles[k].terrain].passable) return `unit ${u.id} off the map`;
+    if (taken.has(k)) return `two units on ${k}`;
+    taken.add(k);
+    if (!Number.isFinite(u.hp) || u.hp <= 0) return `unit ${u.id} has no HP`;
+  }
+  if (s.winner !== null && s.winner !== undefined && !validOwner(s.winner)) return 'bad winner';
+  return null;
+}
