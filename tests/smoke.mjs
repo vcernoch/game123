@@ -181,6 +181,16 @@ try {
   }
   await page.screenshot({ path: 'artifacts/screenshot-fortify.png' });
 
+  // end-turn reminder: with idle units the first press only asks, the second ends the turn
+  await page.evaluate(() => window.__game.newGame(4242));
+  const label0 = await page.textContent('#end-turn');
+  if (!/End turn · \d+/.test(label0)) throw new Error(`end-turn button does not count idle units: ${label0}`);
+  await page.click('#end-turn');
+  const armed = await page.evaluate(() => ({ turn: window.__game.getState().turn, cur: window.__game.getState().current, text: document.getElementById('end-turn').textContent }));
+  if (armed.turn !== 1 || armed.cur !== 0 || armed.text !== 'Really end?') throw new Error(`first press ended the turn: ${JSON.stringify(armed)}`);
+  await page.click('#end-turn');
+  await page.waitForFunction(() => !window.__game.isBusy() && window.__game.getState().turn === 2, null, { timeout: 15000 });
+
   // building: in a fresh game select the capital and build a market via the panel button
   await page.evaluate(() => { window.__game.newGame(12345); window.__game.getState().gold[0] = 99; });
   const capPt = await page.evaluate(async () => {

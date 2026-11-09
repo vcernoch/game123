@@ -2,7 +2,7 @@
 import {
   createGame, reachable, attackTargets, moveUnit, attack, buyUnit, endTurn,
   unitAt, cityAt, getUnit, incomeOf, previewAttack, tileAt, pathTo, nextActiveUnit, cityInfo,
-  cloneState, drainEvents, migrateState, logFor, isUndoableMove, canFortify, fortify, visibleTiles, exploredTiles, build, unitCost, hasBuilding,
+  cloneState, drainEvents, migrateState, logFor, isUndoableMove, canFortify, fortify, activeUnits, visibleTiles, exploredTiles, build, unitCost, hasBuilding,
   rankOf, rankMult, buildingCost, unitMove, factionOf, riverDefense,
 } from './game.js';
 import { createAnimator } from './anim.js';
@@ -31,6 +31,8 @@ let hover = null;
 let aiRunning = false;
 let pending = null;        // touch: target awaiting confirmation by a second tap
 let lastPointer = 'mouse'; // type of the last pointer (mouse / touch / pen)
+let endArmed = false;      // end-turn reminder: the first press only asks for confirmation
+let endArmTimer = null;
 let undoStack = [];        // states before undoable moves this turn (memory only)
 const sound = createSound();
 sound.enabled = loadPrefs().sound !== false;
@@ -123,6 +125,7 @@ function updateHud() {
   $('income').textContent = `+${incomeOf(state, 0)}`;
   $('cities').textContent = `${state.cities.filter((c) => c.owner === 0).length} / ${state.cities.length}`;
   $('end-turn').disabled = busy() || state.winner !== null;
+  updateEndTurnButton();
 
   const info = $('info');
   const u = selectedUnit();
@@ -347,8 +350,39 @@ async function afterAction(before = null) {
   }
 }
 
-function doEndTurn() {
+// End-turn button: shows how many units can still act; while armed it asks for confirmation.
+function updateEndTurnButton() {
+  const btn = $('end-turn');
+  const idle = state.current === 0 && state.winner === null ? activeUnits(state, 0).length : 0;
+  if (endArmed && idle) {
+    btn.textContent = 'Really end?';
+    btn.title = `${idle} unit${idle === 1 ? '' : 's'} can still act – press again to end the turn`;
+    btn.classList.add('armed');
+  } else {
+    btn.textContent = idle ? `End turn · ${idle}` : 'End turn';
+    btn.title = idle ? `${idle} unit${idle === 1 ? '' : 's'} can still act (Tab selects them)` : 'End turn (Enter)';
+    btn.classList.remove('armed');
+  }
+}
+
+function disarmEndTurn() {
+  endArmed = false;
+  clearTimeout(endArmTimer);
+}
+
+// force = skip the reminder (test hook)
+function doEndTurn(force = false) {
   if (busy() || state.winner !== null) return;
+  if (!force && !endArmed && activeUnits(state, 0).length) {
+    // first press with units that can still act: ask for a second press within a few seconds
+    endArmed = true;
+    clearTimeout(endArmTimer);
+    endArmTimer = setTimeout(() => { endArmed = false; draw(); }, 4000);
+    sound.play('click');
+    draw();
+    return;
+  }
+  disarmEndTurn();
   selectedId = null;
   selectedCityId = null;
   $('tooltip').hidden = true;
@@ -471,7 +505,7 @@ $('zoom').addEventListener('click', () => {
 canvas.addEventListener('click', onClick);
 canvas.addEventListener('mousemove', onMove);
 canvas.addEventListener('mouseleave', () => { hover = null; $('tooltip').hidden = true; draw(); });
-$('end-turn').addEventListener('click', doEndTurn);
+$('end-turn').addEventListener('click', () => doEndTurn());
 $('new-game').addEventListener('click', () => newGame());
 $('banner-new').addEventListener('click', () => newGame());
 $('stats-panel').addEventListener('toggle', () => { statsKey = ''; updateStats(); });
@@ -490,7 +524,7 @@ $('info').addEventListener('click', (ev) => {
 });
 window.addEventListener('keydown', (ev) => {
   if ($('new-game-dialog').open) return; // keys belong to the dialog
-  if (ev.key === 'Enter' || ev.key === 'e') doEndTurn();
+  if (ev.key === 'Enter' || ev.key === 'e') doEndTurn(ev.shiftKey);
   if (ev.key === 'Tab') { ev.preventDefault(); selectNextUnit(); }
   if (ev.key === 'z' || ev.key === 'Z') { ev.preventDefault(); undoMove(); }
   if (ev.key === 'f' || ev.key === 'F') { ev.preventDefault(); fortifySelected(); }
@@ -541,7 +575,8 @@ function undoMove() {
 // Hook for automated tests (Playwright).
 window.__game = {
   getState: () => state,
-  endTurn: doEndTurn,
+  endTurn: () => doEndTurn(true),
+  pressEndTurn: () => doEndTurn(),
   undo: undoMove,
   canUndo: () => undoStack.length > 0,
   nextUnit: selectNextUnit,

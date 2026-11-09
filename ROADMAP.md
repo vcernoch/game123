@@ -40,7 +40,7 @@ Check off `[x]` when done. Add new ideas to the end of the relevant phase or to 
 
 ## Phase 4 – tactics and comfort (own improvements)
 - [x] Fortify (F): a unit that hasn't acted digs in for +25 % defense until it moves or attacks; AI garrisons fortify too
-- [ ] End-turn reminder: the button shows how many units can still act, a second press confirms
+- [x] End-turn reminder: the button shows how many units can still act, a second press confirms
 - [ ] City borders: tiles around each city drawn as territory in the owner's colour
 - [ ] Multi-turn move orders: a far target becomes the unit's destination and it keeps walking at the start of each turn
 

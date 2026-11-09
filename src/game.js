@@ -415,12 +415,17 @@ export function pathTo(state, unit, q, r) {
   return path;
 }
 
+// Own units that can still move or attack, sorted by id. Fortified units are left alone (like sleeping
+// units); they can still be selected by clicking. Used by Tab and by the end-turn reminder.
+export function activeUnits(state, player) {
+  const canAct = (u) => !u.fortified && (u.movesLeft > 0 || attackTargets(state, u).length > 0);
+  return state.units.filter((u) => u.owner === player && canAct(u)).sort((a, b) => a.id - b.id);
+}
+
 // The next own unit that can still move or attack (for the Tab key).
 // Cycles by id after unit afterId; returns null if there is none.
 export function nextActiveUnit(state, player, afterId = null) {
-  // fortified units are left alone (like sleeping units); they can still be selected by clicking
-  const canAct = (u) => !u.fortified && (u.movesLeft > 0 || attackTargets(state, u).length > 0);
-  const mine = state.units.filter((u) => u.owner === player && canAct(u)).sort((a, b) => a.id - b.id);
+  const mine = activeUnits(state, player);
   if (!mine.length) return null;
   return mine.find((u) => afterId === null || u.id > afterId) || mine[0];
 }

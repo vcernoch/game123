@@ -2,6 +2,13 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-09 – End-turn reminder
+- `activeUnits(state, player)` in `game.js` (units that can still move or attack, fortified ones excluded); `nextActiveUnit` now uses it, so Tab and the reminder always agree.
+- The "End turn" button shows how many units can still act ("End turn · 3"). With idle units the first press (or Enter) only arms it – the button turns orange and reads "Really end?" for 4 s; a second press ends the turn. Shift+Enter ends right away. Fortify a unit (F) to stop being reminded about it.
+- Test hook: `window.__game.endTurn()` still ends immediately, `pressEndTurn()` behaves like the button.
+- Tests: +1 logic (active units with moves / possible attack / exhausted / fortified, other player's units). Smoke test checks the counter, that the first click only arms the button, and that the second click ends the turn.
+- Status: `npm run check` green (44 logic tests + smoke).
+
 ## 2026-11-09 – Fortify
 - `fortify()` / `canFortify()` in `game.js`, `FORTIFY` in `rules.js`: a unit of the current player that hasn't moved or attacked this turn can dig in. It ends its turn and gets +25 % defense (`defenseValue`) until it moves or attacks; the bonus lasts across turns. Attacking drops the fortification *before* the fight, so it never helps the attacker's counter defense.
 - Tab (`nextActiveUnit`) skips fortified units, like sleeping units in other strategy games; clicking still selects them.

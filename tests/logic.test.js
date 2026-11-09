@@ -6,7 +6,7 @@ import {
   drainEvents, applyEvent, migrateState, STATE_VERSION,
   visibleTiles, exploredTiles, build, unitCost, rankOf, stepCost, getUnit,
   buildingCost, unitMove, factionOf, armyPower, riverBetween, riverDefense,
-  rollHappening, applyHappening, cityIncome, logFor, isUndoableMove, canFortify, fortify,
+  rollHappening, applyHappening, cityIncome, logFor, isUndoableMove, canFortify, fortify, activeUnits,
 } from '../src/game.js';
 import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
@@ -1046,4 +1046,19 @@ test('fortify: an AI garrison with nothing to attack digs in', () => {
   const after = getUnit(s, g.id);
   assert.ok(after && after.q === cap.q && after.r === cap.r);
   assert.ok(after.fortified, 'the garrison fortified');
+});
+
+test('active units: who can still act (end-turn reminder and Tab)', () => {
+  const { s, me } = duel(9);
+  assert.deepEqual(activeUnits(s, 0).map((u) => u.id), [me.id]);
+  me.movesLeft = 0;
+  assert.equal(activeUnits(s, 0).length, 1, 'an attack is still possible');
+  me.hasAttacked = true;
+  assert.equal(activeUnits(s, 0).length, 0);
+  assert.equal(nextActiveUnit(s, 0), null);
+  me.hasAttacked = false;
+  me.movesLeft = 2;
+  me.fortified = true;
+  assert.equal(activeUnits(s, 0).length, 0, 'fortified units are not nagged about');
+  assert.equal(activeUnits(s, 1).length, 0, 'not the AI\'s turn: its units have no moves');
 });
