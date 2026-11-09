@@ -2,7 +2,7 @@
 import {
   createGame, reachable, attackTargets, moveUnit, attack, buyUnit, endTurn,
   unitAt, cityAt, getUnit, incomeOf, previewAttack, tileAt, pathTo, nextActiveUnit, cityInfo,
-  cloneState, drainEvents, migrateState, visibleTiles, exploredTiles, build, unitCost, hasBuilding,
+  cloneState, drainEvents, migrateState, logFor, visibleTiles, exploredTiles, build, unitCost, hasBuilding,
   rankOf, rankMult, buildingCost, unitMove, factionOf, riverDefense,
 } from './game.js';
 import { createAnimator } from './anim.js';
@@ -194,7 +194,8 @@ function updateHud() {
   }
   info.innerHTML = html;
 
-  $('log').innerHTML = state.log.slice(-8).reverse().map((l) => `<li><b>${l.turn}.</b> ${l.msg}</li>`).join('');
+  $('log').innerHTML = logFor(state, 0).slice(-8).reverse()
+    .map((l) => `<li${l.hidden ? ' class="hidden-act"' : ''}><b>${l.turn}.</b> ${l.msg}</li>`).join('');
 
   const banner = $('banner');
   // znělka konce hry: jednou, až doběhne animace posledního tahu

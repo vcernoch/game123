@@ -94,7 +94,7 @@ function countStat(state, name, player) {
   state.stats[name][player]++;
 }
 
-export const STATE_VERSION = 11;
+export const STATE_VERSION = 12;
 
 // Převede uložený stav starší verze na aktuální; neznámý formát vrátí null.
 export function migrateState(s) {
@@ -142,6 +142,10 @@ export function migrateState(s) {
   if (s.version === 10) {
     s.happenings = false; // rozehraná hra pokračuje podle pravidel, se kterými začala
     s.version = 11;
+  }
+  if (s.version === 11) {
+    // záznamy kroniky bez `seen` jsou veřejné, takže staré záznamy zůstanou vidět všem
+    s.version = 12;
   }
   return s.version === STATE_VERSION ? s : null;
 }
@@ -434,7 +438,9 @@ function gainXp(state, unit, amount) {
   unit.xp = (unit.xp || 0) + amount;
   if (rankOf(unit) <= before) return false;
   unit.hp = Math.min(UNIT_TYPES[unit.type].hp, unit.hp + XP.promotionHeal);
-  addLog(state, `${PLAYERS[unit.owner].name}: ${UNIT_TYPES[unit.type].name} povýšen na ${RANKS[rankOf(unit)].name}`);
+  addLog(state, `${PLAYERS[unit.owner].name}: ${UNIT_TYPES[unit.type].name} povýšen na ${RANKS[rankOf(unit)].name}`, {
+    by: unit.owner, at: [unit],
+  });
   return true;
 }
 
@@ -524,7 +530,9 @@ export function moveUnit(state, unitId, q, r) {
     countStat(state, 'captures', unit.owner);
     const loot = factionOf(state, unit.owner).captureGold || 0;
     state.gold[unit.owner] += loot;
-    addLog(state, `${PLAYERS[unit.owner].name}: dobyto město ${city.name}${loot ? ` (kořist ${loot} zl.)` : ''}`);
+    addLog(state, `${PLAYERS[unit.owner].name}: dobyto město ${city.name}${loot ? ` (kořist ${loot} zl.)` : ''}`, {
+      by: unit.owner, at: [city], also: prev === null ? [] : [prev],
+    });
     if (prev !== null) checkWinner(state);
   }
   updateExplored(state, unit.owner);
@@ -543,11 +551,14 @@ export function attack(state, attackerId, defenderId) {
   a.moved = true;
   const aName = UNIT_TYPES[a.type].name;
   const dName = UNIT_TYPES[d.type].name;
+  // boj vidí oba účastníci a každý, kdo vidí aspoň jedno z polí (spočítáno před ztrátou jednotek)
+  const fight = { by: a.owner, at: [{ q: a.q, r: a.r }, { q: d.q, r: d.r }], also: [d.owner] };
+  fight.seen = seenBy(state, fight);
   const ev = { type: 'attack', attackerId: a.id, defenderId: d.id, damage: res.damage, counter: 0, killed: d.hp <= 0, died: false };
   emit(state, ev);
   if (d.hp <= 0) {
     removeUnit(state, d.id);
-    addLog(state, `${PLAYERS[a.owner].name}: ${aName} zničil jednotku ${dName}`);
+    addLog(state, `${PLAYERS[a.owner].name}: ${aName} zničil jednotku ${dName}`, fight);
     countStat(state, 'kills', a.owner);
     countStat(state, 'losses', d.owner);
     ev.promoted = gainXp(state, a, XP.attack + XP.kill);
@@ -555,10 +566,10 @@ export function attack(state, attackerId, defenderId) {
     a.hp -= res.counter;
     ev.counter = res.counter;
     ev.died = a.hp <= 0;
-    addLog(state, `${PLAYERS[a.owner].name}: ${aName} útočí na ${dName} (−${res.damage}, protiúder −${res.counter})`);
+    addLog(state, `${PLAYERS[a.owner].name}: ${aName} útočí na ${dName} (−${res.damage}, protiúder −${res.counter})`, fight);
     if (a.hp <= 0) {
       removeUnit(state, a.id);
-      addLog(state, `${aName} padl v boji`);
+      addLog(state, `${aName} padl v boji`, fight);
       countStat(state, 'kills', d.owner);
       countStat(state, 'losses', a.owner);
     } else {
@@ -583,7 +594,7 @@ export function buyUnit(state, cityId, type) {
   if (state.gold[state.current] < cost || unitAt(state, city.q, city.r)) return false;
   state.gold[state.current] -= cost;
   spawnUnit(state, type, state.current, city.q, city.r);
-  addLog(state, `${PLAYERS[state.current].name}: naverbován ${t.name} (${city.name})`);
+  addLog(state, `${PLAYERS[state.current].name}: naverbován ${t.name} (${city.name})`, { by: state.current, at: [city] });
   return true;
 }
 
@@ -597,7 +608,7 @@ export function build(state, cityId, building) {
   state.gold[state.current] -= cost;
   city.buildings = [...(city.buildings || []), building];
   emit(state, { type: 'build', cityId, building });
-  addLog(state, `${PLAYERS[state.current].name}: dokončena stavba ${b.name} (${city.name})`);
+  addLog(state, `${PLAYERS[state.current].name}: dokončena stavba ${b.name} (${city.name})`, { by: state.current, at: [city] });
   return true;
 }
 
@@ -656,26 +667,29 @@ export function applyHappening(state, player, kind, city) {
   const info = HAPPENINGS.kinds[kind];
   const ev = { type: 'happening', kind, player, cityId: city.id, gold: 0, hits: [], suppressed: false };
   const who = PLAYERS[player].name;
+  const where = { by: player, at: [city] };
   if (kind === 'harvest') {
     ev.gold = info.gold;
     state.gold[player] += info.gold;
-    addLog(state, `${who}: ${info.name} ve městě ${city.name} (+${info.gold} zl.)`);
+    addLog(state, `${who}: ${info.name} ve městě ${city.name} (+${info.gold} zl.)`, where);
   } else if (kind === 'plague') {
     for (const u of state.units) {
       if (distance(u, city) > 1 || u.hp <= 1) continue;
       u.hp = Math.max(1, u.hp - info.damage);
       ev.hits.push({ unitId: u.id, hp: u.hp });
+      if (!where.also) where.also = [];
+      where.also.push(u.owner); // o nákaze ví i majitel postižené jednotky
     }
-    addLog(state, `${who}: ${info.name} ve městě ${city.name}${ev.hits.length ? ` – nakaženo jednotek: ${ev.hits.length}` : ''}`);
+    addLog(state, `${who}: ${info.name} ve městě ${city.name}${ev.hits.length ? ` – nakaženo jednotek: ${ev.hits.length}` : ''}`, where);
   } else if (kind === 'revolt') {
     const g = unitAt(state, city.q, city.r);
     if (g && g.owner === player) {
       ev.suppressed = true;
-      addLog(state, `${who}: ${info.name} ve městě ${city.name} – posádka udržela pořádek`);
+      addLog(state, `${who}: ${info.name} ve městě ${city.name} – posádka udržela pořádek`, where);
     } else {
       ev.gold = -Math.min(state.gold[player], cityIncome(city, state));
       state.gold[player] += ev.gold;
-      addLog(state, `${who}: ${info.name} ve městě ${city.name} – město tento tah neodvedlo daně (${ev.gold} zl.)`);
+      addLog(state, `${who}: ${info.name} ve městě ${city.name} – město tento tah neodvedlo daně (${ev.gold} zl.)`, where);
     }
   }
   emit(state, ev);
@@ -698,7 +712,42 @@ function checkWinner(state) {
   }
 }
 
-function addLog(state, msg) {
-  state.log.push({ turn: state.turn, msg });
-  if (state.log.length > 50) state.log.shift();
+// Zápis do kroniky. Bez `where` je záznam veřejný (konec hry…). S `where` = { by, at, also, seen }
+// se uloží `seen`: hráči, kteří akci viděli – její původce, hráči z `also` a ti, kdo právě vidí
+// některé z polí `at`. Bez mlhy vidí všichni, takže se `seen` neukládá.
+function addLog(state, msg, where = null) {
+  const entry = { turn: state.turn, msg };
+  if (where && state.fog) entry.seen = where.seen || seenBy(state, where);
+  state.log.push(entry);
+  if (state.log.length > LOG_LIMIT) state.log.shift();
+}
+
+const LOG_LIMIT = 50;
+
+function seenBy(state, { by = null, at = [], also = [] }) {
+  const seen = new Set(also);
+  if (by !== null) seen.add(by);
+  PLAYERS.forEach((_, p) => {
+    if (seen.has(p)) return;
+    const vis = visibleTiles(state, p);
+    if (at.some((h) => vis.has(key(h.q, h.r)))) seen.add(p);
+  });
+  return [...seen].sort();
+}
+
+// Kronika z pohledu hráče (nejstarší první). Záznamy, které hráč neviděl, se slijí do jednoho
+// řádku „Akce soupeře v mlze války (N)“ s počtem; po konci hry je vidět všechno.
+export function logFor(state, viewer) {
+  const out = [];
+  for (const e of state.log) {
+    if (!e.seen || e.seen.includes(viewer) || state.winner !== null) {
+      out.push({ turn: e.turn, msg: e.msg });
+      continue;
+    }
+    const last = out[out.length - 1];
+    if (last && last.hidden && last.turn === e.turn) last.count++;
+    else out.push({ turn: e.turn, hidden: true, count: 1 });
+  }
+  for (const e of out) if (e.hidden) e.msg = `Akce soupeře v mlze války (${e.count})`;
+  return out;
 }

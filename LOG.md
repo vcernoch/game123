@@ -2,6 +2,15 @@
 
 Nejnovější záznam nahoře. Formát: datum – co se udělalo – stav testů – otázky pro Vladimíra.
 
+## 2026-11-09 – Kronika respektuje mlhu války (v0.6.0)
+- **Otázka pro Vladimíra (trvá):** Zbylé body fáze 3 – víc AI soupeřů a kampaň/scénáře s vlastními cíli – mění pravidla vítězství, takže na ně bez tvého souhlasu nesahám (podrobnosti v záznamech níž). Zároveň je v `dev` od posledního sloučení hodně nového (v0.4.0–v0.6.0), prosím o sloučení do `main`.
+- Záznamy kroniky nesou `seen` = hráči, kteří akci viděli: původce, dotčený hráč (obránce, bývalý majitel dobytého města, majitel jednotky zasažené morem) a každý, kdo v tu chvíli vidí některé z dotčených polí. U boje se viditelnost počítá před ztrátou jednotek, takže hráč vždy ví o padlé jednotce.
+- `logFor(state, viewer)` v `game.js` vrací kroniku z pohledu hráče; po sobě jdoucí neviděné akce slije do jednoho řádku „Akce soupeře v mlze války (N)“ (v UI kurzívou). Bez mlhy se nic neskrývá, po konci hry se odkryje všechno. Konec hry je veřejný záznam.
+- Struktura stavu: `state.version` 12 (nepovinné `seen` u záznamů kroniky); staré záznamy bez `seen` zůstanou veřejné.
+- `package-lock.json` měl zastaralou verzi 0.4.0 – srovnáno přes `npm version`.
+- Testy: +1 logický (verbování a stavba AI v mlze skryté a slité, vlastní akce viditelné, ztráta vlastní jednotky viditelná, konec hry, bez mlhy, migrace). Smoke test po 5 tazích ověří, že kronika v UI nezobrazuje žádný neviděný záznam.
+- Stav: `npm run check` zelený (40 logických testů + smoke).
+
 ## 2026-11-09 – Náhodné události (v0.5.0)
 - `HAPPENINGS` v `rules.js`: od 3. kola má každý hráč na začátku svého tahu 15% šanci na událost v náhodném vlastním městě:
   - **Bohatá úroda** (váha 3): +8 zlata.

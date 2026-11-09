@@ -6,7 +6,7 @@ import {
   drainEvents, applyEvent, migrateState, STATE_VERSION,
   visibleTiles, exploredTiles, build, unitCost, rankOf, stepCost, getUnit,
   buildingCost, unitMove, factionOf, armyPower, riverBetween, riverDefense,
-  rollHappening, applyHappening, cityIncome,
+  rollHappening, applyHappening, cityIncome, logFor,
 } from '../src/game.js';
 import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
@@ -873,4 +873,51 @@ test('statistiky: historie po kolech, počítadla a graf', () => {
   const m = migrateState(old);
   assert.deepEqual(m.history, []);
   assert.deepEqual(m.stats.kills, [0, 0]);
+});
+
+test('kronika: akce soupeře v mlze hráč nevidí, vlastní a viditelné ano', () => {
+  const s = createGame({ seed: 7 });
+  const aiCap = s.cities.find((c) => c.owner === 1 && c.capital);
+  assert.ok(!visibleTiles(s, 0).has(key(aiCap.q, aiCap.r)), 'nepřátelské hlavní město je na začátku v mlze');
+  // AI naverbuje a postaví v mlze
+  s.current = 1;
+  s.gold[1] = 200;
+  const g = unitAt(s, aiCap.q, aiCap.r);
+  if (g) s.units = s.units.filter((u) => u !== g);
+  assert.ok(buyUnit(s, aiCap.id, 'warrior'));
+  assert.ok(build(s, aiCap.id, 'market'));
+  const mine = logFor(s, 1).slice(-2);
+  assert.ok(mine.every((l) => !l.hidden), 'AI vidí své akce');
+  const hidden = logFor(s, 0);
+  const last = hidden[hidden.length - 1];
+  assert.ok(last.hidden, 'hráč akce v mlze nevidí');
+  assert.equal(last.count, 2, 'po sobě jdoucí skryté akce se slijí do jednoho řádku');
+  assert.ok(!hidden.some((l) => l.msg.includes('naverbován')));
+  // boj, kde je hráč napaden, vidí vždy (i když útočník stojí v mlze a obránce padne)
+  const victim = s.units.find((u) => u.owner === 0);
+  const spot = neighbors(victim.q, victim.r).find((n) => isPassable(s, n.q, n.r) && !unitAt(s, n.q, n.r));
+  const archer = { id: 999, type: 'archer', owner: 1, q: spot.q, r: spot.r, hp: 10, movesLeft: 0, hasAttacked: false, xp: 0 };
+  s.units.push(archer);
+  victim.hp = 1;
+  assert.ok(attack(s, archer.id, victim.id));
+  const after = logFor(s, 0);
+  assert.ok(after[after.length - 1].msg.includes('zničil'), 'hráč vidí ztrátu vlastní jednotky');
+  // neveřejné záznamy jdou do JSON a po konci hry se odkryje vše
+  const copy = JSON.parse(JSON.stringify(s));
+  copy.winner = 1;
+  assert.ok(logFor(copy, 0).every((l) => !l.hidden));
+  // bez mlhy se nic neskrývá
+  const open = createGame({ seed: 7, fog: false });
+  open.current = 1;
+  open.gold[1] = 200;
+  const cap2 = open.cities.find((c) => c.owner === 1 && c.capital);
+  build(open, cap2.id, 'market');
+  assert.ok(logFor(open, 0).every((l) => !l.hidden));
+  // stará hra (verze 11) se načte a její záznamy zůstanou veřejné
+  const old = createGame({ seed: 3 });
+  old.version = 11;
+  old.log = [{ turn: 1, msg: 'AI: něco' }];
+  const m = migrateState(old);
+  assert.equal(m.version, STATE_VERSION);
+  assert.equal(logFor(m, 0)[0].msg, 'AI: něco');
 });

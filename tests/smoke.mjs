@@ -45,6 +45,16 @@ try {
   if (turn < 6 && (await page.evaluate(() => window.__game.getState().winner)) === null) {
     throw new Error(`kola nepřibývají (turn=${turn})`);
   }
+  // kronika neprozradí akce AI v mlze války: žádný řádek nesmí být záznam, který hráč neviděl
+  const leak = await page.evaluate(() => {
+    const st = window.__game.getState();
+    if (st.winner !== null) return null;
+    const line = (e) => `${e.turn}. ${e.msg}`;
+    const pub = new Set(st.log.filter((e) => !e.seen || e.seen.includes(0)).map(line));
+    const secret = new Set(st.log.filter((e) => e.seen && !e.seen.includes(0)).map(line).filter((l) => !pub.has(l)));
+    return [...document.querySelectorAll('#log li')].map((li) => li.textContent).find((t) => secret.has(t)) || null;
+  });
+  if (leak) throw new Error(`kronika prozrazuje akci v mlze: ${leak}`);
   await page.click('#board', { position: { x: box.width / 2, y: box.height / 2 } });
 
   // Tab vybere jednotku s pohybem a najetí na vzdálené pole ukáže trasu
