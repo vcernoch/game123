@@ -3,7 +3,7 @@ import {
   createGame, reachable, attackTargets, moveUnit, attack, buyUnit, endTurn,
   unitAt, cityAt, getUnit, incomeOf, previewAttack, tileAt, pathTo, nextActiveUnit, cityInfo,
   cloneState, drainEvents, migrateState, logFor, isUndoableMove, canFortify, fortify, activeUnits, territoryOwner, cityResources, unitSummary, planRoute, setOrder, runOrders, cancelOrder, visibleTiles, exploredTiles, build, unitCost, hasBuilding,
-  rankOf, rankMult, buildingCost, unitMove, factionOf, riverDefense,
+  rankOf, rankMult, buildingCost, unitMove, factionOf, riverDefense, zocTiles,
 } from './game.js';
 import { createAnimator } from './anim.js';
 import { decideTap } from './input.js';
@@ -131,6 +131,7 @@ function drawBoard() {
     viewer: 0,
     selectedId,
     reachable: mine ? reachable(state, u) : null,
+    zoc: mine ? zocTiles(state, 0) : null,
     targets: mine ? new Set(attackTargets(state, u).map((t) => t.id)) : null,
     hover,
     ...pathView(u, mine),
@@ -204,6 +205,9 @@ function updateHud() {
     const road = tile.road ? ' · road (move cost ½ along roads)' : '';
     const river = tile.rivers && tile.rivers.length ? ` · river (crossing +${RIVER.crossCost} move, defender +${Math.round(RIVER.defBonus * 100)} %)` : '';
     html = `<p>${t.name}${t.passable ? ` · move ${t.cost} · defense +${Math.round(t.defBonus * 100)} %` : ' · impassable'}${road}${river}</p>`;
+    if (tile.terrain && t.passable && zocTiles(state, 0).has(key(hover.q, hover.r))) {
+      html += '<p class="hint">Enemy zone of control – a unit that steps here must stop</p>';
+    }
     if (tile.resource) html += `<p class="resource">${RESOURCES[tile.resource].name}: ${RESOURCES[tile.resource].desc}</p>`;
     const realm = territoryOwner(state, hover.q, hover.r);
     if (realm !== undefined) {
@@ -375,6 +379,10 @@ function showTooltip(ev, hex) {
     const city = cityAt(state, hex.q, hex.r);
     if (city) lines.push(cityTipText(city));
     tip.textContent = lines.join('\n');
+    placeTip(tip, ev);
+  } else if (sel && hex && sel.owner === state.current && zocTiles(state, sel.owner).has(key(hex.q, hex.r))
+    && reachable(state, sel).has(key(hex.q, hex.r))) {
+    tip.textContent = 'Enemy zone of control – the move ends here';
     placeTip(tip, ev);
   } else if (hex && cityAt(state, hex.q, hex.r) && exploredTiles(state, 0).has(key(hex.q, hex.r))) {
     tip.textContent = cityTipText(cityAt(state, hex.q, hex.r));

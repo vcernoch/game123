@@ -43,6 +43,7 @@ export function render(ctx, state, view = {}) {
 
   const seen = (q, r) => !view.visible || view.visible.has(key(q, r));
   const known = (q, r) => !view.explored || view.explored.has(key(q, r));
+  const zocStops = [];
 
   for (const t of Object.values(state.tiles)) {
     const c = tileCenter(t.q, t.r);
@@ -63,17 +64,21 @@ export function render(ctx, state, view = {}) {
       ctx.fillStyle = '#2a2f3a';
       ctx.fill();
     }
-    if (view.reachable && view.reachable.has(key(t.q, t.r))) {
+    const canReach = view.reachable && view.reachable.has(key(t.q, t.r));
+    if (canReach) {
       ctx.fillStyle = 'rgba(255,255,255,0.35)';
       ctx.fill();
     }
     ctx.strokeStyle = 'rgba(0,0,0,0.25)';
     ctx.lineWidth = 1;
     ctx.stroke();
+    // reachable tile in an enemy zone of control: the move ends here
+    if (canReach && view.zoc && view.zoc.has(key(t.q, t.r))) zocStops.push(c);
   }
 
   drawBorders(ctx, state, known);
   drawRivers(ctx, state, known, seen);
+  for (const c of zocStops) drawZocStop(ctx, c.x, c.y + HEX_SIZE * 0.45);
 
   if (view.hover && state.tiles[key(view.hover.q, view.hover.r)]) {
     const c = tileCenter(view.hover.q, view.hover.r);
@@ -263,6 +268,26 @@ function drawRoad(ctx, state, t, c) {
 // when the neighbor is off the map). Bridge = road on both sides of the edge.
 // City borders: on each territory tile, the edges towards a different territory (or none) are drawn
 // slightly inset in the colour of the city's owner, so neighbouring borders sit side by side.
+// A small stop sign (octagon with a white bar) low in the tile: "the move ends here".
+function drawZocStop(ctx, x, y) {
+  const r = Math.max(5, HEX_SIZE * 0.2);
+  ctx.save();
+  ctx.beginPath();
+  for (let i = 0; i < 8; i++) {
+    const a = Math.PI / 8 + (i * Math.PI) / 4;
+    ctx.lineTo(x + r * Math.cos(a), y + r * Math.sin(a));
+  }
+  ctx.closePath();
+  ctx.fillStyle = '#c62f2f';
+  ctx.fill();
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(x - r * 0.55, y - r * 0.15, r * 1.1, r * 0.3);
+  ctx.restore();
+}
+
 function drawBorders(ctx, state, known) {
   const terr = territoryMap(state);
   const owner = new Map(state.cities.map((c) => [c.id, c.owner]));

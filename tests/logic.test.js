@@ -6,7 +6,7 @@ import {
   drainEvents, applyEvent, migrateState, STATE_VERSION,
   visibleTiles, exploredTiles, build, unitCost, rankOf, stepCost, getUnit,
   buildingCost, unitMove, factionOf, armyPower, riverBetween, riverDefense,
-  rollHappening, applyHappening, cityIncome, logFor, isUndoableMove, canFortify, fortify, activeUnits, territoryMap, territoryOwner, planRoute, setOrder, runOrders, cancelOrder, cityHeal, citySight, cityResources, unitSummary,
+  rollHappening, applyHappening, cityIncome, logFor, isUndoableMove, canFortify, fortify, activeUnits, territoryMap, territoryOwner, planRoute, setOrder, runOrders, cancelOrder, cityHeal, citySight, cityResources, unitSummary, zocTiles,
 } from '../src/game.js';
 import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
@@ -1328,4 +1328,62 @@ test('keyboard shortcuts: one table for keys and the overlay', () => {
   for (const [k, shift] of [['Tab', false], ['Enter', false], ['Enter', true], ['f', false], ['1', false], ['?', true]]) {
     assert.equal(SHORTCUTS.filter((sc) => sc.match(k, shift)).length, 1, `${k}${shift ? '+shift' : ''}`);
   }
+});
+
+test('zone of control: entering a tile next to a visible enemy stops the unit', () => {
+  const s = createGame({ seed: 3, fog: false });
+  for (const t of Object.values(s.tiles)) { t.terrain = 'plains'; delete t.road; delete t.rivers; }
+  s.units = [];
+  const me = { id: 900, type: 'horseman', owner: 0, q: 2, r: 4, hp: 10, movesLeft: 4, hasAttacked: false, xp: 0 };
+  const foe = { id: 901, type: 'warrior', owner: 1, q: 5, r: 4, hp: 10, movesLeft: 0, hasAttacked: true, xp: 0 };
+  s.units.push(me, foe);
+  const zoc = zocTiles(s, 0);
+  assert.equal(zoc.size, 6, 'the six neighbours of the enemy');
+  assert.ok(!zocTiles(s, 1).has(key(4, 4)), 'own units make no zone for their owner');
+  const reach = reachable(s, me);
+  // the tile in front of the enemy is reachable, but the unit can't walk past through the zone
+  assert.equal(reach.get(key(4, 4)), 2);
+  assert.ok(!reach.has(key(6, 4)), 'behind the enemy needs passing through the zone');
+  for (const [k, cost] of reach) {
+    const path = pathTo(s, me, ...k.split(',').map(Number));
+    assert.equal(path.length - 1, cost, 'all plains: cost = steps');
+    // no intermediate tile of the path lies in the zone
+    for (const p of path.slice(1, -1)) assert.ok(!zoc.has(key(p.q, p.r)), `path to ${k} passes the zone`);
+  }
+  // without the enemy the same tile is reachable
+  s.units = [me];
+  assert.ok(reachable(s, me).has(key(6, 4)));
+  // starting inside the zone the unit may leave it (and stops again on the next zone tile)
+  s.units = [me, foe];
+  me.q = 4; me.r = 4;
+  const out = reachable(s, me);
+  assert.ok(out.has(key(1, 4)), 'walks away from the enemy');
+  // moveUnit follows the same rules and the attack after stopping still works
+  me.q = 2; me.r = 4; me.movesLeft = 4;
+  assert.ok(!moveUnit(s, me.id, 6, 4));
+  assert.ok(moveUnit(s, me.id, 4, 4));
+  assert.equal(me.movesLeft, 2);
+  assert.ok(attack(s, me.id, foe.id));
+});
+
+test('zone of control: hidden enemies have none, old games keep playing without it', () => {
+  const s = createGame({ seed: 3, fog: true });
+  for (const t of Object.values(s.tiles)) { t.terrain = 'plains'; delete t.road; delete t.rivers; }
+  s.units = [];
+  s.cities.forEach((c) => { c.owner = null; });
+  const me = { id: 900, type: 'warrior', owner: 0, q: 1, r: 1, hp: 10, movesLeft: 2, hasAttacked: false, xp: 0 };
+  const far = { id: 901, type: 'warrior', owner: 1, q: 1 + UNIT_TYPES.warrior.sight + 2, r: 1, hp: 10, movesLeft: 0, hasAttacked: true, xp: 0 };
+  s.units.push(me, far);
+  assert.ok(!visibleTiles(s, 0).has(key(far.q, far.r)), 'the enemy is in the fog');
+  assert.equal(zocTiles(s, 0).size, 0);
+  s.fog = false;
+  assert.equal(zocTiles(s, 0).size, 6, 'without fog the same enemy has a zone');
+  const old = createGame({ seed: 3 });
+  old.version = 15;
+  delete old.zoc;
+  const m = migrateState(old);
+  assert.equal(m.version, STATE_VERSION);
+  assert.equal(m.zoc, false);
+  assert.equal(zocTiles(m, 0).size, 0);
+  assert.equal(createGame({ seed: 3 }).zoc, true);
 });

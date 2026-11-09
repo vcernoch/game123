@@ -38,6 +38,7 @@ export function createGame({
     events: [],
     fog,
     happenings: !!happenings,
+    zoc: true,
     difficulty,
     factions: [faction, aiFaction],
     history: [],
@@ -94,7 +95,7 @@ function countStat(state, name, player) {
   state.stats[name][player]++;
 }
 
-export const STATE_VERSION = 15;
+export const STATE_VERSION = 16;
 
 // Converts a saved state of an older version to the current one; returns null for an unknown format.
 export function migrateState(s) {
@@ -158,6 +159,10 @@ export function migrateState(s) {
   if (s.version === 14) {
     // map resources arrived in version 15 – old maps simply have none
     s.version = 15;
+  }
+  if (s.version === 15) {
+    s.zoc = false; // zone of control arrived in version 16 – a game in progress keeps its rules
+    s.version = 16;
   }
   return s.version === STATE_VERSION ? s : null;
 }
@@ -422,11 +427,15 @@ function searchMoves(state, unit) {
   const result = new Map();
   const parent = new Map();
   if (unit.movesLeft <= 0) return { result, parent };
-  const best = new Map([[key(unit.q, unit.r), 0]]);
+  const zoc = zocTiles(state, unit.owner);
+  const start = key(unit.q, unit.r);
+  const best = new Map([[start, 0]]);
   const frontier = [{ q: unit.q, r: unit.r, cost: 0 }];
   while (frontier.length) {
     frontier.sort((a, b) => a.cost - b.cost);
     const cur = frontier.shift();
+    // a unit that entered an enemy zone of control stops there
+    if (key(cur.q, cur.r) !== start && zoc.has(key(cur.q, cur.r))) continue;
     for (const n of neighbors(cur.q, cur.r)) {
       const t = tileAt(state, n.q, n.r);
       if (!t || !TERRAIN[t.terrain].passable) continue;
@@ -447,6 +456,20 @@ function searchMoves(state, unit) {
     }
   }
   return { result, parent };
+}
+
+// Zone of control: tiles next to an enemy unit the mover can see. A unit that steps into such a tile
+// must stop there (it may still attack); leaving a zone from the starting tile is free. Hidden enemies
+// don't reveal themselves by stopping a unit. Returns a Set of keys (empty if the game has no ZoC).
+export function zocTiles(state, player) {
+  const zoc = new Set();
+  if (!state.zoc) return zoc;
+  const visible = state.fog ? visibleTiles(state, player) : null;
+  for (const e of state.units) {
+    if (e.owner === player || (visible && !visible.has(key(e.q, e.r)))) continue;
+    for (const n of neighbors(e.q, e.r)) if (state.tiles[key(n.q, n.r)]) zoc.add(key(n.q, n.r));
+  }
+  return zoc;
 }
 
 // Reachable tiles: Map key -> movement cost.

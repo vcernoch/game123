@@ -408,6 +408,39 @@ try {
   if (!riverInfo.includes('river')) throw new Error(`rivers: panel does not describe the river (${riverInfo})`);
   await page.screenshot({ path: 'artifacts/screenshot-rivers.png' });
 
+  // zone of control: an enemy two tiles from the selected horseman marks the tiles next to it
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const zoc = await page.evaluate(async () => {
+    const g = await import('./src/game.js');
+    const rnd = await import('./src/render.js');
+    window.__game.newGame(31, { fog: false });
+    const st = window.__game.getState();
+    const me = st.units.find((u) => u.owner === 0);
+    me.type = 'horseman';
+    me.movesLeft = 4;
+    const foe = st.units.find((u) => u.owner === 1);
+    // put the enemy on a free passable tile at distance 3 from the horseman
+    const spot = Object.values(st.tiles).find((t) => g.isFree(st, t.q, t.r)
+      && Math.max(Math.abs(t.q - me.q), Math.abs(t.r - me.r), Math.abs(t.q + t.r - me.q - me.r)) === 3
+      && !st.cities.some((c) => c.q === t.q && c.r === t.r));
+    foe.q = spot.q; foe.r = spot.r;
+    const zone = g.zocTiles(st, 0);
+    const reach = g.reachable(st, me);
+    const stopKey = [...reach.keys()].find((k) => zone.has(k) && !st.units.some((u) => `${u.q},${u.r}` === k));
+    window.__game.refresh();
+    const rect = document.getElementById('board').getBoundingClientRect();
+    const k = rect.width / rnd.canvasSize(st).w;
+    const at = (q, r) => { const c = rnd.tileCenter(q, r); return { x: rect.left + c.x * k, y: rect.top + c.y * k }; };
+    const [sq, sr] = stopKey ? stopKey.split(',').map(Number) : [0, 0];
+    return { stop: stopKey ? at(sq, sr) : null, me: at(me.q, me.r) };
+  });
+  if (!zoc.stop) throw new Error('zoc: no reachable tile in the zone of control');
+  await page.mouse.click(zoc.me.x, zoc.me.y);
+  await page.mouse.move(zoc.stop.x, zoc.stop.y);
+  const zocTip = await page.textContent('#tooltip');
+  if (!zocTip.includes('zone of control')) throw new Error(`zoc: tooltip does not mention the zone (${zocTip})`);
+  await page.screenshot({ path: 'artifacts/screenshot-zoc.png' });
+
   if (errors.length) throw new Error(errors.join('\n'));
   console.log(`SMOKE OK – turn ${turn}, screenshots in artifacts/`);
 } catch (e) {

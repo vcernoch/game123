@@ -2,6 +2,13 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-09 – Zone of control
+- New rule: a unit that steps onto a tile next to an enemy unit **it can see** must stop there (it can still attack); moving away from a starting tile inside the zone is free. Hidden enemies in the fog have no zone, so a unit stopping never reveals anything. `zocTiles(state, player)` in `game.js`; `searchMoves` doesn't expand from zone tiles, so `reachable`, `pathTo`, `moveUnit`, move orders and the AI all follow the rule automatically. Multi-turn routes (`planRoute`) ignore it – orders stop anyway when an enemy comes into sight.
+- UI: reachable tiles in the zone get a small red stop sign; the mouse tooltip says "Enemy zone of control – the move ends here", the tile panel mentions it too. Help text updated.
+- State: `state.version` 16 (`zoc`); saved games from before continue without the zone so their rules don't change.
+- Tests: +2 logic (zone around a visible enemy, no walking past it, path never crosses the zone, leaving is free, moveUnit + attack after stopping; hidden enemy has no zone, migration). Smoke test selects a horseman near an enemy, hovers a stop tile and checks the tooltip (`artifacts/screenshot-zoc.png`).
+- Status: `npm run check` green (54 logic tests + smoke).
+
 ## 2026-11-09 – Keyboard shortcuts → v0.11.0
 - New `src/keys.js`: one `SHORTCUTS` table drives both the key handling (`keyAction`) and the overlay, so they can't disagree. Added to the structure list in `CLAUDE.md`.
 - New: number keys 1–5 recruit the matching unit in the selected city (the numbers are shown on the recruit buttons, hidden on touch screens); `?` (or the "⌨ Keyboard shortcuts" button under "How to play") opens a list of all shortcuts, Esc or `?` closes it. Existing keys (Tab, Enter/E, Shift+Enter, F, Z, Esc) now go through the table; shortcuts with Ctrl/Cmd/Alt are left to the browser.
