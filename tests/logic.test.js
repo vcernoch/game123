@@ -12,6 +12,7 @@ import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
 } from '../src/ai.js';
 import { decideTap } from '../src/input.js';
+import { SHORTCUTS, keyAction, recruitKey } from '../src/keys.js';
 import { chartSvg, summaryRows } from '../src/stats.js';
 import { soundFor, createLimiter, createSound, SOUND_NAMES } from '../src/sound.js';
 import { readFileSync } from 'node:fs';
@@ -1304,4 +1305,27 @@ test('unit summary for the tooltip: effective stats and reasons', () => {
   cap.buildings = ['walls'];
   me.q = cap.q; me.r = cap.r;
   assert.ok(unitSummary(s, me).notes.includes('city with walls'));
+});
+
+test('keyboard shortcuts: one table for keys and the overlay', () => {
+  assert.deepEqual(keyAction('Tab'), { type: 'nextUnit' });
+  assert.deepEqual(keyAction('Enter'), { type: 'endTurn', force: false });
+  assert.deepEqual(keyAction('Enter', true), { type: 'endTurn', force: true });
+  assert.deepEqual(keyAction('e'), { type: 'endTurn', force: false });
+  assert.equal(keyAction('F').type, 'fortify');
+  assert.equal(keyAction('z').type, 'undo');
+  assert.equal(keyAction('?', true).type, 'help');
+  assert.equal(keyAction('Escape').type, 'escape');
+  const types = Object.keys(UNIT_TYPES);
+  types.forEach((t, i) => {
+    assert.deepEqual(keyAction(String(i + 1)), { type: 'recruit', unitType: t });
+    assert.equal(recruitKey(t), String(i + 1));
+  });
+  assert.equal(keyAction(String(types.length + 1)), null);
+  assert.equal(keyAction('x'), null);
+  // every entry has overlay text, and no key is claimed by two entries
+  for (const sc of SHORTCUTS) assert.ok(sc.keys && sc.text);
+  for (const [k, shift] of [['Tab', false], ['Enter', false], ['Enter', true], ['f', false], ['1', false], ['?', true]]) {
+    assert.equal(SHORTCUTS.filter((sc) => sc.match(k, shift)).length, 1, `${k}${shift ? '+shift' : ''}`);
+  }
 });

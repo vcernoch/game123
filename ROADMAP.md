@@ -45,10 +45,10 @@ Check off `[x]` when done. Add new ideas to the end of the relevant phase or to 
 - [x] Multi-turn move orders: a far target becomes the unit's destination and it keeps walking at the start of each turn
 - [x] More buildings: watchtower, infirmary, temple, academy (Vladimír's request)
 
-## Phase 5 – map and information (own improvements)
+## Phase 5 – map and information (own improvements) ✅
 - [x] Map resources: gold mines and horse pastures in city territory (more income, cheaper horsemen)
 - [x] Unit tooltip: hovering any visible unit shows its stats, HP, rank and state
-- [ ] Keyboard shortcuts: number keys recruit in the selected city, `?` shows a shortcut overlay
+- [x] Keyboard shortcuts: number keys recruit in the selected city, `?` shows a shortcut overlay
 
 ## Ideas (unordered)
 - Diplomacy with multiple AIs

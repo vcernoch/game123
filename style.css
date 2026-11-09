@@ -130,3 +130,11 @@ fieldset small, .check small { display: block; color: var(--muted); margin-left:
 #end-turn.armed { background: #e07a3a; color: #fff; }
 .order { color: #ffe27a; }
 .resource { color: #f2c94c; }
+kbd { font: 600 11px ui-monospace, monospace; background: #3c434f; color: var(--text); border-radius: 4px; padding: 1px 5px; border-bottom: 2px solid #20242c; }
+.hotkey { margin-right: 4px; opacity: 0.85; }
+@media (hover: none) { .hotkey { display: none; } }
+#keys-list { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; margin: 0 0 12px; font-size: 14px; }
+#keys-list dt { white-space: nowrap; }
+#keys-list dd { margin: 0; color: var(--muted); }
+#keys-dialog form { display: flex; justify-content: flex-end; }
+.keys-btn { margin-top: 8px; }

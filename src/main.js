@@ -11,6 +11,7 @@ import { createSound, soundFor } from './sound.js';
 import { chartSvg, summaryRows } from './stats.js';
 import { GAME_VERSION, GAME_DATE } from './version.js';
 import { runAITurn } from './ai.js';
+import { SHORTCUTS, keyAction, recruitKey } from './keys.js';
 import { render, canvasSize, pickHex } from './render.js';
 import { key } from './hex.js';
 import {
@@ -179,7 +180,7 @@ function updateHud() {
       for (const [type, t] of Object.entries(UNIT_TYPES)) {
         const cost = unitCost(state, city, type);
         const dis = blocked || state.gold[0] < cost ? 'disabled' : '';
-        html += `<button data-buy="${type}" ${dis} title="${t.desc || ''}">${t.name} <small>${cost} gold</small></button>`;
+        html += `<button data-buy="${type}" ${dis} title="${t.desc ? `${t.desc} · ` : ''}key ${recruitKey(type)}"><span><kbd class="hotkey">${recruitKey(type)}</kbd> ${t.name}</span> <small>${cost} gold</small></button>`;
       }
       html += '</div>';
       if (blocked) html += '<p class="hint">The city is occupied – move the unit out first.</p>';
@@ -602,20 +603,39 @@ $('info').addEventListener('click', (ev) => {
     return;
   }
   const btn = ev.target.closest('button[data-buy]');
-  if (!btn || !selectedCityId) return;
-  if (!busy() && buyUnit(state, selectedCityId, btn.dataset.buy)) { undoStack = []; sound.play('recruit'); afterAction(); }
+  if (btn) recruitSelected(btn.dataset.buy);
 });
+// Shortcut overlay, generated from the same table as the key handling.
+$('keys-open').addEventListener('click', () => $('keys-dialog').showModal());
+$('keys-list').innerHTML = SHORTCUTS.map((s) => `<dt><kbd>${s.keys}</kbd></dt><dd>${s.text}</dd>`).join('');
+
 window.addEventListener('keydown', (ev) => {
   if ($('new-game-dialog').open) return; // keys belong to the dialog
-  if (ev.key === 'Enter' || ev.key === 'e') doEndTurn(ev.shiftKey);
-  if (ev.key === 'Tab') { ev.preventDefault(); selectNextUnit(); }
-  if (ev.key === 'z' || ev.key === 'Z') { ev.preventDefault(); undoMove(); }
-  if (ev.key === 'f' || ev.key === 'F') { ev.preventDefault(); fortifySelected(); }
-  if (ev.key === 'Escape') {
+  if (ev.ctrlKey || ev.metaKey || ev.altKey) return; // leave browser shortcuts alone
+  const act = keyAction(ev.key, ev.shiftKey);
+  if (!act) return;
+  if ($('keys-dialog').open) {
+    if (act.type === 'help') $('keys-dialog').close(); // Esc is handled by the dialog itself
+    return;
+  }
+  if (act.type !== 'endTurn' && act.type !== 'escape') ev.preventDefault();
+  if (act.type === 'endTurn') doEndTurn(act.force);
+  else if (act.type === 'nextUnit') selectNextUnit();
+  else if (act.type === 'undo') undoMove();
+  else if (act.type === 'fortify') fortifySelected();
+  else if (act.type === 'recruit') recruitSelected(act.unitType);
+  else if (act.type === 'help') $('keys-dialog').showModal();
+  else if (act.type === 'escape') {
     if (busy()) { anim.skip(); return; }
     selectedId = null; selectedCityId = null; pending = null; draw();
   }
 });
+
+// Recruits in the selected own city (number keys and the panel buttons).
+function recruitSelected(type) {
+  if (busy() || !selectedCityId) return;
+  if (buyUnit(state, selectedCityId, type)) { undoStack = []; sound.play('recruit'); afterAction(); }
+}
 
 // Selects the next unit that can still act (Tab / button).
 function selectNextUnit() {

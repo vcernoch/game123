@@ -2,6 +2,13 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-09 – Keyboard shortcuts → v0.11.0
+- New `src/keys.js`: one `SHORTCUTS` table drives both the key handling (`keyAction`) and the overlay, so they can't disagree. Added to the structure list in `CLAUDE.md`.
+- New: number keys 1–5 recruit the matching unit in the selected city (the numbers are shown on the recruit buttons, hidden on touch screens); `?` (or the "⌨ Keyboard shortcuts" button under "How to play") opens a list of all shortcuts, Esc or `?` closes it. Existing keys (Tab, Enter/E, Shift+Enter, F, Z, Esc) now go through the table; shortcuts with Ctrl/Cmd/Alt are left to the browser.
+- Tests: +1 logic (every key maps to the right action, recruit numbers match the unit order, no key claimed twice). Smoke test recruits an archer with key 2 and opens/closes the overlay (`artifacts/screenshot-keys.png`).
+- Status: `npm run check` green (52 logic tests + smoke).
+- Run summary: phase 5 (own improvements) done – map resources, unit tooltip, keyboard shortcuts. Version 0.11.0. Vladimír will merge `dev` later.
+
 ## 2026-11-09 – Unit tooltip
 - `unitSummary(state, unit)` in `game.js`: name, owner, HP, effective attack (rank) and defense where the unit stands (rank, terrain, own city / walls, fortify), range, move, rank, fortified / marching, plus the reasons for the defense bonus.
 - Hovering any visible unit (own or enemy) shows it in the tooltip on two lines; a city under the unit adds a third line with the city summary. The attack preview still takes priority when the selected unit can attack the hovered one. On touch there is no hover – tapping a unit shows it in the panel as before.

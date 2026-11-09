@@ -258,6 +258,31 @@ try {
   if (!hasMarket) throw new Error('market was not built');
   await page.screenshot({ path: 'artifacts/screenshot-city-panel.png' });
 
+  // number key recruits in the selected city (the capital must be empty first)
+  await page.evaluate(() => {
+    const st = window.__game.getState();
+    const c = st.cities.find((x) => x.owner === 0 && x.capital);
+    st.units = st.units.filter((u) => u.q !== c.q || u.r !== c.r);
+    window.__game.refresh();
+  });
+  await page.mouse.click(capPt.x, capPt.y);
+  await page.keyboard.press('2');
+  await page.waitForFunction(() => !window.__game.isBusy(), null, { timeout: 5000 });
+  const recruited = await page.evaluate(() => {
+    const st = window.__game.getState();
+    const c = st.cities.find((x) => x.owner === 0 && x.capital);
+    const u = st.units.find((x) => x.q === c.q && x.r === c.r);
+    return u && u.type;
+  });
+  if (recruited !== 'archer') throw new Error(`key 2 did not recruit an archer: ${recruited}`);
+
+  // ? opens the shortcut overlay, Esc closes it
+  await page.keyboard.press('?');
+  if (!(await page.evaluate(() => document.getElementById('keys-dialog').open))) throw new Error('? did not open the shortcuts');
+  await page.screenshot({ path: 'artifacts/screenshot-keys.png' });
+  await page.keyboard.press('Escape');
+  if (await page.evaluate(() => document.getElementById('keys-dialog').open)) throw new Error('Esc did not close the shortcuts');
+
   // sound toggle
   await page.click('#sound');
   if ((await page.getAttribute('#sound', 'aria-pressed')) !== 'false') throw new Error('sound cannot be turned off');
