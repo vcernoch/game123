@@ -2,7 +2,7 @@
 import {
   createGame, reachable, attackTargets, moveUnit, attack, buyUnit, endTurn,
   unitAt, cityAt, getUnit, incomeOf, previewAttack, tileAt, pathTo, nextActiveUnit, cityInfo,
-  cloneState, drainEvents, migrateState, logFor, isUndoableMove, canFortify, fortify, activeUnits, territoryOwner, visibleTiles, exploredTiles, build, unitCost, hasBuilding,
+  cloneState, drainEvents, migrateState, logFor, isUndoableMove, canFortify, fortify, activeUnits, territoryOwner, planRoute, setOrder, runOrders, cancelOrder, visibleTiles, exploredTiles, build, unitCost, hasBuilding,
   rankOf, rankMult, buildingCost, unitMove, factionOf, riverDefense,
 } from './game.js';
 import { createAnimator } from './anim.js';
@@ -102,6 +102,23 @@ function draw() {
   updateHud();
 }
 
+// What route to draw: a move this turn (solid), a multi-turn order to the hovered tile (dashed,
+// with the number of turns), or the selected unit's current order.
+function pathView(u, mine) {
+  if (!mine) return {};
+  if (hover && !seenUnitAt(hover.q, hover.r)) {
+    const near = pathTo(state, u, hover.q, hover.r);
+    if (near) return { path: near };
+    const far = planRoute(state, u, hover.q, hover.r);
+    if (far) return { path: far.path, pathTurns: far.turns };
+  }
+  if (u.goto) {
+    const cur = planRoute(state, u, u.goto.q, u.goto.r);
+    if (cur) return { path: cur.path, pathTurns: cur.turns, pathFaint: true };
+  }
+  return {};
+}
+
 function drawBoard() {
   const u = selectedUnit();
   const mine = u && u.owner === state.current && !busy();
@@ -115,7 +132,7 @@ function drawBoard() {
     reachable: mine ? reachable(state, u) : null,
     targets: mine ? new Set(attackTargets(state, u).map((t) => t.id)) : null,
     hover,
-    path: mine && hover && !seenUnitAt(hover.q, hover.r) ? pathTo(state, u, hover.q, hover.r) : null,
+    ...pathView(u, mine),
   });
 }
 
@@ -137,6 +154,11 @@ function updateHud() {
       <p>HP ${u.hp}/${t.hp} · Attack ${fmt(t.atk * rankMult(u))} · Defense ${fmt(t.def * rankMult(u))} · Range ${t.range}</p>
       <p>Move ${fmt(u.movesLeft)}/${unitMove(state, u)}${u.fortified ? '' : u.hasAttacked ? ' · already attacked' : ''}</p>
       <p>${rankLine(u)}</p>${t.desc ? `<p class="hint">${t.desc}</p>` : ''}`;
+    if (u.goto && u.owner === 0) {
+      const r = planRoute(state, u, u.goto.q, u.goto.r);
+      html += `<p class="order">➜ Marching to a target${r ? ` · ${r.turns} turn${r.turns === 1 ? '' : 's'}` : ''}</p>`;
+      if (!busy()) html += '<button data-cancel-order class="secondary wide-btn">✖ Cancel order</button>';
+    }
     if (u.fortified) html += `<p class="fortified">⛨ Fortified: +${Math.round(FORTIFY.defBonus * 100)} % defense until it moves or attacks</p>`;
     if (u.owner === 0 && !busy() && canFortify(state, u)) {
       html += `<button data-fortify class="secondary wide-btn" title="Dig in: +${Math.round(FORTIFY.defBonus * 100)} % defense, ends the unit's turn (F)">⛨ Fortify</button>`;
@@ -196,7 +218,10 @@ function updateHud() {
       const pr = previewAttack(state, u, target);
       html += `<p class="confirm">${riverDefense(state, u, target) ? 'Attack across a river' : 'Attack'}: −${pr.damage}${pr.kills ? ' (destroys)' : ''}, counter −${pr.counter}.<br>Tap the target again to confirm.</p>`;
     } else {
-      html += '<p class="confirm">Tap the target again to confirm the move.</p>';
+      const far = !reachable(state, u).has(key(pending.q, pending.r)) && planRoute(state, u, pending.q, pending.r);
+      html += far
+        ? `<p class="confirm">Tap the target again to send the unit there (${far.turns} turns).</p>`
+        : '<p class="confirm">Tap the target again to confirm the move.</p>';
     }
   }
   if (!html) {
@@ -281,6 +306,15 @@ function onClick(ev) {
     undoStack = [];
     if (!getUnit(state, act.unitId)) selectedId = null;
     if (touch) hover = null;
+    afterAction(before);
+    return;
+  }
+  if (act.type === 'goto') {
+    const before = cloneState(state);
+    const result = setOrder(state, act.unitId, act.q, act.r);
+    undoStack = [];
+    if (touch) hover = null;
+    if (result === 'interrupted') showNotice([], [orderText(getUnit(state, act.unitId), result)]);
     afterAction(before);
     return;
   }
@@ -406,16 +440,37 @@ function doEndTurn(force = false) {
     const happened = drainEvents(state).filter((e) => e.type === 'happening' && e.player === 0);
     save();
     await anim.play(before, events);
+    // the player's units with move orders walk on
+    const beforeOrders = cloneState(state);
+    const orders = state.winner === null && state.current === 0 ? runOrders(state, 0) : [];
+    const walked = drainEvents(state);
+    save();
+    if (walked.length) await anim.play(beforeOrders, walked);
     aiRunning = false;
-    showNotice(happened);
+    const stopped = orders.filter((o) => o.result === 'interrupted' || o.result === 'blocked')
+      .map((o) => orderText(getUnit(state, o.unitId), o.result));
+    showNotice(happened, stopped);
     draw();
   }, 250);
 }
 
+// Why a move order stopped, for the banner.
+function orderText(unit, result) {
+  const name = unit ? UNIT_TYPES[unit.type].name : 'A unit';
+  return result === 'interrupted' ? `${name} stopped its march: enemy in sight.` : `${name} can't get through – order cancelled.`;
+}
+
 // Banner for a random event that hit the player at the start of the turn (cleared at the next end of turn).
-function showNotice(happened) {
+// extra = further messages (stopped move orders) appended to the banner.
+function showNotice(happened, extra = []) {
   const el = $('notice');
-  if (!happened.length) { el.hidden = true; return; }
+  if (!happened.length && !extra.length) { el.hidden = true; return; }
+  if (!happened.length) {
+    el.textContent = extra.join(' ');
+    el.className = 'bad';
+    el.hidden = false;
+    return;
+  }
   const ev = happened[0];
   const city = state.cities.find((c) => c.id === ev.cityId);
   const name = HAPPENINGS.kinds[ev.kind].name;
@@ -426,6 +481,7 @@ function showNotice(happened) {
   else if (ev.suppressed) text += ', but the garrison kept order.';
   else text += `: the city paid no taxes this turn (${ev.gold} gold).`;
   const good = ev.kind === 'harvest' || ev.suppressed;
+  if (extra.length) text += ` ${extra.join(' ')}`;
   el.textContent = text;
   el.className = good ? 'good' : 'bad';
   el.hidden = false;
@@ -518,6 +574,7 @@ $('next-unit').addEventListener('click', selectNextUnit);
 $('info').addEventListener('click', (ev) => {
   if (ev.target.closest('button[data-undo]')) { undoMove(); return; }
   if (ev.target.closest('button[data-fortify]')) { fortifySelected(); return; }
+  if (ev.target.closest('button[data-cancel-order]') && selectedId) { cancelOrder(state, selectedId); save(); draw(); return; }
   const bBtn = ev.target.closest('button[data-build]');
   if (bBtn && selectedCityId && !busy()) {
     if (build(state, selectedCityId, bBtn.dataset.build)) { undoStack = []; drainEvents(state); sound.play('build'); afterAction(); }

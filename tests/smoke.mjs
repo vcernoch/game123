@@ -181,6 +181,37 @@ try {
   }
   await page.screenshot({ path: 'artifacts/screenshot-fortify.png' });
 
+  // move order: hovering a far known tile shows a dashed route, a click sends the unit, it walks on next turn
+  await page.evaluate(() => window.__game.newGame(31, { fog: false }));
+  const order = await page.evaluate(async () => {
+    const g = await import('./src/game.js');
+    const rnd = await import('./src/render.js');
+    const st = window.__game.getState();
+    window.__game.nextUnit();
+    const u = g.getUnit(st, window.__game.selectedId());
+    const reach = g.reachable(st, u);
+    let best = null;
+    for (const t of Object.values(st.tiles)) {
+      if (reach.has(`${t.q},${t.r}`) || g.unitAt(st, t.q, t.r) || g.cityAt(st, t.q, t.r)) continue;
+      const r = g.planRoute(st, u, t.q, t.r);
+      if (r && r.turns === 3 && (!best || r.path.length > best.len)) best = { q: t.q, r: t.r, len: r.path.length };
+    }
+    const c = rnd.tileCenter(best.q, best.r);
+    const rect = document.getElementById('board').getBoundingClientRect();
+    const k = rect.width / rnd.canvasSize(st).w;
+    return { id: u.id, q: best.q, r: best.r, x: rect.left + c.x * k, y: rect.top + c.y * k };
+  });
+  await page.mouse.move(order.x, order.y);
+  await page.screenshot({ path: 'artifacts/screenshot-order.png' });
+  await page.mouse.click(order.x, order.y);
+  await page.waitForFunction(() => !window.__game.isBusy(), null, { timeout: 5000 });
+  const afterOrder = await page.evaluate((id) => { const u = window.__game.getState().units.find((x) => x.id === id); return { goto: u.goto, q: u.q, r: u.r }; }, order.id);
+  if (!afterOrder.goto || afterOrder.goto.q !== order.q) throw new Error(`move order not set: ${JSON.stringify(afterOrder)}`);
+  await page.evaluate(() => window.__game.endTurn());
+  await page.waitForFunction(() => !window.__game.isBusy() && window.__game.getState().current === 0, null, { timeout: 15000 });
+  const walked = await page.evaluate((id) => { const u = window.__game.getState().units.find((x) => x.id === id); return u && { q: u.q, r: u.r, goto: u.goto }; }, order.id);
+  if (walked && walked.q === afterOrder.q && walked.r === afterOrder.r && walked.goto) throw new Error('the unit did not walk on at the start of the turn');
+
   // end-turn reminder: with idle units the first press only asks, the second ends the turn
   await page.evaluate(() => window.__game.newGame(4242));
   const label0 = await page.textContent('#end-turn');

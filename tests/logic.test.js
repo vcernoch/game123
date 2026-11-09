@@ -6,7 +6,7 @@ import {
   drainEvents, applyEvent, migrateState, STATE_VERSION,
   visibleTiles, exploredTiles, build, unitCost, rankOf, stepCost, getUnit,
   buildingCost, unitMove, factionOf, armyPower, riverBetween, riverDefense,
-  rollHappening, applyHappening, cityIncome, logFor, isUndoableMove, canFortify, fortify, activeUnits, territoryMap, territoryOwner,
+  rollHappening, applyHappening, cityIncome, logFor, isUndoableMove, canFortify, fortify, activeUnits, territoryMap, territoryOwner, planRoute, setOrder, runOrders, cancelOrder,
 } from '../src/game.js';
 import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
@@ -1098,4 +1098,103 @@ test('territory: nearest city within the radius, no water, resting heals more', 
   assert.equal(territoryOwner(s, neutral.q, neutral.r), null);
   neutral.owner = 1;
   assert.equal(territoryOwner(s, neutral.q, neutral.r), 1);
+});
+
+test('move orders: a far target is walked over several turns', () => {
+  const s = createGame({ seed: 31, fog: false });
+  s.units = s.units.filter((u) => u.owner === 0);
+  const u = s.units.find((x) => x.type === 'warrior');
+  // the farthest passable free tile with a route
+  let target = null;
+  for (const t of Object.values(s.tiles)) {
+    if (!isPassable(s, t.q, t.r) || unitAt(s, t.q, t.r) || s.cities.some((c) => c.q === t.q && c.r === t.r)) continue;
+    const r = planRoute(s, u, t.q, t.r);
+    if (r && (!target || r.turns > target.route.turns)) target = { t, route: r };
+  }
+  assert.ok(target && target.route.turns >= 3, 'a target at least 3 turns away');
+  const { path } = target.route;
+  for (let i = 1; i < path.length; i++) assert.equal(distance(path[i - 1], path[i]), 1);
+  assert.equal(setOrder(s, u.id, target.t.q, target.t.r), 'moved');
+  assert.ok(u.goto, 'the order stays on the unit');
+  assert.equal(u.movesLeft, 0, 'it walked as far as it could this turn');
+  let turns = 1;
+  let result = 'moved';
+  while (result === 'moved' && turns < 20) {
+    endTurn(s); endTurn(s); // AI does nothing
+    result = runOrders(s, 0)[0].result;
+    turns++;
+  }
+  assert.equal(result, 'arrived');
+  assert.equal(turns, target.route.turns, 'the turn estimate was right');
+  assert.ok(u.q === target.t.q && u.r === target.t.r && !u.goto);
+  assert.equal(runOrders(s, 0).length, 0);
+  assert.ok(JSON.parse(JSON.stringify(s)));
+});
+
+test('move orders: interrupted by an enemy, cancelled by manual actions, no route through the unknown', () => {
+  const base = createGame({ seed: 31, fog: false });
+  base.units = base.units.filter((x) => x.owner === 0);
+  const pick = (s) => {
+    const u = s.units.find((x) => x.type === 'warrior');
+    const t = Object.values(s.tiles).find((x) => {
+      const r = isPassable(s, x.q, x.r) && !unitAt(s, x.q, x.r) && planRoute(s, u, x.q, x.r);
+      return r && r.turns >= 3;
+    });
+    return { u, t };
+  };
+  // an enemy comes into sight → the order stops at the start of the turn without moving
+  let s = cloneState(base);
+  let { u, t } = pick(s);
+  setOrder(s, u.id, t.q, t.r);
+  endTurn(s); endTurn(s);
+  const spot = neighbors(u.q, u.r).find((n) => isPassable(s, n.q, n.r) && !unitAt(s, n.q, n.r));
+  s.units.push({ id: 700, type: 'warrior', owner: 1, q: spot.q, r: spot.r, hp: 10, movesLeft: 0, hasAttacked: true, xp: 0 });
+  const at = { q: u.q, r: u.r };
+  assert.equal(runOrders(s, 0)[0].result, 'interrupted');
+  assert.ok(!u.goto && u.q === at.q && u.r === at.r);
+  // a manual move, an attack or fortify cancels the order; cancelOrder too
+  s = cloneState(base);
+  ({ u, t } = pick(s));
+  setOrder(s, u.id, t.q, t.r);
+  endTurn(s); endTurn(s);
+  const [k] = reachable(s, u).keys();
+  const [mq, mr] = k.split(',').map(Number);
+  moveUnit(s, u.id, mq, mr);
+  assert.ok(!u.goto);
+  setOrder(s, u.id, t.q, t.r);
+  cancelOrder(s, u.id);
+  assert.ok(!u.goto);
+  // with fog: an unexplored tile can't be a target, the route only uses explored tiles
+  const f = createGame({ seed: 31 });
+  const fu = f.units.find((x) => x.owner === 0);
+  const known = exploredTiles(f, 0);
+  const unknown = Object.values(f.tiles).find((x) => !known.has(key(x.q, x.r)) && isPassable(f, x.q, x.r));
+  assert.equal(planRoute(f, fu, unknown.q, unknown.r), null);
+  assert.equal(setOrder(f, fu.id, unknown.q, unknown.r), null);
+  for (const x of Object.values(f.tiles)) {
+    const r = known.has(key(x.q, x.r)) && planRoute(f, fu, x.q, x.r);
+    if (r) assert.ok(r.path.every((p) => known.has(key(p.q, p.r))));
+  }
+  // migration
+  const old = createGame({ seed: 2 });
+  old.version = 13;
+  assert.equal(migrateState(old).version, STATE_VERSION);
+});
+
+test('move orders: a tap on a far known tile gives an order (touch needs confirmation)', () => {
+  const s = createGame({ seed: 31, fog: false });
+  const u = s.units.find((x) => x.owner === 0 && x.type === 'warrior');
+  const reach = reachable(s, u);
+  const far = Object.values(s.tiles).find((t) => !reach.has(key(t.q, t.r)) && !unitAt(s, t.q, t.r)
+    && !s.cities.some((c) => c.q === t.q && c.r === t.r) && planRoute(s, u, t.q, t.r));
+  assert.deepEqual(decideTap(s, { selectedId: u.id }, far.q, far.r), { type: 'goto', unitId: u.id, q: far.q, r: far.r });
+  const first = decideTap(s, { selectedId: u.id, confirm: true }, far.q, far.r);
+  assert.equal(first.kind, 'goto');
+  assert.equal(decideTap(s, { selectedId: u.id, confirm: true, pending: { q: far.q, r: far.r } }, far.q, far.r).type, 'goto');
+  // a far own city is still selected, a foreign one can be marched to
+  s.units = s.units.filter((x) => x.owner !== 1);
+  const enemyCap = s.cities.find((c) => c.owner === 1);
+  if (!reach.has(key(enemyCap.q, enemyCap.r))) assert.equal(decideTap(s, { selectedId: u.id }, enemyCap.q, enemyCap.r).type, 'goto');
+  const myCity = s.cities.find((c) => c.owner === 0);
+  if (myCity.q !== u.q || myCity.r !== u.r) assert.notEqual(decideTap(s, { selectedId: u.id }, myCity.q, myCity.r).type, 'goto');
 });

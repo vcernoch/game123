@@ -38,11 +38,11 @@ Check off `[x]` when done. Add new ideas to the end of the relevant phase or to 
 - [x] Undo move (Z): a move that revealed nothing new can be taken back (own improvement)
 - [x] Whole project in English: game UI, code comments, tests and docs (Vladimír's request)
 
-## Phase 4 – tactics and comfort (own improvements)
+## Phase 4 – tactics and comfort (own improvements) ✅
 - [x] Fortify (F): a unit that hasn't acted digs in for +25 % defense until it moves or attacks; AI garrisons fortify too
 - [x] End-turn reminder: the button shows how many units can still act, a second press confirms
 - [x] City borders: tiles around each city drawn as territory in the owner's colour; resting in own territory heals more
-- [ ] Multi-turn move orders: a far target becomes the unit's destination and it keeps walking at the start of each turn
+- [x] Multi-turn move orders: a far target becomes the unit's destination and it keeps walking at the start of each turn
 
 ## Ideas (unordered)
 - Diplomacy with multiple AIs

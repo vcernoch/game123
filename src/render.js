@@ -84,7 +84,7 @@ export function render(ctx, state, view = {}) {
 
   for (const city of state.cities) if (known(city.q, city.r)) drawCity(ctx, city);
 
-  if (view.path && view.path.length > 1) drawPath(ctx, view.path);
+  if (view.path && view.path.length > 1) drawPath(ctx, view.path, view.pathTurns, view.pathFaint);
 
   // animated units are drawn last so they sit on top
   const moving = view.unitPos || new Map();
@@ -128,7 +128,9 @@ function drawFloater(ctx, f) {
 }
 
 // Movement path: polyline through tile centers with an arrow at the end.
-function drawPath(ctx, path) {
+// turns = set for a multi-turn order: the line is dashed and the arrow shows the number of turns;
+// faint = the selected unit's current order (drawn lighter).
+function drawPath(ctx, path, turns = null, faint = false) {
   const pts = path.map((p) => tileCenter(p.q, p.r));
   const end = pts[pts.length - 1];
   const prev = pts[pts.length - 2];
@@ -139,6 +141,8 @@ function drawPath(ctx, path) {
   ctx.save();
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
+  if (faint) ctx.globalAlpha = 0.6;
+  if (turns) ctx.setLineDash([8, 6]);
   for (const [color, width] of [['rgba(0,0,0,0.45)', 7], ['#ffe27a', 4]]) {
     ctx.beginPath();
     ctx.moveTo(pts[0].x, pts[0].y);
@@ -148,6 +152,7 @@ function drawPath(ctx, path) {
     ctx.lineWidth = width;
     ctx.stroke();
   }
+  ctx.setLineDash([]);
   ctx.beginPath();
   ctx.moveTo(tip.x + Math.cos(ang) * 2, tip.y + Math.sin(ang) * 2);
   ctx.lineTo(base.x + Math.cos(ang + Math.PI / 2) * 8, base.y + Math.sin(ang + Math.PI / 2) * 8);
@@ -158,13 +163,30 @@ function drawPath(ctx, path) {
   ctx.lineWidth = 1.5;
   ctx.fill();
   ctx.stroke();
-  // dots on intermediate tiles
-  ctx.fillStyle = '#ffe27a';
-  for (let i = 1; i < pts.length - 1; i++) {
+  if (turns) {
+    // number of turns in a badge next to the target
+    const label = `${turns} turn${turns === 1 ? '' : 's'}`;
+    ctx.font = 'bold 12px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const bx = end.x;
+    const by = end.y - 20;
+    const w = ctx.measureText(label).width + 10;
+    ctx.fillStyle = 'rgba(20,22,30,0.85)';
     ctx.beginPath();
-    ctx.arc(pts[i].x, pts[i].y, 4, 0, Math.PI * 2);
+    ctx.roundRect(bx - w / 2, by - 9, w, 18, 9);
     ctx.fill();
-    ctx.stroke();
+    ctx.fillStyle = '#ffe27a';
+    ctx.fillText(label, bx, by + 1);
+  } else {
+    // dots on intermediate tiles
+    ctx.fillStyle = '#ffe27a';
+    for (let i = 1; i < pts.length - 1; i++) {
+      ctx.beginPath();
+      ctx.arc(pts[i].x, pts[i].y, 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
   }
   ctx.restore();
 }

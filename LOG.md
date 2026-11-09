@@ -2,6 +2,16 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-09 – Multi-turn move orders → v0.9.0
+- **Question for Vladimír (still open):** more AI opponents / scenarios with their own objectives change the victory rules – say "scenarios yes" or "more AI yes" if you want them. Please also merge `dev` into `main` (v0.9.0).
+- `planRoute()` in `game.js`: cheapest route to any known tile using only what the player knows (explored tiles, blocked by enemies the player can see, own units can be walked through) plus the number of turns by the same rules as `reachable()`.
+- `setOrder()` stores `unit.goto` and walks right away; `runOrders()` at the start of the player's turn walks each ordered unit to the farthest tile of the route reachable this turn (`followOrder`). The order ends when the unit arrives; it is cancelled when the way is blocked, when an enemy comes within 2 tiles in sight (before or after the step – the player decides), and by any manual move, attack, fortify or "✖ Cancel order".
+- UI: hovering a known tile out of reach shows a dashed route with a "N turns" badge, a click (on touch: tap twice) gives the order. A far own city is still selected on click (recruiting); foreign cities can be marched to. The selected unit's current order is drawn faintly, the panel shows "➜ Marching to a target · N turns". Stopped orders are announced in the banner under the header. Help text updated.
+- State: `state.version` 14 (optional `unit.goto`).
+- Tests: +3 logic (route along neighbouring tiles, the turn estimate matches the real march over several turns, arrival clears the order; interruption by an enemy, cancelling by a manual move and `cancelOrder`, no route through unexplored tiles; tap → goto with touch confirmation, own vs. foreign city). Smoke test hovers a 3-turn target (`artifacts/screenshot-order.png`), gives the order by click and checks the unit walks on after the AI turn.
+- Status: `npm run check` green (48 logic tests + smoke).
+- Run summary: phase 4 (own improvements) is done – fortify, end-turn reminder, city borders, move orders. Version 0.9.0.
+
 ## 2026-11-09 – City borders and territory
 - `territoryMap()` / `territoryOwner()` in `game.js`, `TERRITORY` in `rules.js`: every non-water tile up to 2 tiles from a city belongs to the nearest city (ties → lower city id). It only depends on city positions; the owner follows the city.
 - Gameplay: a unit resting (not moved) in its own territory outside a city heals +2 instead of +1 (`endTurn`). Small, symmetric, gives borders a purpose and makes falling back home worthwhile; the AI's retreat logic benefits automatically.

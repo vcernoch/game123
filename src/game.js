@@ -94,7 +94,7 @@ function countStat(state, name, player) {
   state.stats[name][player]++;
 }
 
-export const STATE_VERSION = 13;
+export const STATE_VERSION = 14;
 
 // Converts a saved state of an older version to the current one; returns null for an unknown format.
 export function migrateState(s) {
@@ -150,6 +150,10 @@ export function migrateState(s) {
   if (s.version === 12) {
     // fortify arrived in version 13 – a missing `fortified` means not fortified
     s.version = 13;
+  }
+  if (s.version === 13) {
+    // move orders arrived in version 14 – a missing `goto` means no order
+    s.version = 14;
   }
   return s.version === STATE_VERSION ? s : null;
 }
@@ -440,6 +444,127 @@ export function pathTo(state, unit, q, r) {
   return path;
 }
 
+// ---------- multi-turn move orders ----------
+
+// Route to a far tile for a player's unit, using only what the player knows: explored passable tiles,
+// blocked by enemy units the player can see right now (own units can be walked through).
+// Returns { path: [{q,r}…] from the unit to the target, turns } or null. turns = turns needed
+// counting the current one (by the same rules as reachable(): a first step may use up the last points).
+export function planRoute(state, unit, q, r) {
+  const target = key(q, r);
+  const explored = exploredTiles(state, unit.owner);
+  const visible = visibleTiles(state, unit.owner);
+  const blocked = (tq, tr) => {
+    const o = unitAt(state, tq, tr);
+    return o && o.owner !== unit.owner && visible.has(key(tq, tr));
+  };
+  if (!explored.has(target) || !isPassable(state, q, r) || (unit.q === q && unit.r === r)) return null;
+  const occupant = unitAt(state, q, r);
+  if (occupant && (occupant.owner === unit.owner || visible.has(target))) return null;
+  const best = new Map([[key(unit.q, unit.r), 0]]);
+  const parent = new Map();
+  const frontier = [{ q: unit.q, r: unit.r, cost: 0 }];
+  while (frontier.length) {
+    frontier.sort((a, b) => a.cost - b.cost);
+    const cur = frontier.shift();
+    if (key(cur.q, cur.r) === target) break;
+    for (const n of neighbors(cur.q, cur.r)) {
+      const k = key(n.q, n.r);
+      if (!explored.has(k) || !isPassable(state, n.q, n.r) || blocked(n.q, n.r)) continue;
+      const cost = cur.cost + stepCost(state, cur, n, unit);
+      if (best.has(k) && best.get(k) <= cost) continue;
+      best.set(k, cost);
+      parent.set(k, key(cur.q, cur.r));
+      frontier.push({ q: n.q, r: n.r, cost });
+    }
+  }
+  if (!best.has(target)) return null;
+  const path = [];
+  for (let k = target; k !== undefined; k = parent.get(k)) {
+    const [pq, pr] = k.split(',').map(Number);
+    path.unshift({ q: pq, r: pr });
+  }
+  return { path, turns: routeTurns(state, unit, path) };
+}
+
+function routeTurns(state, unit, path) {
+  const full = unitMove(state, unit);
+  let left = unit.movesLeft;
+  let fresh = left === full; // a first step this turn may use up the last points
+  let turns = 1;
+  for (let i = 1; i < path.length; i++) {
+    const c = stepCost(state, path[i - 1], path[i], unit);
+    if (c > left && !(fresh && left > 0)) {
+      turns++;
+      left = full;
+    }
+    left = Math.max(0, left - c);
+    fresh = false;
+  }
+  return turns;
+}
+
+// Gives a unit a move order and starts walking right away. Returns the result of followOrder.
+export function setOrder(state, unitId, q, r) {
+  const unit = getUnit(state, unitId);
+  if (!unit || unit.owner !== state.current || state.winner !== null || !planRoute(state, unit, q, r)) return null;
+  delete unit.fortified;
+  unit.goto = { q, r };
+  return followOrder(state, unit);
+}
+
+export function cancelOrder(state, unitId) {
+  const unit = getUnit(state, unitId);
+  if (unit) delete unit.goto;
+}
+
+// Visible enemy units within `radius` of the unit (used to interrupt move orders).
+function enemyInSight(state, unit, radius = 2) {
+  const visible = visibleTiles(state, unit.owner);
+  return state.units.some((u) => u.owner !== unit.owner && distance(u, unit) <= radius && visible.has(key(u.q, u.r)));
+}
+
+// One turn of walking along a move order: goes to the farthest tile on the route reachable this turn.
+// Result: 'arrived' | 'moved' | 'blocked' (no way – order cancelled) | 'interrupted' (enemy in sight –
+// order cancelled so the player decides) | 'idle' (no moves left).
+export function followOrder(state, unit) {
+  const goal = unit.goto;
+  if (!goal) return 'idle';
+  if (unit.movesLeft <= 0) return 'idle';
+  const route = planRoute(state, unit, goal.q, goal.r);
+  if (!route) { delete unit.goto; return 'blocked'; }
+  const reach = reachable(state, unit);
+  let stop = null;
+  for (let i = route.path.length - 1; i > 0; i--) {
+    const p = route.path[i];
+    if (reach.has(key(p.q, p.r))) { stop = p; break; }
+  }
+  if (!stop) { delete unit.goto; return 'blocked'; }
+  moveUnit(state, unit.id, stop.q, stop.r);
+  const u = getUnit(state, unit.id);
+  if (!u) return 'blocked';
+  if (u.q === goal.q && u.r === goal.r) return 'arrived';
+  if (enemyInSight(state, u)) return 'interrupted';
+  u.goto = goal;
+  return 'moved';
+}
+
+// At the start of a player's turn: units with orders walk on. An enemy already in sight stops the order
+// before moving. Returns [{ unitId, result }].
+export function runOrders(state, player) {
+  const out = [];
+  for (const unit of state.units.filter((u) => u.owner === player && u.goto)) {
+    if (state.winner !== null) break;
+    if (enemyInSight(state, unit)) {
+      delete unit.goto;
+      out.push({ unitId: unit.id, result: 'interrupted' });
+      continue;
+    }
+    out.push({ unitId: unit.id, result: followOrder(state, unit) });
+  }
+  return out;
+}
+
 // Own units that can still move or attack, sorted by id. Fortified units are left alone (like sleeping
 // units); they can still be selected by clicking. Used by Tab and by the end-turn reminder.
 export function activeUnits(state, player) {
@@ -484,6 +609,7 @@ export function fortify(state, unitId) {
   const unit = getUnit(state, unitId);
   if (!canFortify(state, unit)) return false;
   unit.fortified = true;
+  delete unit.goto;
   unit.movesLeft = 0;
   unit.hasAttacked = true;
   emit(state, { type: 'fortify', unitId: unit.id });
@@ -598,6 +724,7 @@ export function moveUnit(state, unitId, q, r) {
   unit.movesLeft = Math.max(0, unit.movesLeft - cost);
   unit.moved = true;
   delete unit.fortified;
+  delete unit.goto; // a manual move cancels a move order (followOrder puts it back)
   const city = cityAt(state, q, r);
   if (city && city.owner !== unit.owner) {
     const prev = city.owner;
@@ -621,6 +748,7 @@ export function attack(state, attackerId, defenderId) {
   if (!a || !d || a.owner !== state.current || state.winner !== null) return false;
   if (!attackTargets(state, a).includes(d)) return false;
   delete a.fortified; // attacking leaves the fortification before the fight
+  delete a.goto;
   const res = previewAttack(state, a, d);
   d.hp -= res.damage;
   a.hasAttacked = true;
