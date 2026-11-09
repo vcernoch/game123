@@ -2,6 +2,14 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-09 – City borders and territory
+- `territoryMap()` / `territoryOwner()` in `game.js`, `TERRITORY` in `rules.js`: every non-water tile up to 2 tiles from a city belongs to the nearest city (ties → lower city id). It only depends on city positions; the owner follows the city.
+- Gameplay: a unit resting (not moved) in its own territory outside a city heals +2 instead of +1 (`endTurn`). Small, symmetric, gives borders a purpose and makes falling back home worthwhile; the AI's retreat logic benefits automatically.
+- Drawing (`drawBorders` in `render.js`): a light tint of the owner's colour over the realm and a dashed border on edges towards another owner or no territory; neutral cities get a pale dashed border without tint. Dashes so borders can't be mistaken for rivers (solid double lines). Hovering a tile tells whose territory it is and the healing rule. Help text updated.
+- No state change (computed from city positions).
+- Tests: +1 logic (radius, no water, nearest city, coverage on all map sizes, owner follows the city, healing in vs. outside territory).
+- Status: `npm run check` green (45 logic tests + smoke).
+
 ## 2026-11-09 – End-turn reminder
 - `activeUnits(state, player)` in `game.js` (units that can still move or attack, fortified ones excluded); `nextActiveUnit` now uses it, so Tab and the reminder always agree.
 - The "End turn" button shows how many units can still act ("End turn · 3"). With idle units the first press (or Enter) only arms it – the button turns orange and reads "Really end?" for 4 s; a second press ends the turn. Shift+Enter ends right away. Fortify a unit (F) to stop being reminded about it.

@@ -6,7 +6,7 @@ import {
   drainEvents, applyEvent, migrateState, STATE_VERSION,
   visibleTiles, exploredTiles, build, unitCost, rankOf, stepCost, getUnit,
   buildingCost, unitMove, factionOf, armyPower, riverBetween, riverDefense,
-  rollHappening, applyHappening, cityIncome, logFor, isUndoableMove, canFortify, fortify, activeUnits,
+  rollHappening, applyHappening, cityIncome, logFor, isUndoableMove, canFortify, fortify, activeUnits, territoryMap, territoryOwner,
 } from '../src/game.js';
 import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
@@ -19,7 +19,7 @@ import { GAME_VERSION, GAME_DATE } from '../src/version.js';
 import { pathExists, generateMap, dirTo } from '../src/map.js';
 import { distance, key, neighbors } from '../src/hex.js';
 import {
-  FORTIFY, UNIT_TYPES, TERRAIN, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS,
+  FORTIFY, TERRITORY, ECONOMY, UNIT_TYPES, TERRAIN, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS,
 } from '../src/rules.js';
 
 test('map is deterministic and starting cities are connected', () => {
@@ -1061,4 +1061,41 @@ test('active units: who can still act (end-turn reminder and Tab)', () => {
   me.fortified = true;
   assert.equal(activeUnits(s, 0).length, 0, 'fortified units are not nagged about');
   assert.equal(activeUnits(s, 1).length, 0, 'not the AI\'s turn: its units have no moves');
+});
+
+test('territory: nearest city within the radius, no water, resting heals more', () => {
+  for (const size of ['small', 'medium', 'large']) {
+    const s = createGame({ seed: 13, size });
+    const terr = territoryMap(s);
+    for (const [k, id] of terr) {
+      const t = s.tiles[k];
+      assert.notEqual(t.terrain, 'water');
+      const c = s.cities.find((x) => x.id === id);
+      const d = distance(t, c);
+      assert.ok(d <= TERRITORY.radius);
+      for (const o of s.cities) assert.ok(distance(t, o) > d || (distance(t, o) === d && o.id >= id), 'nearest city wins');
+    }
+    for (const c of s.cities) assert.equal(terr.get(key(c.q, c.r)), c.id, 'a city tile belongs to its city');
+    for (const t of Object.values(s.tiles)) {
+      const inside = s.cities.some((c) => distance(t, c) <= TERRITORY.radius) && t.terrain !== 'water';
+      assert.equal(terr.has(key(t.q, t.r)), inside);
+    }
+  }
+  // owner follows the city; healing of a resting unit
+  const s = createGame({ seed: 13, fog: false });
+  const cap = s.cities.find((c) => c.owner === 0 && c.capital);
+  const near = Object.values(s.tiles).find((t) => distance(t, cap) === 1 && isPassable(s, t.q, t.r) && !unitAt(s, t.q, t.r));
+  assert.equal(territoryOwner(s, near.q, near.r), 0);
+  const outside = Object.values(s.tiles).find((t) => isPassable(s, t.q, t.r) && territoryOwner(s, t.q, t.r) === undefined && !unitAt(s, t.q, t.r));
+  s.units = [];
+  const a = { id: 1, type: 'warrior', owner: 0, q: near.q, r: near.r, hp: 4, movesLeft: 2, hasAttacked: false, xp: 0, moved: false };
+  const b = { id: 2, type: 'warrior', owner: 0, q: outside.q, r: outside.r, hp: 4, movesLeft: 2, hasAttacked: false, xp: 0, moved: false };
+  s.units.push(a, b);
+  endTurn(s);
+  assert.equal(a.hp, 4 + TERRITORY.healIdle);
+  assert.equal(b.hp, 4 + ECONOMY.healIdle);
+  const neutral = s.cities.find((c) => c.owner === null);
+  assert.equal(territoryOwner(s, neutral.q, neutral.r), null);
+  neutral.owner = 1;
+  assert.equal(territoryOwner(s, neutral.q, neutral.r), 1);
 });

@@ -1,6 +1,7 @@
 // Canvas rendering. No game logic, only drawing the state.
 import { hexToPixel, hexCorners, pixelToHex, key, neighbors, DIRS } from './hex.js';
 import { TERRAIN, UNIT_TYPES, PLAYERS, NEUTRAL_COLOR, RANKS } from './rules.js';
+import { territoryMap } from './game.js';
 
 export const HEX_SIZE = 32;
 const PAD = 8;
@@ -70,6 +71,7 @@ export function render(ctx, state, view = {}) {
     ctx.stroke();
   }
 
+  drawBorders(ctx, state, known);
   drawRivers(ctx, state, known, seen);
 
   if (view.hover && state.tiles[key(view.hover.q, view.hover.r)]) {
@@ -194,6 +196,45 @@ function drawRoad(ctx, state, t, c) {
 
 // Rivers along hex edges. Each edge is drawn once (from the tile with the smaller key, or
 // when the neighbor is off the map). Bridge = road on both sides of the edge.
+// City borders: on each territory tile, the edges towards a different territory (or none) are drawn
+// slightly inset in the colour of the city's owner, so neighbouring borders sit side by side.
+function drawBorders(ctx, state, known) {
+  const terr = territoryMap(state);
+  const owner = new Map(state.cities.map((c) => [c.id, c.owner]));
+  ctx.save();
+  ctx.lineCap = 'butt';
+  ctx.lineWidth = 3;
+  ctx.setLineDash([5, 3]); // dashed, so borders can't be mistaken for rivers (solid double lines)
+  for (const [k, cityId] of terr) {
+    const t = state.tiles[k];
+    if (!known(t.q, t.r)) continue;
+    const who = owner.get(cityId);
+    const c = tileCenter(t.q, t.r);
+    if (who !== null) {
+      // a light tint of the owner's colour over the whole realm
+      hexPath(ctx, c.x, c.y, HEX_SIZE - 1);
+      ctx.globalAlpha = 0.13;
+      ctx.fillStyle = PLAYERS[who].color;
+      ctx.fill();
+    }
+    const corners = hexCorners(c.x, c.y, HEX_SIZE - 3);
+    ctx.strokeStyle = who === null ? NEUTRAL_COLOR : PLAYERS[who].color;
+    ctx.globalAlpha = who === null ? 0.7 : 0.95;
+    for (let d = 0; d < 6; d++) {
+      const nId = terr.get(key(t.q + DIRS[d][0], t.r + DIRS[d][1]));
+      if (nId !== undefined && owner.get(nId) === who) continue; // same owner – no border inside the realm
+      // direction d points at angle −60·d°, the edge lies between corners (6−d)%6 and (7−d)%6
+      const p1 = corners[(6 - d) % 6];
+      const p2 = corners[(7 - d) % 6];
+      ctx.beginPath();
+      ctx.moveTo(p1.x, p1.y);
+      ctx.lineTo(p2.x, p2.y);
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
 function drawRivers(ctx, state, known, seen) {
   ctx.save();
   ctx.lineCap = 'round';

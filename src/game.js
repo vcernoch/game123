@@ -3,7 +3,7 @@ import { key, neighbors, distance } from './hex.js';
 import { generateMap, hasRiverEdge } from './map.js';
 import {
   TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY, VISION, DIFFICULTY, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, ROAD_COST, RIVER,
-  FACTIONS, NO_FACTION, MAP_SIZES, HAPPENINGS, FORTIFY,
+  FACTIONS, NO_FACTION, MAP_SIZES, HAPPENINGS, FORTIFY, TERRITORY,
 } from './rules.js';
 import { createRng } from './rng.js';
 
@@ -152,6 +152,31 @@ export function migrateState(s) {
     s.version = 13;
   }
   return s.version === STATE_VERSION ? s : null;
+}
+
+// ---------- city territory ----------
+
+// Territory: Map tile key -> city id. Depends only on city positions, so it's the same all game.
+export function territoryMap(state) {
+  const map = new Map();
+  for (const t of Object.values(state.tiles)) {
+    if (t.terrain === 'water') continue;
+    let best = null;
+    let bestD = Infinity;
+    for (const c of state.cities) {
+      const d = distance(t, c);
+      if (d <= TERRITORY.radius && (d < bestD || (d === bestD && c.id < best.id))) { best = c; bestD = d; }
+    }
+    if (best) map.set(key(t.q, t.r), best.id);
+  }
+  return map;
+}
+
+// Owner of the territory on a tile: player index, null for a neutral city, undefined outside any territory.
+export function territoryOwner(state, q, r) {
+  const id = territoryMap(state).get(key(q, r));
+  if (id === undefined) return undefined;
+  return state.cities.find((c) => c.id === id).owner;
 }
 
 // ---------- fog of war ----------
@@ -669,7 +694,8 @@ export function endTurn(state) {
   // heal units of the player ending the turn
   for (const u of state.units.filter((x) => x.owner === state.current)) {
     const city = cityAt(state, u.q, u.r);
-    const heal = city && city.owner === u.owner ? ECONOMY.healInCity : u.moved ? 0 : ECONOMY.healIdle;
+    const restHeal = territoryOwner(state, u.q, u.r) === u.owner ? TERRITORY.healIdle : ECONOMY.healIdle;
+    const heal = city && city.owner === u.owner ? ECONOMY.healInCity : u.moved ? 0 : restHeal;
     u.hp = Math.min(UNIT_TYPES[u.type].hp, u.hp + heal);
   }
   state.current = (state.current + 1) % PLAYERS.length;

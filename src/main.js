@@ -2,7 +2,7 @@
 import {
   createGame, reachable, attackTargets, moveUnit, attack, buyUnit, endTurn,
   unitAt, cityAt, getUnit, incomeOf, previewAttack, tileAt, pathTo, nextActiveUnit, cityInfo,
-  cloneState, drainEvents, migrateState, logFor, isUndoableMove, canFortify, fortify, activeUnits, visibleTiles, exploredTiles, build, unitCost, hasBuilding,
+  cloneState, drainEvents, migrateState, logFor, isUndoableMove, canFortify, fortify, activeUnits, territoryOwner, visibleTiles, exploredTiles, build, unitCost, hasBuilding,
   rankOf, rankMult, buildingCost, unitMove, factionOf, riverDefense,
 } from './game.js';
 import { createAnimator } from './anim.js';
@@ -14,7 +14,7 @@ import { runAITurn } from './ai.js';
 import { render, canvasSize, pickHex } from './render.js';
 import { key } from './hex.js';
 import {
-  UNIT_TYPES, TERRAIN, PLAYERS, DIFFICULTY, BUILDINGS, RANKS, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FORTIFY,
+  UNIT_TYPES, TERRAIN, PLAYERS, DIFFICULTY, BUILDINGS, RANKS, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FORTIFY, TERRITORY, ECONOMY,
 } from './rules.js';
 
 const SAVE_KEY = 'game123-save';
@@ -179,6 +179,11 @@ function updateHud() {
     const road = tile.road ? ' · road (move cost ½ along roads)' : '';
     const river = tile.rivers && tile.rivers.length ? ` · river (crossing +${RIVER.crossCost} move, defender +${Math.round(RIVER.defBonus * 100)} %)` : '';
     html = `<p>${t.name}${t.passable ? ` · move ${t.cost} · defense +${Math.round(t.defBonus * 100)} %` : ' · impassable'}${road}${river}</p>`;
+    const realm = territoryOwner(state, hover.q, hover.r);
+    if (realm !== undefined) {
+      const whose = realm === null ? 'neutral territory' : realm === 0 ? 'your territory' : `${PLAYERS[realm].name} territory`;
+      html += `<p class="hint">${whose[0].toUpperCase()}${whose.slice(1)} – units resting here heal +${TERRITORY.healIdle} (elsewhere +${ECONOMY.healIdle})</p>`;
+    }
     const hc = cityAt(state, hover.q, hover.r);
     if (hc) {
       const ci = cityInfo(state, hc);

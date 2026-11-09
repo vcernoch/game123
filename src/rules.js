@@ -97,6 +97,10 @@ export const MAP_SIZES = {
   large:  { name: 'Large',  cols: 20, rows: 14, neutralCities: 8, desc: 'long game with more cities' },
 };
 
+// City territory: tiles up to `radius` from a city (the nearest city wins, ties go to the lower id).
+// Water is never territory. A unit resting in its own territory (not in a city) heals `healIdle`.
+export const TERRITORY = { radius: 2, healIdle: 2 };
+
 // Fog of war: city sight range and the hills bonus.
 export const VISION = { city: 2, hillsBonus: 1 };
 
