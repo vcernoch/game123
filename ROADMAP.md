@@ -60,5 +60,8 @@ Check off `[x]` when done. Add new ideas to the end of the relevant phase or to 
 - [x] Scout: a cheap, fast unit that sees far but cannot capture cities; the AI recruits one to explore in the fog
 - [x] Map seed: the new game dialog shows and accepts a map number, "Same map again" restarts the current map
 
+## Phase 8 – army development (own improvements)
+- [x] Unit upgrades: a unit in an own city that hasn't acted can be retrained (warrior → spearman/horseman, archer → catapult, scout → horseman), keeping rank and HP share; the AI uses it against horsemen and for idle scouts
+
 ## Ideas (unordered)
 - Diplomacy with multiple AIs

@@ -2,6 +2,17 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-10 – Unit upgrades (v0.14.0)
+- **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.9.0–v0.14.0) is far ahead of `main` (v0.8.0) – please merge it.
+- Phase 7 was done, so I opened phase 8 (own improvements) in the roadmap.
+- `UPGRADES` / `UPGRADE` in `rules.js`: warrior → spearman or horseman, archer → catapult, scout → horseman. Price = recruit price of the new type in that city (barracks, faction and resource discounts apply) − base price of the old type + 2, at least 3.
+- `upgradeOptions`, `upgradeCost`, `upgradeUnit` in `game.js`: only a unit of the current player standing in an own city that hasn't moved or attacked this turn (so not a unit recruited this turn; a fortified one may, and loses the fortification). It keeps its XP/rank and its share of HP (rounded up), and its turn ends. New `upgrade` event (replayable, animated with a "⇧ Horseman" floater, promote sound) and a chronicle entry.
+- UI: an "Upgrade" block in the unit panel with price and the new type's stats; help text updated.
+- AI (`upgradeSomething` in `ai.js`, with gold to spare above its usual reserve): a warrior in a city with a visible enemy horseman within 4 tiles becomes a spearman; a scout in a city with nothing left to explore becomes a horseman. Measured (new vs. previous AI, both sides of each seed, Normal, fog): Small 57 : 62, Medium 60 : 56 (60 seeds each) – neutral within noise, so it adds variety without changing AI strength.
+- No state structure change (`state.version` stays 16).
+- Tests: +3 logic (price formula, HP share and XP kept, turn ends, replay; refused without gold, after moving, when freshly recruited, outside or in a foreign city, on the other player's turn, wrong path; faction discount; AI upgrades only when it makes sense and has gold; AI vs AI games stay consistent). Smoke test retrains a veteran scout into a horseman from the panel (`artifacts/screenshot-upgrade.png`).
+- Status: `npm run check` green (63 logic tests + smoke).
+
 ## 2026-11-09 – Map number and "Same map again" → v0.13.0
 - **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` is now v0.13.0, several versions ahead of `main` (v0.8.0) – please merge it.
 - Every game already had a seed; now it is visible as the **map number**: the side panel says "Map 123456789 · Difficulty: …". The new game dialog has a "Map" box: an optional map number (empty = random; invalid input is caught by the browser's form check, `pattern` 1–9 digits) and a "This map: N" button that fills in the current one. The same number on the same size always gives the same map, so maps can be shared.

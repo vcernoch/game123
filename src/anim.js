@@ -3,6 +3,7 @@
 // (applyEvent from game.js), and in between only the drawn unit positions move.
 import { applyEvent, getUnit } from './game.js';
 import { tileCenter } from './render.js';
+import { UNIT_TYPES } from './rules.js';
 
 const STEP_MS = 110;    // one movement step
 const ATTACK_MS = 300;  // attacker lunge and return
@@ -103,6 +104,10 @@ export function createAnimator(redraw, isVisible = () => true, onShow = () => {}
       const u = getUnit(st, ev.unitId);
       if (u) addFloater(tileCenter(u.q, u.r), '⛨ fortified', '#cfe3ff');
       await tween(PAUSE_MS, () => {});
+    } else if (ev.type === 'upgrade') {
+      const u = getUnit(st, ev.unitId);
+      if (u) addFloater(tileCenter(u.q, u.r), `⇧ ${UNIT_TYPES[ev.to].name}`, '#ffd34d');
+      await tween(PAUSE_MS, () => {});
     }
   }
 
@@ -136,7 +141,7 @@ export function createAnimator(redraw, isVisible = () => true, onShow = () => {}
     if (ev.type === 'attack') return see(getUnit(st, ev.attackerId)) || see(getUnit(st, ev.defenderId));
     if (ev.type === 'capture') return see(st.cities.find((c) => c.id === ev.cityId));
     if (ev.type === 'spawn') return see(ev.unit);
-    if (ev.type === 'fortify') return see(getUnit(st, ev.unitId));
+    if (ev.type === 'fortify' || ev.type === 'upgrade') return see(getUnit(st, ev.unitId));
     return true;
   }
 

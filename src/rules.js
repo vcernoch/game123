@@ -23,6 +23,16 @@ export const UNIT_TYPES = {
     noCapture: true, desc: 'sees 4 tiles far, cannot capture cities' },
 };
 
+// Unit upgrades: a unit standing in an own city that hasn't acted this turn can be retrained
+// into a stronger type. It keeps its experience and its share of HP; upgrading ends its turn.
+// Price = recruit price of the new type in that city − base price of the old type + fee (at least `min`).
+export const UPGRADES = {
+  warrior: ['spearman', 'horseman'],
+  archer: ['catapult'],
+  scout: ['horseman'],
+};
+export const UPGRADE = { fee: 2, min: 3 };
+
 export const PLAYERS = [
   { name: 'You', color: '#2f6fd6', light: '#9cc0ff', isAI: false },
   { name: 'AI',  color: '#d23c3c', light: '#ffa3a3', isAI: true },

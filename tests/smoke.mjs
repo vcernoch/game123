@@ -305,6 +305,33 @@ try {
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({ path: 'artifacts/screenshot-scout.png' });
 
+  // upgrade: next turn the scout (ready to act, gold to spare) is retrained as a horseman from the panel
+  await page.evaluate(() => {
+    const st = window.__game.getState();
+    const c = st.cities.find((x) => x.owner === 0 && x.capital);
+    const u = st.units.find((x) => x.q === c.q && x.r === c.r);
+    u.movesLeft = 3; u.hasAttacked = false; u.moved = false; u.xp = 3;
+    st.gold[0] = 60;
+    window.__game.refresh();
+  });
+  await page.keyboard.press('Escape');
+  await page.mouse.click(capPt.x, capPt.y);
+  await page.waitForSelector('#info button[data-upgrade="horseman"]:not([disabled])', { timeout: 3000 });
+  await page.$eval('#info button[data-upgrade]', (b) => b.scrollIntoView({ block: 'center' }));
+  await page.screenshot({ path: 'artifacts/screenshot-upgrade.png' });
+  await page.click('#info button[data-upgrade="horseman"]');
+  await page.waitForFunction(() => !window.__game.isBusy(), null, { timeout: 5000 });
+  const upgraded = await page.evaluate(() => {
+    const st = window.__game.getState();
+    const c = st.cities.find((x) => x.owner === 0 && x.capital);
+    const u = st.units.find((x) => x.q === c.q && x.r === c.r);
+    return { type: u && u.type, xp: u && u.xp, moves: u && u.movesLeft, gold: st.gold[0],
+      buttons: document.querySelectorAll('#info button[data-upgrade]').length };
+  });
+  if (upgraded.type !== 'horseman' || upgraded.xp !== 3 || upgraded.moves !== 0 || upgraded.gold >= 60 || upgraded.buttons) {
+    throw new Error(`upgrade from the panel failed: ${JSON.stringify(upgraded)}`);
+  }
+
   // sound toggle
   await page.click('#sound');
   if ((await page.getAttribute('#sound', 'aria-pressed')) !== 'false') throw new Error('sound cannot be turned off');

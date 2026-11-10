@@ -8,10 +8,12 @@ import {
   buildingCost, unitMove, factionOf, armyPower, riverBetween, riverDefense,
   rollHappening, applyHappening, cityIncome, logFor, isUndoableMove, canFortify, fortify, activeUnits, territoryMap, territoryOwner, planRoute, setOrder, runOrders, cancelOrder, cityHeal, citySight, cityResources, unitSummary, zocTiles,
   exportGame, importGame, saveFileName, stateProblem, SAVE_FORMAT, threatTiles, parseSeed, restartOptions, MAX_SEED,
+  upgradeOptions, upgradeUnit, upgradeCost,
 } from '../src/game.js';
 import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
   dangerMap, dangerPenalty, moveTowardsGoal, DANGER, unexploredLand, SCOUT_WHEN_UNKNOWN, aiKnowledge,
+  upgradeSomething, UPGRADE_HORSE_RADIUS,
 } from '../src/ai.js';
 import { decideTap } from '../src/input.js';
 import { SHORTCUTS, keyAction, recruitKey } from '../src/keys.js';
@@ -23,6 +25,7 @@ import { pathExists, generateMap, dirTo } from '../src/map.js';
 import { distance, key, neighbors } from '../src/hex.js';
 import {
   RESOURCES, FORTIFY, TERRITORY, ECONOMY, UNIT_TYPES, TERRAIN, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS,
+  UPGRADES, UPGRADE,
 } from '../src/rules.js';
 
 test('map is deterministic and starting cities are connected', () => {
@@ -1599,4 +1602,146 @@ test('map number: typed numbers are parsed, a restart gives exactly the same sta
   const old = createGame({ seed: 9 });
   old.factions = undefined;
   assert.deepEqual(createGame(restartOptions(old)).factions, defaults.factions);
+});
+
+// A player 0 unit of the given type standing in its capital, ready to act (other units out of the capital).
+function inCapital(type, { seed = 3, gold = 100, hp = null, xp = 0 } = {}) {
+  const s = createGame({ seed, fog: false, happenings: false });
+  const cap = s.cities.find((c) => c.owner === 0 && c.capital);
+  s.units = s.units.filter((u) => u.q !== cap.q || u.r !== cap.r);
+  const u = { id: 900, type, owner: 0, q: cap.q, r: cap.r, hp: hp ?? UNIT_TYPES[type].hp, movesLeft: 2, hasAttacked: false, xp };
+  s.units.push(u);
+  s.gold[0] = gold;
+  return { s, cap, u };
+}
+
+test('upgrades: a unit in an own city is retrained, keeps rank and HP share, pays the difference', () => {
+  // every upgrade path leads to an existing, more expensive type
+  for (const [from, tos] of Object.entries(UPGRADES)) {
+    for (const to of tos) {
+      assert.ok(UNIT_TYPES[from] && UNIT_TYPES[to], `${from} -> ${to}`);
+      assert.ok(UNIT_TYPES[to].cost > UNIT_TYPES[from].cost, `${from} -> ${to} is a step up`);
+    }
+  }
+  const { s, cap, u } = inCapital('warrior', { hp: 5, xp: 4 });
+  const opts = upgradeOptions(s, u);
+  assert.deepEqual(opts.map((o) => o.type), UPGRADES.warrior);
+  const spear = opts.find((o) => o.type === 'spearman');
+  assert.equal(spear.cost, Math.max(UPGRADE.min, unitCost(s, cap, 'spearman') - UNIT_TYPES.warrior.cost + UPGRADE.fee));
+  assert.equal(upgradeCost(s, u, 'spearman'), spear.cost);
+  assert.ok(opts.every((o) => o.affordable));
+  const before = cloneState(s);
+  u.fortified = true;
+  before.units.find((x) => x.id === u.id).fortified = true;
+  assert.ok(upgradeUnit(s, u.id, 'spearman'));
+  assert.equal(u.type, 'spearman');
+  assert.equal(u.hp, Math.ceil((5 / UNIT_TYPES.warrior.hp) * UNIT_TYPES.spearman.hp));
+  assert.equal(u.xp, 4, 'experience is kept');
+  assert.equal(rankOf(u), 1);
+  assert.equal(s.gold[0], 100 - spear.cost);
+  assert.ok(u.hasAttacked && u.movesLeft === 0, 'upgrading ends the unit\'s turn');
+  assert.ok(!u.fortified, 'retraining leaves the fortification');
+  assert.ok(!upgradeUnit(s, u.id, 'horseman'), 'only once per turn');
+  assert.ok(s.log.some((l) => (l.msg ?? l).includes('retrained as Spearman')));
+  // the event replays exactly
+  const evs = drainEvents(s);
+  assert.deepEqual(evs.map((e) => e.type), ['upgrade']);
+  for (const ev of evs) applyEvent(before, ev);
+  assert.deepEqual(before.units.find((x) => x.id === u.id), JSON.parse(JSON.stringify({ ...u, hasAttacked: false, movesLeft: 2 })));
+  // the next turn the spearman acts normally; a spearman has no further upgrade
+  endTurn(s); endTurn(s);
+  assert.ok(u.movesLeft > 0 && !u.hasAttacked);
+  assert.deepEqual(upgradeOptions(s, u), []);
+});
+
+test('upgrades: only in an own city, before acting, with enough gold, for the current player', () => {
+  // not enough gold: shown, but not allowed
+  const poor = inCapital('archer', { gold: 3 });
+  const [cat] = upgradeOptions(poor.s, poor.u);
+  assert.equal(cat.type, 'catapult');
+  assert.ok(!cat.affordable);
+  assert.ok(!upgradeUnit(poor.s, poor.u.id, 'catapult'));
+  assert.equal(poor.s.gold[0], 3);
+  // not a listed path
+  const w = inCapital('warrior');
+  assert.ok(!upgradeUnit(w.s, w.u.id, 'catapult'));
+  assert.ok(!upgradeUnit(w.s, w.u.id, 'nonsense'));
+  // after moving this turn: no options
+  const m = inCapital('warrior');
+  m.u.moved = true;
+  assert.deepEqual(upgradeOptions(m.s, m.u), []);
+  // a freshly recruited unit cannot be upgraded the same turn
+  const r = inCapital('warrior');
+  r.s.units = r.s.units.filter((x) => x.id !== r.u.id);
+  assert.ok(buyUnit(r.s, r.cap.id, 'warrior'));
+  assert.deepEqual(upgradeOptions(r.s, unitAt(r.s, r.cap.q, r.cap.r)), []);
+  // outside a city, or in a foreign one
+  const out = inCapital('warrior');
+  const field = Object.values(out.s.tiles).find((t) => isPassable(out.s, t.q, t.r) && !unitAt(out.s, t.q, t.r)
+    && !out.s.cities.some((c) => c.q === t.q && c.r === t.r));
+  out.u.q = field.q; out.u.r = field.r;
+  assert.deepEqual(upgradeOptions(out.s, out.u), []);
+  out.u.q = out.cap.q; out.u.r = out.cap.r;
+  out.cap.owner = 1;
+  assert.deepEqual(upgradeOptions(out.s, out.u), []);
+  // not on the other player's turn
+  const t = inCapital('warrior');
+  t.s.current = 1;
+  assert.deepEqual(upgradeOptions(t.s, t.u), []);
+  // the scout loses its no-capture rule as a horseman; faction discounts apply to the price
+  const sc = inCapital('scout');
+  assert.ok(upgradeUnit(sc.s, sc.u.id, 'horseman'));
+  assert.ok(!UNIT_TYPES[sc.u.type].noCapture);
+  const horde = createGame({ seed: 3, fog: false, faction: 'horde' });
+  const hc = horde.cities.find((c) => c.owner === 0 && c.capital);
+  horde.units = horde.units.filter((x) => x.q !== hc.q || x.r !== hc.r);
+  const hw = { id: 901, type: 'warrior', owner: 0, q: hc.q, r: hc.r, hp: 10, movesLeft: 2, hasAttacked: false, xp: 0 };
+  horde.units.push(hw);
+  assert.ok(unitCost(horde, hc, 'horseman') < UNIT_TYPES.horseman.cost);
+  assert.equal(upgradeCost(horde, hw, 'horseman'),
+    Math.max(UPGRADE.min, unitCost(horde, hc, 'horseman') - UNIT_TYPES.warrior.cost + UPGRADE.fee));
+  // sound and JSON
+  assert.equal(soundFor({ type: 'upgrade' }), 'promote');
+  assert.doesNotThrow(() => JSON.stringify(sc.s));
+});
+
+test('upgrades: the AI turns a garrison warrior into a spearman against horsemen, and an idle scout into a horseman', () => {
+  const s = createGame({ seed: 11, fog: false, happenings: false });
+  const cap = s.cities.find((c) => c.owner === 1 && c.capital);
+  s.units = s.units.filter((u) => u.owner !== 1);
+  s.units.push({ id: 700, type: 'warrior', owner: 1, q: cap.q, r: cap.r, hp: 10, movesLeft: 2, hasAttacked: false, xp: 0 });
+  s.current = 1;
+  s.gold[1] = 60;
+  const know = aiKnowledge(s, 1);
+  // no horsemen around: nothing happens
+  upgradeSomething(s, 1, know);
+  assert.equal(getUnit(s, 700).type, 'warrior');
+  // a visible enemy horseman nearby: the warrior becomes a spearman
+  const near = Object.values(s.tiles).find((t) => distance(t, cap) === UPGRADE_HORSE_RADIUS && isPassable(s, t.q, t.r) && !unitAt(s, t.q, t.r));
+  s.units.push({ id: 701, type: 'horseman', owner: 0, q: near.q, r: near.r, hp: 10, movesLeft: 0, hasAttacked: true, xp: 0 });
+  upgradeSomething(s, 1, aiKnowledge(s, 1));
+  assert.equal(getUnit(s, 700).type, 'spearman');
+  assert.ok(s.gold[1] < 60);
+  // only with gold to spare
+  const p = createGame({ seed: 11, fog: false, happenings: false });
+  const pc = p.cities.find((c) => c.owner === 1 && c.capital);
+  p.units = p.units.filter((u) => u.owner !== 1);
+  p.units.push({ id: 700, type: 'warrior', owner: 1, q: pc.q, r: pc.r, hp: 10, movesLeft: 2, hasAttacked: false, xp: 0 });
+  p.units.push({ id: 701, type: 'horseman', owner: 0, q: near.q, r: near.r, hp: 10, movesLeft: 0, hasAttacked: true, xp: 0 });
+  p.current = 1;
+  p.gold[1] = 5;
+  upgradeSomething(p, 1, aiKnowledge(p, 1));
+  assert.equal(getUnit(p, 700).type, 'warrior');
+  // a scout in a city on a known map (no fog) has nothing left to explore
+  s.units.push({ id: 702, type: 'scout', owner: 1, ...(() => { const c = s.cities.find((x) => x.owner === null); c.owner = 1; return { q: c.q, r: c.r }; })(), hp: 6, movesLeft: 3, hasAttacked: false, xp: 0 });
+  s.gold[1] = 60;
+  assert.ok(unexploredLand(s, aiKnowledge(s, 1)) <= SCOUT_WHEN_UNKNOWN);
+  upgradeSomething(s, 1, aiKnowledge(s, 1));
+  assert.equal(getUnit(s, 702).type, 'horseman');
+  // AI vs AI games with upgrades still finish and stay consistent
+  for (const seed of [5, 6]) {
+    const g = createGame({ seed, size: 'small' });
+    for (let i = 0; i < 300 && g.winner === null; i++) { runAITurn(g); drainEvents(g); endTurn(g); }
+    assert.ok(g.units.every((u) => UNIT_TYPES[u.type] && u.hp > 0 && u.hp <= UNIT_TYPES[u.type].hp));
+  }
 });

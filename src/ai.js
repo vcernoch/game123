@@ -3,7 +3,7 @@ import { distance, key } from './hex.js';
 import {
   reachable, attackTargets, previewAttack, moveUnit, attack, buyUnit,
   unitAt, getUnit, tileAt, fortify, difficultyOf, visibleTiles, exploredTiles, build, hasBuilding, unitCost, buildingCost, factionOf,
-  threatTiles, cityAt,
+  threatTiles, cityAt, upgradeOptions, upgradeUnit,
 } from './game.js';
 import { UNIT_TYPES, TERRAIN } from './rules.js';
 
@@ -19,6 +19,7 @@ export function runAITurn(state) {
   const me = state.current;
   recruit(state, me);
   const know = aiKnowledge(state, me);
+  upgradeSomething(state, me, know);
   const garrisons = assignGarrisons(state, me, know);
   const danger = dangerMap(state, me, know);
   // archers and catapults go first so melee units can finish weakened targets (focus fire)
@@ -204,6 +205,28 @@ export function buildSomething(state, me) {
   }
   for (const city of mine) {
     if (!hasBuilding(city, 'infirmary') && rich('infirmary')) build(state, city.id, 'infirmary');
+  }
+}
+
+// Upgrades from surplus gold, only where they clearly help (an upgrade ends the unit's turn):
+// a warrior in a city with enemy horsemen in sight nearby becomes a spearman,
+// and a scout that has nothing left to explore becomes a horseman.
+export const UPGRADE_HORSE_RADIUS = 4;
+export function upgradeSomething(state, me, know = aiKnowledge(state, me)) {
+  const explored = () => unexploredLand(state, know) <= SCOUT_WHEN_UNKNOWN;
+  for (const u of state.units.filter((x) => x.owner === me)) {
+    const opts = upgradeOptions(state, u);
+    if (!opts.length) continue;
+    let want = null;
+    if (u.type === 'warrior') {
+      const horse = state.units.some((e) => e.owner !== me && e.type === 'horseman' && know.sees(e.q, e.r)
+        && distance(e, u) <= UPGRADE_HORSE_RADIUS);
+      if (horse) want = 'spearman';
+    } else if (u.type === 'scout' && explored()) {
+      want = 'horseman';
+    }
+    const opt = opts.find((o) => o.type === want);
+    if (opt && state.gold[me] >= opt.cost + RESERVE) upgradeUnit(state, u.id, want);
   }
 }
 

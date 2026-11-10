@@ -4,6 +4,7 @@ import { generateMap, hasRiverEdge } from './map.js';
 import {
   TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY, VISION, DIFFICULTY, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, ROAD_COST, RIVER,
   FACTIONS, NO_FACTION, MAP_SIZES, HAPPENINGS, FORTIFY, TERRITORY, RESOURCES,
+  UPGRADES, UPGRADE,
 } from './rules.js';
 import { createRng } from './rng.js';
 
@@ -313,6 +314,9 @@ export function applyEvent(state, ev) {
   } else if (ev.type === 'build') {
     const c = state.cities.find((x) => x.id === ev.cityId);
     if (c && !hasBuilding(c, ev.building)) c.buildings = [...(c.buildings || []), ev.building];
+  } else if (ev.type === 'upgrade') {
+    const u = getUnit(state, ev.unitId);
+    if (u) { u.type = ev.to; u.hp = ev.hp; delete u.fortified; }
   }
 }
 
@@ -948,6 +952,47 @@ export function buyUnit(state, cityId, type) {
   const xp = hasBuilding(city, 'academy') ? BUILDING_EFFECTS.academyXp : 0; // academy: starts as a Veteran
   spawnUnit(state, type, state.current, city.q, city.r, xp);
   addLog(state, `${PLAYERS[state.current].name}: recruited ${t.name} (${city.name})`, { by: state.current, at: [city] });
+  return true;
+}
+
+// ---------- unit upgrades ----------
+
+// Price of upgrading the unit to type `to` in the city it stands in (see UPGRADE in rules.js).
+export function upgradeCost(state, unit, to) {
+  const city = cityAt(state, unit.q, unit.r);
+  if (!city) return null;
+  return Math.max(UPGRADE.min, unitCost(state, city, to) - UNIT_TYPES[unit.type].cost + UPGRADE.fee);
+}
+
+// Upgrade options of a unit right now: [{ type, cost, affordable }]. Empty unless the unit is the current
+// player's, stands in an own city and hasn't moved or attacked this turn (a fortified unit may still upgrade).
+export function upgradeOptions(state, unit) {
+  if (!unit || unit.owner !== state.current || state.winner !== null || unit.moved || unit.hasAttacked) return [];
+  const city = cityAt(state, unit.q, unit.r);
+  if (!city || city.owner !== unit.owner) return [];
+  return (UPGRADES[unit.type] || []).map((type) => {
+    const cost = upgradeCost(state, unit, type);
+    return { type, cost, affordable: state.gold[unit.owner] >= cost };
+  });
+}
+
+// Retrains the unit into type `to`: keeps XP and the HP share (rounded up), ends its turn. Returns true/false.
+export function upgradeUnit(state, unitId, to) {
+  const unit = getUnit(state, unitId);
+  const opt = upgradeOptions(state, unit).find((o) => o.type === to);
+  if (!opt || !opt.affordable) return false;
+  const from = unit.type;
+  state.gold[unit.owner] -= opt.cost;
+  unit.hp = Math.max(1, Math.ceil((unit.hp / UNIT_TYPES[from].hp) * UNIT_TYPES[to].hp));
+  unit.type = to;
+  unit.movesLeft = 0;
+  unit.hasAttacked = true;
+  delete unit.fortified;
+  delete unit.goto;
+  emit(state, { type: 'upgrade', unitId: unit.id, from, to, hp: unit.hp });
+  const city = cityAt(state, unit.q, unit.r);
+  addLog(state, `${PLAYERS[unit.owner].name}: ${UNIT_TYPES[from].name} retrained as ${UNIT_TYPES[to].name} (${city.name})`,
+    { by: unit.owner, at: [city] });
   return true;
 }
 

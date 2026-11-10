@@ -4,6 +4,7 @@ import {
   unitAt, cityAt, getUnit, incomeOf, previewAttack, tileAt, pathTo, nextActiveUnit, cityInfo,
   cloneState, drainEvents, migrateState, logFor, isUndoableMove, canFortify, fortify, activeUnits, territoryOwner, cityResources, unitSummary, planRoute, setOrder, runOrders, cancelOrder, visibleTiles, exploredTiles, build, unitCost, hasBuilding,
   rankOf, rankMult, buildingCost, unitMove, factionOf, riverDefense, zocTiles, threatTiles, exportGame, importGame, saveFileName, parseSeed, restartOptions,
+  upgradeOptions, upgradeUnit,
 } from './game.js';
 import { createAnimator } from './anim.js';
 import { decideTap } from './input.js';
@@ -166,6 +167,15 @@ function updateHud() {
     if (u.fortified) html += `<p class="fortified">⛨ Fortified: +${Math.round(FORTIFY.defBonus * 100)} % defense until it moves or attacks</p>`;
     if (u.owner === 0 && !busy() && canFortify(state, u)) {
       html += `<button data-fortify class="secondary wide-btn" title="Dig in: +${Math.round(FORTIFY.defBonus * 100)} % defense, ends the unit's turn (F)">⛨ Fortify</button>`;
+    }
+    const ups = u.owner === 0 && !busy() ? upgradeOptions(state, u) : [];
+    if (ups.length) {
+      html += '<h4>Upgrade</h4><div class="buy">';
+      for (const o of ups) {
+        const nt = UNIT_TYPES[o.type];
+        html += `<button data-upgrade="${o.type}" class="secondary" ${o.affordable ? '' : 'disabled'} title="Keeps rank and HP share, ends the unit's turn"><span>⇧ ${nt.name}</span><small>${o.cost} gold</small><small class="desc">HP ${nt.hp} · Attack ${nt.atk} · Defense ${nt.def} · Move ${nt.move}${nt.range > 1 ? ` · Range ${nt.range}` : ''}</small></button>`;
+      }
+      html += '</div>';
     }
   }
   if (city) {
@@ -669,6 +679,8 @@ $('next-unit').addEventListener('click', selectNextUnit);
 $('info').addEventListener('click', (ev) => {
   if (ev.target.closest('button[data-undo]')) { undoMove(); return; }
   if (ev.target.closest('button[data-fortify]')) { fortifySelected(); return; }
+  const uBtn = ev.target.closest('button[data-upgrade]');
+  if (uBtn) { upgradeSelected(uBtn.dataset.upgrade); return; }
   if (ev.target.closest('button[data-cancel-order]') && selectedId) { cancelOrder(state, selectedId); save(); draw(); return; }
   const bBtn = ev.target.closest('button[data-build]');
   if (bBtn && selectedCityId && !busy()) {
@@ -747,6 +759,17 @@ function fortifySelected() {
   afterAction(null); // no animation needed – the shield appears right away
   sound.play('fortify');
   selectNextUnit();
+}
+
+// Retrains the selected unit into another type (button in the panel); it stays selected.
+function upgradeSelected(type) {
+  if (busy() || state.winner !== null) return;
+  const u = selectedUnit();
+  if (!u || u.owner !== 0) return;
+  const before = cloneState(state);
+  if (!upgradeUnit(state, u.id, type)) return;
+  undoStack = [];
+  afterAction(before); // the animation shows "⇧ <type>" and plays the sound
 }
 
 // Undoes the last undoable move (Z key / panel button); the unit stays selected.
