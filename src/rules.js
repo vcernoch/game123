@@ -33,6 +33,10 @@ export const UPGRADES = {
 };
 export const UPGRADE = { fee: 2, min: 3 };
 
+// Disbanding: the current player can dismiss an own unit at any time during their turn. A unit
+// dismissed in an own city returns `refundShare` of its type's base price (rounded down) as gold.
+export const DISBAND = { refundShare: 0.4 };
+
 export const PLAYERS = [
   { name: 'You', color: '#2f6fd6', light: '#9cc0ff', isAI: false },
   { name: 'AI',  color: '#d23c3c', light: '#ffa3a3', isAI: true },

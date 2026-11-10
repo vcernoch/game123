@@ -2,6 +2,16 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-10 – Disbanding units (v0.15.0)
+- **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.9.0–v0.15.0) is far ahead of `main` (v0.8.0) – please merge it.
+- Phase 8 had no open task, so I added one (own improvement): disbanding.
+- `DISBAND` in `rules.js` (`refundShare` 0.4). `disbandRefund`, `canDisband`, `disbandUnit` in `game.js`: the current player can dismiss an own unit at any time during their turn (also after it has acted). In an own city it returns 40 % of the type's base price, rounded down (warrior 4, horseman 6, catapult 8 …); elsewhere, or in a foreign city, nothing. It frees the city tile for recruiting right away. New `disband` event (replayable; gold is not replayed, as for recruiting and upgrades), a "✖ disbanded +N" floater, a soft falling sound, and a chronicle entry that follows the fog rules.
+- UI: "✖ Disband (+N gold)" button at the end of the unit panel; the first press turns it red ("Really disband?"), a second press within 4 s dismisses the unit. Key D does the same; added to the shortcut table / overlay and the help text.
+- The AI doesn't disband (it has no upkeep to save and already retrains idle scouts).
+- No state structure change (`state.version` stays 16).
+- Tests: +3 logic (refund per type and always below the recruit price, removal, log, second disband refused, recruit right after, event replay and sound; no refund outside / in a foreign city; refused on the other player's turn, for an enemy unit, after game over, unknown id; the enemy doesn't see it in the fog), key D in the shortcut test. Smoke test disbands the retrained horseman from the panel: first press asks, second removes it and adds 6 gold (`artifacts/screenshot-disband.png`).
+- Status: `npm run check` green (66 logic tests + smoke).
+
 ## 2026-11-10 – Unit upgrades (v0.14.0)
 - **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.9.0–v0.14.0) is far ahead of `main` (v0.8.0) – please merge it.
 - Phase 7 was done, so I opened phase 8 (own improvements) in the roadmap.

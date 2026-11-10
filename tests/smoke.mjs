@@ -332,6 +332,25 @@ try {
     throw new Error(`upgrade from the panel failed: ${JSON.stringify(upgraded)}`);
   }
 
+  // disband: the retrained horseman is dismissed from the panel – first press arms, second press disbands
+  const goldBefore = upgraded.gold;
+  await page.click('#info button[data-disband]');
+  const armedText = await page.textContent('#info button[data-disband]');
+  if (!armedText.includes('Really disband?') || !armedText.includes('+6 gold')) throw new Error(`disband did not ask first: ${armedText}`);
+  await page.$eval('#info button[data-disband]', (b) => b.scrollIntoView({ block: 'center' }));
+  await page.screenshot({ path: 'artifacts/screenshot-disband.png' });
+  await page.click('#info button[data-disband]');
+  await page.waitForFunction(() => !window.__game.isBusy(), null, { timeout: 5000 });
+  const disbanded = await page.evaluate(() => {
+    const st = window.__game.getState();
+    const c = st.cities.find((x) => x.owner === 0 && x.capital);
+    return { unit: !!st.units.find((x) => x.q === c.q && x.r === c.r), gold: st.gold[0],
+      recruit: !!document.querySelector('#info button[data-buy="warrior"]:not([disabled])') };
+  });
+  if (disbanded.unit || disbanded.gold !== goldBefore + 6 || !disbanded.recruit) {
+    throw new Error(`disband from the panel failed: ${JSON.stringify(disbanded)}`);
+  }
+
   // sound toggle
   await page.click('#sound');
   if ((await page.getAttribute('#sound', 'aria-pressed')) !== 'false') throw new Error('sound cannot be turned off');

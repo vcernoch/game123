@@ -8,7 +8,7 @@ import {
   buildingCost, unitMove, factionOf, armyPower, riverBetween, riverDefense,
   rollHappening, applyHappening, cityIncome, logFor, isUndoableMove, canFortify, fortify, activeUnits, territoryMap, territoryOwner, planRoute, setOrder, runOrders, cancelOrder, cityHeal, citySight, cityResources, unitSummary, zocTiles,
   exportGame, importGame, saveFileName, stateProblem, SAVE_FORMAT, threatTiles, parseSeed, restartOptions, MAX_SEED,
-  upgradeOptions, upgradeUnit, upgradeCost,
+  upgradeOptions, upgradeUnit, upgradeCost, canDisband, disbandRefund, disbandUnit,
 } from '../src/game.js';
 import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
@@ -25,7 +25,7 @@ import { pathExists, generateMap, dirTo } from '../src/map.js';
 import { distance, key, neighbors } from '../src/hex.js';
 import {
   RESOURCES, FORTIFY, TERRITORY, ECONOMY, UNIT_TYPES, TERRAIN, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS,
-  UPGRADES, UPGRADE,
+  UPGRADES, UPGRADE, DISBAND,
 } from '../src/rules.js';
 
 test('map is deterministic and starting cities are connected', () => {
@@ -1319,6 +1319,8 @@ test('keyboard shortcuts: one table for keys and the overlay', () => {
   assert.deepEqual(keyAction('e'), { type: 'endTurn', force: false });
   assert.equal(keyAction('F').type, 'fortify');
   assert.equal(keyAction('z').type, 'undo');
+  assert.equal(keyAction('d').type, 'disband');
+  assert.equal(keyAction('D').type, 'disband');
   assert.equal(keyAction('?', true).type, 'help');
   assert.equal(keyAction('Escape').type, 'escape');
   const types = Object.keys(UNIT_TYPES);
@@ -1744,4 +1746,68 @@ test('upgrades: the AI turns a garrison warrior into a spearman against horsemen
     for (let i = 0; i < 300 && g.winner === null; i++) { runAITurn(g); drainEvents(g); endTurn(g); }
     assert.ok(g.units.every((u) => UNIT_TYPES[u.type] && u.hp > 0 && u.hp <= UNIT_TYPES[u.type].hp));
   }
+});
+
+test('disbanding: an own unit is dismissed, in an own city it refunds a share of its price', () => {
+  for (const [type, t] of Object.entries(UNIT_TYPES)) {
+    const { s, u } = inCapital(type);
+    assert.equal(disbandRefund(s, u), Math.floor(t.cost * DISBAND.refundShare), type);
+    assert.ok(disbandRefund(s, u) < t.cost, `${type}: disbanding never pays more than recruiting`);
+  }
+  const { s, cap, u } = inCapital('catapult', { xp: 5 });
+  u.moved = true; u.hasAttacked = true; // also after acting
+  const before = cloneState(s);
+  const refund = disbandUnit(s, u.id);
+  assert.equal(refund, Math.floor(UNIT_TYPES.catapult.cost * DISBAND.refundShare));
+  assert.equal(s.gold[0], 100 + refund);
+  assert.equal(getUnit(s, u.id), undefined);
+  assert.ok(s.log.some((l) => l.msg.includes(`disbanded Catapult (${cap.name}, +${refund} gold)`)));
+  assert.equal(disbandUnit(s, u.id), false, 'a unit is disbanded only once');
+  // the city can recruit again right away
+  assert.ok(buyUnit(s, cap.id, 'warrior'));
+  // the event replays: the unit disappears from the copy
+  const evs = drainEvents(s).filter((e) => e.type === 'disband');
+  assert.deepEqual(evs.map((e) => [e.unitId, e.owner, e.refund]), [[u.id, 0, refund]]);
+  for (const ev of evs) applyEvent(before, ev);
+  assert.equal(getUnit(before, u.id), undefined);
+  assert.equal(soundFor(evs[0]), 'disband');
+  // a sound exists for it
+  assert.ok(SOUND_NAMES.includes('disband'));
+});
+
+test('disbanding: nothing back outside own cities; never for the other player or after the game', () => {
+  const out = inCapital('horseman');
+  const field = Object.values(out.s.tiles).find((t) => isPassable(out.s, t.q, t.r) && !unitAt(out.s, t.q, t.r)
+    && !out.s.cities.some((c) => c.q === t.q && c.r === t.r));
+  out.u.q = field.q; out.u.r = field.r;
+  assert.equal(disbandRefund(out.s, out.u), 0);
+  assert.equal(disbandUnit(out.s, out.u.id), 0);
+  assert.equal(out.s.gold[0], 100);
+  assert.ok(!getUnit(out.s, out.u.id));
+  assert.ok(out.s.log.at(-1).msg.endsWith('disbanded Horseman'));
+  // in a foreign city: no refund either
+  const foreign = inCapital('warrior');
+  foreign.cap.owner = 1;
+  assert.equal(disbandRefund(foreign.s, foreign.u), 0);
+  // not on the other player's turn, not an enemy unit, not after game over
+  const t = inCapital('warrior');
+  t.s.current = 1;
+  assert.ok(!canDisband(t.s, t.u));
+  assert.equal(disbandUnit(t.s, t.u.id), false);
+  assert.ok(getUnit(t.s, t.u.id));
+  const enemy = t.s.units.find((x) => x.owner === 1);
+  t.s.current = 0;
+  assert.equal(disbandUnit(t.s, enemy.id), false);
+  t.s.winner = 1;
+  assert.equal(disbandUnit(t.s, t.u.id), false);
+  assert.equal(disbandUnit(t.s, 12345), false, 'unknown unit');
+});
+
+test('disbanding: in the fog the enemy does not see a unit disbanded far away', () => {
+  const s = createGame({ seed: 3, fog: true, happenings: false });
+  const mine = s.units.find((u) => u.owner === 0);
+  disbandUnit(s, mine.id);
+  const last = s.log.at(-1);
+  assert.deepEqual(last.seen, [0]);
+  assert.ok(logFor(s, 1).at(-1).hidden);
 });

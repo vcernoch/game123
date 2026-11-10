@@ -4,7 +4,7 @@ import {
   unitAt, cityAt, getUnit, incomeOf, previewAttack, tileAt, pathTo, nextActiveUnit, cityInfo,
   cloneState, drainEvents, migrateState, logFor, isUndoableMove, canFortify, fortify, activeUnits, territoryOwner, cityResources, unitSummary, planRoute, setOrder, runOrders, cancelOrder, visibleTiles, exploredTiles, build, unitCost, hasBuilding,
   rankOf, rankMult, buildingCost, unitMove, factionOf, riverDefense, zocTiles, threatTiles, exportGame, importGame, saveFileName, parseSeed, restartOptions,
-  upgradeOptions, upgradeUnit,
+  upgradeOptions, upgradeUnit, canDisband, disbandRefund, disbandUnit,
 } from './game.js';
 import { createAnimator } from './anim.js';
 import { decideTap } from './input.js';
@@ -35,6 +35,8 @@ let pending = null;        // touch: target awaiting confirmation by a second ta
 let lastPointer = 'mouse'; // type of the last pointer (mouse / touch / pen)
 let endArmed = false;      // end-turn reminder: the first press only asks for confirmation
 let endArmTimer = null;
+let disbandArmed = null;   // id of the unit whose Disband button was pressed once (asks for a second press)
+let disbandArmTimer = null;
 let undoStack = [];        // states before undoable moves this turn (memory only)
 const sound = createSound();
 sound.enabled = loadPrefs().sound !== false;
@@ -176,6 +178,13 @@ function updateHud() {
         html += `<button data-upgrade="${o.type}" class="secondary" ${o.affordable ? '' : 'disabled'} title="Keeps rank and HP share, ends the unit's turn"><span>⇧ ${nt.name}</span><small>${o.cost} gold</small><small class="desc">HP ${nt.hp} · Attack ${nt.atk} · Defense ${nt.def} · Move ${nt.move}${nt.range > 1 ? ` · Range ${nt.range}` : ''}</small></button>`;
       }
       html += '</div>';
+    }
+    if (u.owner === 0 && !busy() && canDisband(state, u)) {
+      const refund = disbandRefund(state, u);
+      const gain = refund ? ` (+${refund} gold)` : '';
+      html += disbandArmed === u.id
+        ? `<button data-disband class="wide-btn disband armed" title="Press again to dismiss the unit for good (D)">✖ Really disband?${gain}</button>`
+        : `<button data-disband class="secondary wide-btn disband" title="${refund ? `Dismiss the unit; in your city it returns ${refund} gold` : 'Dismiss the unit (no gold outside your cities)'} (D)">✖ Disband${gain}</button>`;
     }
   }
   if (city) {
@@ -679,6 +688,7 @@ $('next-unit').addEventListener('click', selectNextUnit);
 $('info').addEventListener('click', (ev) => {
   if (ev.target.closest('button[data-undo]')) { undoMove(); return; }
   if (ev.target.closest('button[data-fortify]')) { fortifySelected(); return; }
+  if (ev.target.closest('button[data-disband]')) { disbandSelected(); return; }
   const uBtn = ev.target.closest('button[data-upgrade]');
   if (uBtn) { upgradeSelected(uBtn.dataset.upgrade); return; }
   if (ev.target.closest('button[data-cancel-order]') && selectedId) { cancelOrder(state, selectedId); save(); draw(); return; }
@@ -708,6 +718,7 @@ window.addEventListener('keydown', (ev) => {
   else if (act.type === 'nextUnit') selectNextUnit();
   else if (act.type === 'undo') undoMove();
   else if (act.type === 'fortify') fortifySelected();
+  else if (act.type === 'disband') disbandSelected();
   else if (act.type === 'recruit') recruitSelected(act.unitType);
   else if (act.type === 'help') $('keys-dialog').showModal();
   else if (act.type === 'threats') toggleThreats();
@@ -770,6 +781,29 @@ function upgradeSelected(type) {
   if (!upgradeUnit(state, u.id, type)) return;
   undoStack = [];
   afterAction(before); // the animation shows "⇧ <type>" and plays the sound
+}
+
+// Disbands the selected unit (D / panel button). The first press only arms the button, a second press
+// within a few seconds on the same unit dismisses it; the city under it stays selected.
+function disbandSelected() {
+  if (busy() || state.winner !== null) return;
+  const u = selectedUnit();
+  if (!u || u.owner !== 0 || !canDisband(state, u)) return;
+  clearTimeout(disbandArmTimer);
+  if (disbandArmed !== u.id) {
+    disbandArmed = u.id;
+    disbandArmTimer = setTimeout(() => { disbandArmed = null; draw(); }, 4000);
+    sound.play('click');
+    draw();
+    return;
+  }
+  disbandArmed = null;
+  const before = cloneState(state);
+  if (disbandUnit(state, u.id) === false) return;
+  undoStack = [];
+  selectedId = null;
+  pending = null;
+  afterAction(before); // the animation shows "✖ disbanded" and plays the sound
 }
 
 // Undoes the last undoable move (Z key / panel button); the unit stays selected.

@@ -4,7 +4,7 @@ import { generateMap, hasRiverEdge } from './map.js';
 import {
   TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY, VISION, DIFFICULTY, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, ROAD_COST, RIVER,
   FACTIONS, NO_FACTION, MAP_SIZES, HAPPENINGS, FORTIFY, TERRITORY, RESOURCES,
-  UPGRADES, UPGRADE,
+  UPGRADES, UPGRADE, DISBAND,
 } from './rules.js';
 import { createRng } from './rng.js';
 
@@ -317,6 +317,8 @@ export function applyEvent(state, ev) {
   } else if (ev.type === 'upgrade') {
     const u = getUnit(state, ev.unitId);
     if (u) { u.type = ev.to; u.hp = ev.hp; delete u.fortified; }
+  } else if (ev.type === 'disband') {
+    removeUnit(state, ev.unitId); // gold is not replayed, as for recruiting and upgrades
   }
 }
 
@@ -994,6 +996,34 @@ export function upgradeUnit(state, unitId, to) {
   addLog(state, `${PLAYERS[unit.owner].name}: ${UNIT_TYPES[from].name} retrained as ${UNIT_TYPES[to].name} (${city.name})`,
     { by: unit.owner, at: [city] });
   return true;
+}
+
+// ---------- disbanding ----------
+
+// Gold returned for disbanding the unit where it stands now: a share of the base price in an own city, else 0.
+export function disbandRefund(state, unit) {
+  const city = cityAt(state, unit.q, unit.r);
+  if (!city || city.owner !== unit.owner) return 0;
+  return Math.floor(UNIT_TYPES[unit.type].cost * DISBAND.refundShare);
+}
+
+// Whether the unit can be disbanded right now: an own unit of the current player while the game runs.
+export function canDisband(state, unit) {
+  return !!unit && unit.owner === state.current && state.winner === null;
+}
+
+// Dismisses the unit (see DISBAND in rules.js). Returns the refunded gold, or false if not allowed.
+export function disbandUnit(state, unitId) {
+  const unit = getUnit(state, unitId);
+  if (!canDisband(state, unit)) return false;
+  const refund = disbandRefund(state, unit);
+  state.gold[unit.owner] += refund;
+  removeUnit(state, unit.id);
+  emit(state, { type: 'disband', unitId: unit.id, owner: unit.owner, refund, q: unit.q, r: unit.r });
+  const city = cityAt(state, unit.q, unit.r);
+  addLog(state, `${PLAYERS[unit.owner].name}: disbanded ${UNIT_TYPES[unit.type].name}${refund ? ` (${city.name}, +${refund} gold)` : ''}`,
+    { by: unit.owner, at: [unit] });
+  return refund;
 }
 
 // Builds a building in an own city. Returns true/false on success.

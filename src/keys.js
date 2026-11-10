@@ -12,6 +12,8 @@ export const SHORTCUTS = [
   { keys: 'Shift + Enter', text: 'end the turn right away', action: () => ({ type: 'endTurn', force: true }),
     match: (k, shift) => k === 'Enter' && shift },
   { keys: 'F', text: 'fortify the selected unit', action: () => ({ type: 'fortify' }), match: (k) => k === 'f' || k === 'F' },
+  { keys: 'D', text: 'disband the selected unit (press twice; in an own city it returns some gold)', action: () => ({ type: 'disband' }),
+    match: (k) => k === 'd' || k === 'D' },
   { keys: 'T', text: 'show or hide the enemy threat overlay', action: () => ({ type: 'threats' }), match: (k) => k === 't' || k === 'T' },
   { keys: 'Z', text: 'undo the last move (if it revealed nothing)', action: () => ({ type: 'undo' }), match: (k) => k === 'z' || k === 'Z' },
   { keys: `1–${RECRUIT_TYPES.length}`, text: `recruit in the selected city (${RECRUIT_TYPES.map((t, i) => `${i + 1} ${UNIT_TYPES[t].name}`).join(', ')})`,

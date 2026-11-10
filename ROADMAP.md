@@ -62,6 +62,7 @@ Check off `[x]` when done. Add new ideas to the end of the relevant phase or to 
 
 ## Phase 8 – army development (own improvements)
 - [x] Unit upgrades: a unit in an own city that hasn't acted can be retrained (warrior → spearman/horseman, archer → catapult, scout → horseman), keeping rank and HP share; the AI uses it against horsemen and for idle scouts
+- [x] Disband: a unit you no longer need can be dismissed (panel button or D, pressed twice); in an own city it returns 40 % of its base price
 
 ## Ideas (unordered)
 - Diplomacy with multiple AIs
