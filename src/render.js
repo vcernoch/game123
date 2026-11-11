@@ -36,6 +36,7 @@ function hexPath(ctx, cx, cy, size) {
 
 // view = { selectedId, reachable: Map, targets: Set(unitId), hover: {q,r}, path: [{q,r}],
 //          unitPos: Map(unitId -> {x,y}) for animations, floaters: [{x,y,text,color,age}],
+//          flankers: Set(unitId) of own units flanking the hovered target (marked with a small ⚔ badge),
 //          visible/explored: Set of keys for fog of war (missing = everything visible), viewer: player at the screen }
 export function render(ctx, state, view = {}) {
   const { w, h } = canvasSize(state);
@@ -113,9 +114,34 @@ export function render(ctx, state, view = {}) {
       ctx.stroke();
       ctx.setLineDash([]);
     }
+    if (view.flankers && view.flankers.has(u.id)) drawFlankBadge(ctx, c.x, c.y);
   }
 
   for (const f of view.floaters || []) drawFloater(ctx, f);
+}
+
+// Small badge with crossed swords at the top-left of a unit that helps a flanking attack.
+function drawFlankBadge(ctx, x, y) {
+  const bx = x - HEX_SIZE * 0.5;
+  const by = y - HEX_SIZE * 0.5;
+  const r = HEX_SIZE * 0.22;
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(bx, by, r, 0, Math.PI * 2);
+  ctx.fillStyle = '#ffdd33';
+  ctx.fill();
+  ctx.strokeStyle = '#3a2a00';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  // two crossed blades
+  ctx.lineWidth = 2;
+  ctx.lineCap = 'round';
+  const d = r * 0.6;
+  ctx.beginPath();
+  ctx.moveTo(bx - d, by + d); ctx.lineTo(bx + d, by - d);
+  ctx.moveTo(bx + d, by + d); ctx.lineTo(bx - d, by - d);
+  ctx.stroke();
+  ctx.restore();
 }
 
 // Floating text (damage, capture): rises and fades, age is 0..1.

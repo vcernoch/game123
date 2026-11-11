@@ -539,6 +539,40 @@ try {
   await page.click('#threats');
   if (await page.evaluate(() => window.__game.threatsShown())) throw new Error('threats: the button did not turn the overlay off');
 
+  // flanking: two own units next to the enemy – the attack tooltip says +20 % and the flankers get a badge
+  await page.mouse.move(5, 5);
+  const flank = await page.evaluate(async () => {
+    const g = await import('./src/game.js');
+    const hex = await import('./src/hex.js');
+    const rnd = await import('./src/render.js');
+    window.__game.newGame(31, { fog: false });
+    const st = window.__game.getState();
+    const free = (t) => t && g.isFree(st, t.q, t.r) && !st.cities.some((c) => c.q === t.q && c.r === t.r);
+    const near = (p) => hex.neighbors(p.q, p.r).map((n) => g.tileAt(st, n.q, n.r)).filter(free);
+    const me = st.units.find((u) => u.owner === 0);
+    me.type = 'warrior'; me.hp = 10; me.movesLeft = 2; me.hasAttacked = false; me.moved = false;
+    const foe = st.units.find((u) => u.owner === 1);
+    // a target tile next to me with at least two more free tiles around it
+    const spot = near(me).find((t) => near(t).filter((n) => hex.distance(n, me) > 0).length >= 2);
+    if (!spot) return null;
+    foe.q = spot.q; foe.r = spot.r;
+    st.units = st.units.filter((u) => u === me || u === foe || hex.distance(u, foe) > 1);
+    for (const t of near(foe).slice(0, 2)) {
+      st.units.push({ id: st.nextUnitId++, type: 'warrior', owner: 0, q: t.q, r: t.r, hp: 10, movesLeft: 0, hasAttacked: true, xp: 0 });
+    }
+    window.__game.refresh();
+    const rect = document.getElementById('board').getBoundingClientRect();
+    const k = rect.width / rnd.canvasSize(st).w;
+    const at = (q, r) => { const c = rnd.tileCenter(q, r); return { x: rect.left + c.x * k, y: rect.top + c.y * k }; };
+    return { me: at(me.q, me.r), foe: at(foe.q, foe.r), count: g.flankers(st, me, foe).length };
+  });
+  if (!flank || flank.count !== 2) throw new Error(`flank: setup failed ${JSON.stringify(flank)}`);
+  await page.mouse.click(flank.me.x, flank.me.y);
+  await page.mouse.move(flank.foe.x + 1, flank.foe.y + 1);
+  const flankTip = await page.textContent('#tooltip');
+  if (!flankTip.includes('Flanking attack (+20 %)')) throw new Error(`flank: tooltip does not show the bonus (${flankTip})`);
+  await page.screenshot({ path: 'artifacts/screenshot-flank.png' });
+
   // save file: the button downloads the game, loading the file through the file input restores it,
   // a broken file shows an error and keeps the current game
   await page.evaluate(() => { window.__game.newGame(55, { fog: false }); window.__game.endTurn(); });

@@ -60,9 +60,12 @@ Check off `[x]` when done. Add new ideas to the end of the relevant phase or to 
 - [x] Scout: a cheap, fast unit that sees far but cannot capture cities; the AI recruits one to explore in the fog
 - [x] Map seed: the new game dialog shows and accepts a map number, "Same map again" restarts the current map
 
-## Phase 8 – army development (own improvements)
+## Phase 8 – army development (own improvements) ✅
 - [x] Unit upgrades: a unit in an own city that hasn't acted can be retrained (warrior → spearman/horseman, archer → catapult, scout → horseman), keeping rank and HP share; the AI uses it against horsemen and for idle scouts
 - [x] Disband: a unit you no longer need can be dismissed (panel button or D, pressed twice); in an own city it returns 40 % of its base price
+
+## Phase 9 – battlefield tactics (own improvements)
+- [x] Flanking: +10 % attack for each other own unit next to the defender (max +30 %), shown in the attack preview with ⚔ badges on the flankers
 
 ## Ideas (unordered)
 - Diplomacy with multiple AIs

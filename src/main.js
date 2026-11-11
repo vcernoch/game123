@@ -3,7 +3,7 @@ import {
   createGame, reachable, attackTargets, moveUnit, attack, buyUnit, endTurn,
   unitAt, cityAt, getUnit, incomeOf, previewAttack, tileAt, pathTo, nextActiveUnit, cityInfo,
   cloneState, drainEvents, migrateState, logFor, isUndoableMove, canFortify, fortify, activeUnits, territoryOwner, cityResources, unitSummary, planRoute, setOrder, runOrders, cancelOrder, visibleTiles, exploredTiles, build, unitCost, hasBuilding,
-  rankOf, rankMult, buildingCost, unitMove, factionOf, riverDefense, zocTiles, threatTiles, exportGame, importGame, saveFileName, parseSeed, restartOptions,
+  rankOf, rankMult, buildingCost, unitMove, factionOf, riverDefense, flankers, zocTiles, threatTiles, exportGame, importGame, saveFileName, parseSeed, restartOptions,
   upgradeOptions, upgradeUnit, canDisband, disbandRefund, disbandUnit,
 } from './game.js';
 import { createAnimator } from './anim.js';
@@ -98,6 +98,13 @@ function rankLine(u) {
   return `${RANKS[r].name} ${RANKS[r].symbol} · XP ${u.xp || 0}${next ? `/${next.xp}` : ''}`;
 }
 
+// "Attack", "Attack across a river", "Flanking attack +20 %" … for the attack preview.
+function attackLabel(attacker, target, preview) {
+  let label = riverDefense(state, attacker, target) ? 'Attack across a river' : 'Attack';
+  if (preview.flank) label = `${label.replace('Attack', 'Flanking attack')} (+${Math.round(preview.flank * 100)} %)`;
+  return label;
+}
+
 function selectedUnit() {
   return selectedId ? getUnit(state, selectedId) : null;
 }
@@ -124,6 +131,14 @@ function pathView(u, mine) {
   return {};
 }
 
+// Own units that would flank the hovered attack target of the selected unit (for the ⚔ badges).
+function flankView(u) {
+  const at = pending || hover; // touch: the target awaiting confirmation
+  const target = at && seenUnitAt(at.q, at.r);
+  if (!target || !attackTargets(state, u).includes(target)) return null;
+  return new Set(flankers(state, u, target).map((f) => f.id));
+}
+
 function drawBoard() {
   const u = selectedUnit();
   const mine = u && u.owner === state.current && !busy();
@@ -139,6 +154,7 @@ function drawBoard() {
     threats: showThreats && state.winner === null ? threatTiles(shown, 0) : null,
     targets: mine ? new Set(attackTargets(state, u).map((t) => t.id)) : null,
     hover,
+    flankers: mine ? flankView(u) : null,
     ...pathView(u, mine),
   });
 }
@@ -245,7 +261,7 @@ function updateHud() {
     const target = seenUnitAt(pending.q, pending.r);
     if (target && target.owner !== u.owner) {
       const pr = previewAttack(state, u, target);
-      html += `<p class="confirm">${riverDefense(state, u, target) ? 'Attack across a river' : 'Attack'}: −${pr.damage}${pr.kills ? ' (destroys)' : ''}, counter −${pr.counter}.<br>Tap the target again to confirm.</p>`;
+      html += `<p class="confirm">${attackLabel(u, target, pr)}: −${pr.damage}${pr.kills ? ' (destroys)' : ''}, counter −${pr.counter}.<br>Tap the target again to confirm.</p>`;
     } else {
       const far = !reachable(state, u).has(key(pending.q, pending.r)) && planRoute(state, u, pending.q, pending.r);
       html += far
@@ -392,7 +408,7 @@ function showTooltip(ev, hex) {
   const target = hex && seenUnitAt(hex.q, hex.r);
   if (sel && target && sel.owner === state.current && attackTargets(state, sel).includes(target)) {
     const p = previewAttack(state, sel, target);
-    tip.textContent = `${riverDefense(state, sel, target) ? 'Attack across a river' : 'Attack'}: −${p.damage}${p.kills ? ' (destroys)' : ''}, counter −${p.counter}`;
+    tip.textContent = `${attackLabel(sel, target, p)}: −${p.damage}${p.kills ? ' (destroys)' : ''}, counter −${p.counter}`;
     placeTip(tip, ev);
   } else if (target) {
     // any visible unit: its stats; a city under it gets a second line

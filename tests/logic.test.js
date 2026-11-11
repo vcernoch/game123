@@ -5,7 +5,7 @@ import {
   previewAttack, cloneState, pathTo, nextActiveUnit, tileAt, cityInfo, incomeOf, defenseValue,
   drainEvents, applyEvent, migrateState, STATE_VERSION,
   visibleTiles, exploredTiles, build, unitCost, rankOf, stepCost, getUnit,
-  buildingCost, unitMove, factionOf, armyPower, riverBetween, riverDefense,
+  buildingCost, unitMove, factionOf, armyPower, riverBetween, riverDefense, flankers, flankBonus,
   rollHappening, applyHappening, cityIncome, logFor, isUndoableMove, canFortify, fortify, activeUnits, territoryMap, territoryOwner, planRoute, setOrder, runOrders, cancelOrder, cityHeal, citySight, cityResources, unitSummary, zocTiles,
   exportGame, importGame, saveFileName, stateProblem, SAVE_FORMAT, threatTiles, parseSeed, restartOptions, MAX_SEED,
   upgradeOptions, upgradeUnit, upgradeCost, canDisband, disbandRefund, disbandUnit,
@@ -24,7 +24,7 @@ import { GAME_VERSION, GAME_DATE } from '../src/version.js';
 import { pathExists, generateMap, dirTo } from '../src/map.js';
 import { distance, key, neighbors } from '../src/hex.js';
 import {
-  RESOURCES, FORTIFY, TERRITORY, ECONOMY, UNIT_TYPES, TERRAIN, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS,
+  RESOURCES, FORTIFY, TERRITORY, ECONOMY, UNIT_TYPES, TERRAIN, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FLANK,
   UPGRADES, UPGRADE, DISBAND,
 } from '../src/rules.js';
 
@@ -1810,4 +1810,48 @@ test('disbanding: in the fog the enemy does not see a unit disbanded far away', 
   const last = s.log.at(-1);
   assert.deepEqual(last.seen, [0]);
   assert.ok(logFor(s, 1).at(-1).hidden);
+});
+
+test('flanking: own units next to the defender raise the attack, capped, counterattack not boosted', () => {
+  const s = createGame({ seed: 1, fog: false });
+  const tiles = Object.values(s.tiles);
+  for (const t of tiles) { t.terrain = 'plains'; delete t.rivers; delete t.road; }
+  s.cities = s.cities.filter((c) => distance(c, { q: 5, r: 4 }) > 3);
+  const center = tileAt(s, 5, 4);
+  const around = neighbors(center.q, center.r);
+  assert.equal(around.length, 6);
+  const mk = (id, owner, p, type = 'warrior') => ({ id, type, owner, q: p.q, r: p.r, hp: UNIT_TYPES[type].hp, movesLeft: 2, hasAttacked: false, xp: 0 });
+  const foe = mk(901, 1, center);
+  const me = mk(900, 0, around[0]);
+  s.units = [me, foe];
+  const alone = previewAttack(s, me, foe);
+  assert.equal(alone.flank, 0);
+  assert.equal(flankers(s, me, foe).length, 0, 'the attacker itself never counts');
+  // an enemy unit next to the defender doesn't count, nor does an own unit two tiles away
+  s.units.push(mk(902, 1, around[1]), mk(903, 0, { q: center.q + 2, r: center.r - 1 }));
+  assert.equal(flankBonus(s, me, foe), 0);
+  // own units next to the defender: +perUnit each, up to max
+  s.units = [me, foe];
+  let prev = alone.damage;
+  for (let i = 1; i <= 5; i++) {
+    s.units.push(mk(910 + i, 0, around[i]));
+    const p = previewAttack(s, me, foe);
+    assert.equal(flankers(s, me, foe).length, i);
+    assert.ok(Math.abs(p.flank - FLANK.perUnit * Math.min(i, FLANK.max)) < 1e-9, `flank with ${i}`);
+    assert.ok(p.damage >= prev, 'more flankers never do less damage');
+    assert.ok(p.counter <= alone.counter, 'the counterattack is never stronger');
+    prev = p.damage;
+  }
+  const full = previewAttack(s, me, foe);
+  assert.ok(full.damage > alone.damage, `flanked ${full.damage} > alone ${alone.damage}`);
+  // a ranged attacker standing away from the target gets the bonus too
+  const archer = mk(950, 0, { q: center.q + 2, r: center.r - 1 }, 'archer');
+  s.units.push(archer);
+  assert.ok(Math.abs(flankBonus(s, archer, foe) - FLANK.perUnit * FLANK.max) < 1e-9);
+  // the real attack deals the previewed flanked damage
+  s.current = 0;
+  s.units = s.units.filter((u) => u.id !== 950);
+  const expected = previewAttack(s, me, foe).damage;
+  assert.ok(attack(s, me.id, foe.id));
+  assert.equal(getUnit(s, foe.id) ? getUnit(s, foe.id).hp : 0, Math.max(0, UNIT_TYPES.warrior.hp - expected));
 });

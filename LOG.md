@@ -2,6 +2,16 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-11 – Flanking (v0.16.0)
+- **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.9.0–v0.16.0) is far ahead of `main` (v0.8.0) – please merge it.
+- Phase 8 was done, so I opened phase 9 (battlefield tactics, own improvement) in the roadmap.
+- `FLANK` in `rules.js` (`perUnit` 0.1, `max` 3). `flankers` / `flankBonus` in `game.js`: every other unit of the attacker's owner standing next to the defender adds +10 % attack, up to +30 %. Works for ranged attackers too (the flankers must be adjacent to the target, not to the archer). The counterattack is not boosted. `previewAttack` returns `flank`, so the real attack, the UI and the AI all use the same number.
+- UI: the attack tooltip / touch confirmation says "Flanking attack (+20 %)" (or "Flanking attack across a river …"), and while a target is hovered or awaiting confirmation the flanking units get a small yellow ⚔ badge. Help text updated.
+- AI: no special code – it evaluates attacks through `previewAttack`, so it profits from flanks it happens to have; it doesn't yet plan attack order to maximise them (possible follow-up).
+- No state structure change (`state.version` stays 16). No existing test needed changing.
+- Tests: +1 logic (no bonus alone, enemies and distant units don't count, +10 % per flanker capped at 3, damage never drops and counter never rises with more flankers, ranged attacker, the real attack deals the previewed damage). Smoke test sets up two flankers, checks the tooltip text and saves `artifacts/screenshot-flank.png`.
+- Status: `npm run check` green (67 logic tests + smoke).
+
 ## 2026-11-10 – Disbanding units (v0.15.0)
 - **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.9.0–v0.15.0) is far ahead of `main` (v0.8.0) – please merge it.
 - Phase 8 had no open task, so I added one (own improvement): disbanding.
