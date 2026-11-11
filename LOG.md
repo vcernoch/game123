@@ -2,6 +2,15 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-11 – AI lines up flanking attacks (v0.17.0)
+- **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.9.0–v0.17.0) is far ahead of `main` (v0.8.0) – please merge it.
+- Follow-up to flanking (phase 9). Before, AI melee units moved and attacked one at a time, so the first attacker on a target never had a flank bonus. Now `planStrike(…, { lineUp })` only moves a melee unit into its strike position and returns the plan `{ unitId, targetId, damage }`; `strikeLinedUp` makes the attacks after all units have acted, in plan order, so every strike counts the others standing next to the target.
+- To keep focus fire: later plans judge targets by the HP left after the already lined-up hits (`pendingDamage`), skip targets those hits already destroy, and a strike that kills on its own is made at once. If the planned target is gone or the attack no longer pays off, the unit takes its best other attack. Archers, catapults, garrisons and retreating units behave as before.
+- A first version without the pending-damage estimate was clearly worse (small 52 : 63, medium 50 : 66) – it spread damage instead of finishing units. Final version, new vs. previous AI, both sides of each seed, Normal, fog: Small 99 : 99, Medium 102 : 96 (100 seeds each), Large 30 : 28 (30 seeds) – neutral to slightly better in AI-vs-AI. Instrumented: average flank per AI melee strike went up by ~3 percentage points; against a human the AI now visibly surrounds a unit before hitting it.
+- No state structure change (`state.version` stays 16), no UI change.
+- Tests: +2 logic (three AI warriors line up around a tough spearman without attacking, the first strike carries +20 %, then all strike; a lone kill is made right away and a target doomed by lined-up hits isn't picked again).
+- Status: `npm run check` green (69 logic tests + smoke).
+
 ## 2026-11-11 – Flanking (v0.16.0)
 - **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.9.0–v0.16.0) is far ahead of `main` (v0.8.0) – please merge it.
 - Phase 8 was done, so I opened phase 9 (battlefield tactics, own improvement) in the roadmap.

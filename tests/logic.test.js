@@ -13,7 +13,7 @@ import {
 import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
   dangerMap, dangerPenalty, moveTowardsGoal, DANGER, unexploredLand, SCOUT_WHEN_UNKNOWN, aiKnowledge,
-  upgradeSomething, UPGRADE_HORSE_RADIUS,
+  upgradeSomething, UPGRADE_HORSE_RADIUS, strikeLinedUp,
 } from '../src/ai.js';
 import { decideTap } from '../src/input.js';
 import { SHORTCUTS, keyAction, recruitKey } from '../src/keys.js';
@@ -1854,4 +1854,62 @@ test('flanking: own units next to the defender raise the attack, capped, counter
   const expected = previewAttack(s, me, foe).damage;
   assert.ok(attack(s, me.id, foe.id));
   assert.equal(getUnit(s, foe.id) ? getUnit(s, foe.id).hp : 0, Math.max(0, UNIT_TYPES.warrior.hp - expected));
+});
+
+test('AI lines up melee strikes so every attacker gets the flank bonus, then strikes in plan order', () => {
+  const s = createGame({ seed: 1, fog: false, difficulty: 'hard' });
+  for (const t of Object.values(s.tiles)) { t.terrain = 'plains'; delete t.rivers; delete t.road; }
+  s.cities = s.cities.filter((c) => distance(c, { q: 5, r: 4 }) > 4);
+  s.current = 1;
+  const center = tileAt(s, 5, 4);
+  const mk = (id, owner, p, type = 'warrior') => ({ id, type, owner, q: p.q, r: p.r, hp: UNIT_TYPES[type].hp, movesLeft: UNIT_TYPES[type].move, hasAttacked: false, xp: 0 });
+  // a tough veteran spearman of the player in the middle, three AI warriors two tiles away
+  const foe = mk(901, 0, center, 'spearman');
+  foe.xp = 99;
+  const ring = Object.values(s.tiles).filter((t) => distance(t, center) === 2);
+  const ais = [ring[0], ring[2], ring[4]].map((t, i) => mk(920 + i, 1, t));
+  s.units = [foe, ...ais];
+  const know = aiKnowledge(s, 1);
+  const lined = [];
+  for (const u of ais) {
+    const plan = planStrike(s, u, know, new Map(), { lineUp: lined });
+    assert.equal(typeof plan, 'object', 'a strike that does not kill alone is lined up');
+    assert.equal(plan.targetId, foe.id);
+    assert.ok(plan.damage > 0);
+    lined.push(plan);
+  }
+  assert.equal(getUnit(s, foe.id).hp, UNIT_TYPES.spearman.hp, 'nobody has attacked yet');
+  for (const u of ais) assert.equal(distance(getUnit(s, u.id), center), 1, 'all attackers stand next to the target');
+  // the first strike now has the bonus of both others – striking one by one it would have had none
+  const first = getUnit(s, lined[0].unitId);
+  const p = previewAttack(s, first, foe);
+  assert.ok(Math.abs(p.flank - 2 * FLANK.perUnit) < 1e-9, `first strike flanked: ${p.flank}`);
+  const before = foe.hp;
+  strikeLinedUp(s, lined);
+  const left = getUnit(s, foe.id);
+  assert.ok(!left || left.hp < before - p.damage, 'all lined-up attackers struck');
+  for (const u of ais) { const a = getUnit(s, u.id); if (a) assert.ok(a.hasAttacked); }
+});
+
+test('AI line-up: a lone kill is struck at once, a doomed target is left to the lined-up attackers', () => {
+  const s = createGame({ seed: 1, fog: false, difficulty: 'hard' });
+  for (const t of Object.values(s.tiles)) { t.terrain = 'plains'; delete t.rivers; delete t.road; }
+  s.cities = s.cities.filter((c) => distance(c, { q: 5, r: 4 }) > 4);
+  s.current = 1;
+  const center = tileAt(s, 5, 4);
+  const mk = (id, owner, p, type = 'warrior') => ({ id, type, owner, q: p.q, r: p.r, hp: UNIT_TYPES[type].hp, movesLeft: UNIT_TYPES[type].move, hasAttacked: false, xp: 0 });
+  const foe = mk(901, 0, center);
+  foe.hp = 1;
+  const ring = Object.values(s.tiles).filter((t) => distance(t, center) === 2);
+  const a = mk(920, 1, ring[0]);
+  s.units = [foe, a];
+  assert.equal(planStrike(s, a, aiKnowledge(s, 1), new Map(), { lineUp: [] }), true, 'the kill is made right away');
+  assert.equal(getUnit(s, foe.id), undefined);
+  // a target the lined-up strikes will already destroy is not picked again
+  const foe2 = mk(902, 0, center);
+  const b = mk(921, 1, ring[3]);
+  s.units = [foe2, b];
+  const doomed = [{ unitId: 999, targetId: foe2.id, damage: foe2.hp }];
+  assert.equal(planStrike(s, b, aiKnowledge(s, 1), new Map(), { lineUp: doomed }), false);
+  assert.deepEqual([getUnit(s, b.id).q, getUnit(s, b.id).r], [ring[3].q, ring[3].r], 'it did not move');
 });

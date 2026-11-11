@@ -27,6 +27,8 @@ export function runAITurn(state) {
     .filter((u) => u.owner === me)
     .sort((a, b) => UNIT_TYPES[b.type].range - UNIT_TYPES[a.type].range || a.id - b.id)
     .map((u) => u.id);
+  // melee strikes are lined up first and struck afterwards, so every attacker gets the flank bonus of the others
+  const lined = [];
   for (const id of ids) {
     if (state.winner !== null) return;
     const unit = getUnit(state, id);
@@ -36,22 +38,53 @@ export function runAITurn(state) {
     } else if (isWounded(unit) && enemiesNear(state, unit, know, 3).length) {
       retreat(state, unit, know, danger.get());
     } else {
-      if (planStrike(state, unit, know, danger.get())) continue;
+      const melee = UNIT_TYPES[unit.type].range === 1;
+      const plan = planStrike(state, unit, know, danger.get(), melee ? { lineUp: lined } : {});
+      if (plan && typeof plan === 'object') { lined.push(plan); continue; }
+      if (plan) continue;
       if (tryBestAttack(state, unit)) continue;
       moveTowardsGoal(state, unit, danger.get());
       const after = getUnit(state, id);
       if (after) tryBestAttack(state, after);
     }
   }
+  strikeLinedUp(state, lined);
+  if (state.winner !== null) return;
   recruit(state, me);
   buildSomething(state, me);
 }
 
+// Carries out lined-up melee strikes in the order they were planned (later plans assume the earlier hits);
+// if the planned target has fallen or the attack no longer pays off, the unit takes the best other attack.
+export function strikeLinedUp(state, plans) {
+  for (const p of plans) {
+    if (state.winner !== null) return;
+    const u = getUnit(state, p.unitId);
+    if (!u || u.hasAttacked) continue;
+    const t = getUnit(state, p.targetId);
+    if (t && attackTargets(state, u).includes(t) && scoreAttack(state, u, t) > 0) attack(state, u.id, t.id);
+    else tryBestAttack(state, u);
+  }
+}
+
+// Damage the lined-up strikes are expected to deal, per target id.
+function pendingDamage(plans) {
+  const m = new Map();
+  for (const p of plans) m.set(p.targetId, (m.get(p.targetId) || 0) + p.damage);
+  return m;
+}
+
 // Finds the best "move to a tile and attack" combination. The attacker's position affects the counterattack
 // (terrain) and range, so the attack is tentatively evaluated from every reachable tile.
-export function planStrike(state, unit, know = aiKnowledge(state, unit.owner), danger = new Map()) {
+// With lineUp (the list of strikes lined up so far) the unit only moves into position and returns its planned
+// strike { unitId, targetId, damage } – the attack is made later by strikeLinedUp, when the other attackers stand
+// next to the target too and add their flank bonus. Targets are judged by the HP left after the lined-up hits.
+// A strike that kills on its own is made right away. Without lineUp it attacks at once and returns true/false.
+export function planStrike(state, unit, know = aiKnowledge(state, unit.owner), danger = new Map(), { lineUp = null } = {}) {
   const range = UNIT_TYPES[unit.type].range;
-  const targets = state.units.filter((u) => u.owner !== unit.owner && know.sees(u.q, u.r));
+  const pending = pendingDamage(lineUp || []);
+  const targets = state.units.filter((u) => u.owner !== unit.owner && know.sees(u.q, u.r)
+    && (pending.get(u.id) || 0) < u.hp); // already doomed by the lined-up strikes
   if (!targets.length || unit.hasAttacked) return false;
   const spots = [[key(unit.q, unit.r), 0], ...reachable(state, unit)];
   const home = { q: unit.q, r: unit.r };
@@ -62,8 +95,11 @@ export function planStrike(state, unit, know = aiKnowledge(state, unit.owner), d
     if (!near.length) continue;
     unit.q = q; unit.r = r; // tentatively – restored right away
     for (const t of near) {
+      const hp = t.hp;
+      t.hp -= pending.get(t.id) || 0; // tentatively – restored right away
       const s = scoreAttack(state, unit, t) + TERRAIN[tileAt(state, q, r).terrain].defBonus
         - DANGER.strike * dangerPenalty(state, unit, q, r, danger.get(k) || 0);
+      t.hp = hp;
       if (s > 0 && (!best || s > best.s)) best = { s, q, r, t };
     }
     unit.q = home.q; unit.r = home.r;
@@ -71,7 +107,13 @@ export function planStrike(state, unit, know = aiKnowledge(state, unit.owner), d
   if (!best) return false;
   if (best.q !== unit.q || best.r !== unit.r) moveUnit(state, unit.id, best.q, best.r);
   const u = getUnit(state, unit.id);
-  return !!u && attack(state, u.id, best.t.id);
+  if (!u) return false;
+  // a strike that kills anyway needs no flank: done now, so the others plan around the fallen target
+  if (lineUp && u.q === best.q && u.r === best.r) {
+    const p = previewAttack(state, u, best.t);
+    if (!p.kills) return { unitId: u.id, targetId: best.t.id, damage: p.damage };
+  }
+  return attack(state, u.id, best.t.id);
 }
 
 const WOUNDED = 0.25; // below this HP fraction the unit retreats
