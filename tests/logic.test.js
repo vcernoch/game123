@@ -5,7 +5,7 @@ import {
   previewAttack, cloneState, pathTo, nextActiveUnit, tileAt, cityInfo, incomeOf, defenseValue,
   drainEvents, applyEvent, migrateState, STATE_VERSION,
   visibleTiles, exploredTiles, build, unitCost, rankOf, stepCost, getUnit,
-  buildingCost, unitMove, factionOf, armyPower, riverBetween, riverDefense, flankers, flankBonus, highGroundBonus,
+  buildingCost, unitMove, factionOf, armyPower, riverBetween, riverDefense, flankers, flankBonus, highGroundBonus, chargeBonus, chargeReady, movesSpent,
   rollHappening, applyHappening, cityIncome, logFor, isUndoableMove, canFortify, fortify, activeUnits, territoryMap, territoryOwner, planRoute, setOrder, runOrders, cancelOrder, cityHeal, citySight, cityResources, unitSummary, zocTiles,
   exportGame, importGame, saveFileName, stateProblem, SAVE_FORMAT, threatTiles, parseSeed, restartOptions, MAX_SEED,
   upgradeOptions, upgradeUnit, upgradeCost, canDisband, disbandRefund, disbandUnit,
@@ -24,7 +24,7 @@ import { GAME_VERSION, GAME_DATE } from '../src/version.js';
 import { pathExists, generateMap, dirTo } from '../src/map.js';
 import { distance, key, neighbors } from '../src/hex.js';
 import {
-  RESOURCES, FORTIFY, TERRITORY, ECONOMY, UNIT_TYPES, TERRAIN, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FLANK, HIGH_GROUND,
+  RESOURCES, FORTIFY, TERRITORY, ECONOMY, UNIT_TYPES, TERRAIN, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FLANK, HIGH_GROUND, CHARGE,
   UPGRADES, UPGRADE, DISBAND,
 } from '../src/rules.js';
 
@@ -1954,4 +1954,76 @@ test('high ground: an attacker on hills against a unit below gets the bonus, sta
   const expected = previewAttack(s, me, foe).damage;
   assert.ok(attack(s, me.id, foe.id));
   assert.equal(getUnit(s, foe.id) ? getUnit(s, foe.id).hp : 0, Math.max(0, UNIT_TYPES.warrior.hp - expected));
+});
+
+test('cavalry charge: a horseman that spent 2+ moves gets the bonus, not into forest, not for others, counter not boosted', () => {
+  const s = createGame({ seed: 1, fog: false });
+  for (const t of Object.values(s.tiles)) { t.terrain = 'plains'; delete t.rivers; delete t.road; }
+  s.cities = s.cities.filter((c) => distance(c, { q: 5, r: 4 }) > 4);
+  s.factions = [null, null];
+  s.current = 0;
+  const center = tileAt(s, 5, 4);
+  const mk = (id, owner, p, type) => ({ id, type, owner, q: p.q, r: p.r, hp: UNIT_TYPES[type].hp, movesLeft: UNIT_TYPES[type].move, hasAttacked: false, xp: 0 });
+  const foe = mk(901, 1, center, 'warrior');
+  const start = Object.values(s.tiles).find((t) => distance(t, center) === 3);
+  const horse = mk(900, 0, start, 'horseman');
+  s.units = [horse, foe];
+  // fresh horseman: no charge yet
+  assert.equal(movesSpent(s, horse), 0);
+  assert.equal(chargeReady(s, horse), false);
+  assert.equal(chargeBonus(s, horse, foe), 0);
+  // one step is not enough, two are
+  horse.movesLeft = UNIT_TYPES.horseman.move - 1;
+  assert.equal(chargeBonus(s, horse, foe), 0);
+  horse.movesLeft = UNIT_TYPES.horseman.move - CHARGE.minMoves;
+  assert.equal(chargeBonus(s, horse, foe), CHARGE.atkBonus);
+  // other unit types never charge
+  const w = mk(902, 0, start, 'warrior');
+  w.movesLeft = 0;
+  assert.equal(chargeBonus(s, w, foe), 0);
+  // no charge against a defender in forest
+  tileAt(s, foe.q, foe.r).terrain = 'forest';
+  assert.equal(chargeBonus(s, horse, foe), 0);
+  tileAt(s, foe.q, foe.r).terrain = 'plains';
+  // a real move of 2 tiles next to the target, then the attack: charge in the preview and the actual damage
+  horse.movesLeft = UNIT_TYPES.horseman.move;
+  const next = neighbors(center.q, center.r).find((n) => distance(n, start) === 2);
+  assert.ok(moveUnit(s, horse.id, next.q, next.r));
+  const h = getUnit(s, horse.id);
+  assert.equal(chargeReady(s, h), true);
+  const p = previewAttack(s, h, foe);
+  assert.equal(p.charge, CHARGE.atkBonus);
+  // compare with the same horseman standing still: more damage, the counter is not stronger
+  const still = { ...h, movesLeft: UNIT_TYPES.horseman.move };
+  const calm = previewAttack(s, still, foe);
+  assert.equal(calm.charge, 0);
+  assert.ok(p.damage > calm.damage, `charge ${p.damage} > standing ${calm.damage}`);
+  assert.ok(p.counter <= calm.counter);
+  assert.ok(attack(s, h.id, foe.id));
+  assert.equal(getUnit(s, foe.id).hp, UNIT_TYPES.warrior.hp - p.damage);
+  // after attacking the charge is spent
+  assert.equal(chargeReady(s, getUnit(s, horse.id)), false);
+});
+
+test('cavalry charge: the AI counts the moves it spends on the approach', () => {
+  const s = createGame({ seed: 1, fog: false, difficulty: 'hard' });
+  for (const t of Object.values(s.tiles)) { t.terrain = 'plains'; delete t.rivers; delete t.road; }
+  s.cities = s.cities.filter((c) => distance(c, { q: 5, r: 4 }) > 5);
+  s.factions = [null, null];
+  s.current = 1;
+  const center = tileAt(s, 5, 4);
+  const mk = (id, owner, p, type) => ({ id, type, owner, q: p.q, r: p.r, hp: UNIT_TYPES[type].hp, movesLeft: UNIT_TYPES[type].move, hasAttacked: false, xp: 0 });
+  const foe = mk(901, 0, center, 'warrior');
+  const start = Object.values(s.tiles).find((t) => distance(t, center) === 3);
+  const horse = mk(900, 1, start, 'horseman');
+  s.units = [horse, foe];
+  // what a charge from a neighbouring tile would deal
+  const next = neighbors(center.q, center.r).find((n) => distance(n, start) === 2);
+  const expected = previewAttack(s, { ...horse, q: next.q, r: next.r, movesLeft: horse.movesLeft - 2 }, foe);
+  assert.equal(expected.charge, CHARGE.atkBonus);
+  assert.equal(planStrike(s, horse, aiKnowledge(s, 1), new Map()), true);
+  const h = getUnit(s, horse.id);
+  assert.equal(distance(h, center), 1, 'the horseman rode up to the target');
+  assert.ok(h.hasAttacked);
+  assert.equal(getUnit(s, foe.id).hp, UNIT_TYPES.warrior.hp - expected.damage, 'the strike carried the charge');
 });

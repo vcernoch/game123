@@ -68,6 +68,7 @@ Check off `[x]` when done. Add new ideas to the end of the relevant phase or to 
 - [x] Flanking: +10 % attack for each other own unit next to the defender (max +30 %), shown in the attack preview with ⚔ badges on the flankers
 - [x] AI uses flanks: melee units first line up around their targets and strike only when everyone is in place, so each strike gets the others' flank bonus
 - [x] High ground: a unit on hills attacking a unit below it gets +20 % attack (shown in the attack preview and the tile panel)
+- [x] Cavalry charge: a horseman that has spent 2+ move points this turn gets +25 % attack, but not against a unit in forest; the AI counts the approach
 
 ## Ideas (unordered)
 - Diplomacy with multiple AIs

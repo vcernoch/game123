@@ -89,11 +89,13 @@ export function planStrike(state, unit, know = aiKnowledge(state, unit.owner), d
   const spots = [[key(unit.q, unit.r), 0], ...reachable(state, unit)];
   const home = { q: unit.q, r: unit.r };
   let best = null;
-  for (const [k] of spots) {
+  const homeMoves = unit.movesLeft;
+  for (const [k, cost] of spots) {
     const [q, r] = k.split(',').map(Number);
     const near = targets.filter((t) => distance(t, { q, r }) <= range);
     if (!near.length) continue;
-    unit.q = q; unit.r = r; // tentatively – restored right away
+    // tentatively – restored right away; the spent moves count for a cavalry charge
+    unit.q = q; unit.r = r; unit.movesLeft = homeMoves - cost;
     for (const t of near) {
       const hp = t.hp;
       t.hp -= pending.get(t.id) || 0; // tentatively – restored right away
@@ -102,7 +104,7 @@ export function planStrike(state, unit, know = aiKnowledge(state, unit.owner), d
       t.hp = hp;
       if (s > 0 && (!best || s > best.s)) best = { s, q, r, t };
     }
-    unit.q = home.q; unit.r = home.r;
+    unit.q = home.q; unit.r = home.r; unit.movesLeft = homeMoves;
   }
   if (!best) return false;
   if (best.q !== unit.q || best.r !== unit.r) moveUnit(state, unit.id, best.q, best.r);

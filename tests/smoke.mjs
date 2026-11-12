@@ -27,7 +27,7 @@ try {
   await page.waitForSelector('#new-game-dialog[open]', { timeout: 2000 });
   await page.screenshot({ path: 'artifacts/screenshot-menu.png' });
   await page.click('#new-game-dialog button[value="cancel"]');
-  await page.evaluate(() => window.__game.newGame(12345));
+  await page.evaluate(() => window.__game.newGame(54321));
   await page.evaluate(() => window.__game.setAnimSpeed(0.25));
   const shownVersion = await page.textContent('#version');
   const expected = await page.evaluate(() => window.__game.version);
@@ -584,6 +584,21 @@ try {
   const highTip = await page.textContent('#tooltip');
   if (!highTip.includes('high ground +20 %')) throw new Error(`high ground: tooltip does not show the bonus (${highTip})`);
   await page.screenshot({ path: 'artifacts/screenshot-highground.png' });
+  // cavalry charge: the attacker becomes a horseman that has already ridden 2 move points
+  await page.evaluate(() => {
+    const st = window.__game.getState();
+    const me = st.units.find((u) => u.owner === 0 && u.movesLeft > 0);
+    me.type = 'horseman'; me.movesLeft = 2;
+    const foe = st.units.find((u) => u.owner === 1 && st.units.some((m) => m === me) && Math.abs(u.q - me.q) + Math.abs(u.r - me.r) <= 2);
+    if (foe) st.tiles[`${foe.q},${foe.r}`].terrain = 'plains';
+    window.__game.refresh();
+  });
+  await page.mouse.move(flank.me.x, flank.me.y);
+  await page.mouse.move(flank.foe.x + 1, flank.foe.y - 1);
+  const chargeTip = await page.textContent('#tooltip');
+  if (!chargeTip.includes('charge +25 %')) throw new Error(`charge: tooltip does not show the bonus (${chargeTip})`);
+  if (!(await page.textContent('#info')).includes('charge ready')) throw new Error('charge: the unit panel does not say "charge ready"');
+  await page.screenshot({ path: 'artifacts/screenshot-charge.png' });
 
   // save file: the button downloads the game, loading the file through the file input restores it,
   // a broken file shows an error and keeps the current game

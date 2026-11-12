@@ -2,7 +2,7 @@
 import { key, neighbors, distance } from './hex.js';
 import { generateMap, hasRiverEdge } from './map.js';
 import {
-  TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY, VISION, DIFFICULTY, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, ROAD_COST, RIVER, FLANK, HIGH_GROUND,
+  TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY, VISION, DIFFICULTY, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, ROAD_COST, RIVER, FLANK, HIGH_GROUND, CHARGE,
   FACTIONS, NO_FACTION, MAP_SIZES, HAPPENINGS, FORTIFY, TERRITORY, RESOURCES,
   UPGRADES, UPGRADE, DISBAND,
 } from './rules.js';
@@ -481,6 +481,23 @@ export function highGroundBonus(state, attacker, defender) {
   return high(attacker) && !high(defender) ? HIGH_GROUND.atkBonus : 0;
 }
 
+// Movement points the unit has spent so far this turn.
+export function movesSpent(state, unit) {
+  return Math.max(0, unitMove(state, unit) - unit.movesLeft);
+}
+
+// Can the unit charge (enough movement spent this turn)? Ignores the target's terrain.
+export function chargeReady(state, unit) {
+  return CHARGE.types.includes(unit.type) && !unit.hasAttacked && movesSpent(state, unit) >= CHARGE.minMoves;
+}
+
+// Cavalry charge: attack bonus for a horseman that moved far enough this turn (0 against a defender in forest).
+export function chargeBonus(state, attacker, defender) {
+  if (!chargeReady(state, attacker)) return 0;
+  const t = tileAt(state, defender.q, defender.r);
+  return t && CHARGE.blockedBy.includes(t.terrain) ? 0 : CHARGE.atkBonus;
+}
+
 // Searches reachable tiles (Dijkstra). Returns costs and predecessors so a path can be built.
 // Own units can be passed through but not stopped on.
 function searchMoves(state, unit) {
@@ -844,7 +861,8 @@ function attackPower(state, unit, target) {
 export function previewAttack(state, attacker, defender) {
   const flank = flankBonus(state, attacker, defender);
   const high = highGroundBonus(state, attacker, defender);
-  const atk = attackPower(state, attacker, defender) * hpFactor(attacker) * (1 + flank + high);
+  const charge = chargeBonus(state, attacker, defender);
+  const atk = attackPower(state, attacker, defender) * hpFactor(attacker) * (1 + flank + high + charge);
   const def = defenseValue(state, defender, attacker) * (1 + riverDefense(state, attacker, defender));
   const damage = Math.max(1, Math.round((4 * atk) / def));
   const defenderHp = Math.max(0, defender.hp - damage);
@@ -855,7 +873,7 @@ export function previewAttack(state, attacker, defender) {
     const cDef = defenseValue(state, attacker, defender);
     counter = Math.max(1, Math.round((3 * cAtk) / cDef));
   }
-  return { damage, counter, kills: defenderHp === 0, dies: attacker.hp - counter <= 0, flank, high };
+  return { damage, counter, kills: defenderHp === 0, dies: attacker.hp - counter <= 0, flank, high, charge };
 }
 
 function hpFactor(unit) {

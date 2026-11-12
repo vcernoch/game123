@@ -2,6 +2,16 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-12 – Cavalry charge (v0.19.0)
+- **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.9.0–v0.19.0) is far ahead of `main` (v0.8.0) – please merge it.
+- Phase 9 (battlefield tactics, own improvement), new task. `CHARGE` in `rules.js` (`types` ['horseman'], `minMoves` 2, `atkBonus` 0.25, `blockedBy` ['forest']). `movesSpent`, `chargeReady`, `chargeBonus` in `game.js`: a horseman that has spent at least 2 move points this turn before attacking gets +25 % attack; no charge against a defender in forest. Adds to flank and high ground (`1 + flank + high + charge`), never to the counterattack. `previewAttack` returns `charge`, so the real attack, the UI and the AI use the same number. Spearmen keep their double strength against horsemen, so a charge into spears is still a bad idea.
+- UI: the attack tooltip / touch confirmation appends "· charge +25 %"; the unit panel shows "charge ready (+25 %)" in orange; the tile panel for forest says "no cavalry charge". Help text updated.
+- AI: `planStrike` now sets the tentative `movesLeft` along with the tentative position when it evaluates strike tiles, so it sees the charge bonus of a longer approach (before, previews from other tiles silently assumed no movement spent).
+- Smoke test: the AI horsemen now hit harder, so on seed 12345 the passive player lost all units in the first 5 turns and the "Tab selects a unit" step had nothing to select. I changed the starting seed of that section to 54321 (player still has a unit at turn 6); the check itself is unchanged.
+- No state structure change (`state.version` stays 16).
+- Tests: +2 logic (no charge when fresh or after 1 move point, other types never, not into forest, a real 2-tile move then attack deals the previewed charged damage with no stronger counter, spent after attacking; the AI horseman rides up 2 tiles and strikes with the charge). Smoke test makes the flanking attacker a horseman with 2/4 moves, checks the tooltip and the panel, and saves `artifacts/screenshot-charge.png`.
+- Status: `npm run check` green (72 logic tests + smoke).
+
 ## 2026-11-12 – High ground (v0.18.0)
 - **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.9.0–v0.18.0) is far ahead of `main` (v0.8.0) – please merge it.
 - Phase 9 (battlefield tactics, own improvement) got a new task. `HIGH_GROUND` in `rules.js` (`atkBonus` 0.2, `terrain` ['hills']). `highGroundBonus` in `game.js`: an attacker standing on hills that attacks a unit not on hills gets +20 % attack – melee and ranged alike. It adds to the flank bonus (`1 + flank + high`) and, like flanking, doesn't boost the counterattack. `previewAttack` returns `high`, so the real attack, the UI and the AI use the same number.

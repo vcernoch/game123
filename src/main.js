@@ -4,7 +4,7 @@ import {
   unitAt, cityAt, getUnit, incomeOf, previewAttack, tileAt, pathTo, nextActiveUnit, cityInfo,
   cloneState, drainEvents, migrateState, logFor, isUndoableMove, canFortify, fortify, activeUnits, territoryOwner, cityResources, unitSummary, planRoute, setOrder, runOrders, cancelOrder, visibleTiles, exploredTiles, build, unitCost, hasBuilding,
   rankOf, rankMult, buildingCost, unitMove, factionOf, riverDefense, flankers, zocTiles, threatTiles, exportGame, importGame, saveFileName, parseSeed, restartOptions,
-  upgradeOptions, upgradeUnit, canDisband, disbandRefund, disbandUnit,
+  upgradeOptions, upgradeUnit, canDisband, disbandRefund, disbandUnit, chargeReady,
 } from './game.js';
 import { createAnimator } from './anim.js';
 import { decideTap } from './input.js';
@@ -16,7 +16,7 @@ import { SHORTCUTS, keyAction, recruitKey } from './keys.js';
 import { render, canvasSize, pickHex } from './render.js';
 import { key } from './hex.js';
 import {
-  UNIT_TYPES, TERRAIN, PLAYERS, DIFFICULTY, BUILDINGS, RANKS, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FORTIFY, TERRITORY, ECONOMY, RESOURCES, HIGH_GROUND,
+  UNIT_TYPES, TERRAIN, PLAYERS, DIFFICULTY, BUILDINGS, RANKS, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FORTIFY, TERRITORY, ECONOMY, RESOURCES, HIGH_GROUND, CHARGE,
 } from './rules.js';
 
 const SAVE_KEY = 'game123-save';
@@ -103,6 +103,7 @@ function attackLabel(attacker, target, preview) {
   let label = riverDefense(state, attacker, target) ? 'Attack across a river' : 'Attack';
   if (preview.flank) label = `${label.replace('Attack', 'Flanking attack')} (+${Math.round(preview.flank * 100)} %)`;
   if (preview.high) label += ` · high ground +${Math.round(preview.high * 100)} %`;
+  if (preview.charge) label += ` · charge +${Math.round(preview.charge * 100)} %`;
   return label;
 }
 
@@ -176,7 +177,7 @@ function updateHud() {
     const t = UNIT_TYPES[u.type];
     html += `<h3>${t.name} <span class="tag" style="background:${PLAYERS[u.owner].color}">${PLAYERS[u.owner].name}</span></h3>
       <p>HP ${u.hp}/${t.hp} · Attack ${fmt(t.atk * rankMult(u))} · Defense ${fmt(t.def * rankMult(u))} · Range ${t.range}</p>
-      <p>Move ${fmt(u.movesLeft)}/${unitMove(state, u)}${u.fortified ? '' : u.hasAttacked ? ' · already attacked' : ''}</p>
+      <p>Move ${fmt(u.movesLeft)}/${unitMove(state, u)}${u.fortified ? '' : u.hasAttacked ? ' · already attacked' : ''}${chargeReady(state, u) ? ` · <span class="charge">charge ready (+${Math.round(CHARGE.atkBonus * 100)} %)</span>` : ''}</p>
       <p>${rankLine(u)}</p>${t.desc ? `<p class="hint">${t.desc}</p>` : ''}`;
     if (u.goto && u.owner === 0) {
       const r = planRoute(state, u, u.goto.q, u.goto.r);
@@ -243,7 +244,8 @@ function updateHud() {
     const road = tile.road ? ' · road (move cost ½ along roads)' : '';
     const river = tile.rivers && tile.rivers.length ? ` · river (crossing +${RIVER.crossCost} move, defender +${Math.round(RIVER.defBonus * 100)} %)` : '';
     const high = HIGH_GROUND.terrain.includes(tile.terrain) ? ` · high ground (attack +${Math.round(HIGH_GROUND.atkBonus * 100)} % against units below)` : '';
-    html = `<p>${t.name}${t.passable ? ` · move ${t.cost} · defense +${Math.round(t.defBonus * 100)} %` : ' · impassable'}${high}${road}${river}</p>`;
+    const noCharge = CHARGE.blockedBy.includes(tile.terrain) ? ' · no cavalry charge' : '';
+    html = `<p>${t.name}${t.passable ? ` · move ${t.cost} · defense +${Math.round(t.defBonus * 100)} %` : ' · impassable'}${high}${noCharge}${road}${river}</p>`;
     if (tile.terrain && t.passable && zocTiles(state, 0).has(key(hover.q, hover.r))) {
       html += '<p class="hint">Enemy zone of control – a unit that steps here must stop</p>';
     }

@@ -108,6 +108,11 @@ export const FLANK = { perUnit: 0.1, max: 3 };
 // terrain) gets +atkBonus attack. Like flanking it adds to the attack only, not to the counterattack.
 export const HIGH_GROUND = { atkBonus: 0.2, terrain: ['hills'] };
 
+// Cavalry charge: a unit of one of `types` that has spent at least `minMoves` movement points this turn
+// gets +atkBonus attack – unless the defender stands on one of `blockedBy` (no charging into woods).
+// Like flanking it adds to the attack only, not to the counterattack.
+export const CHARGE = { types: ['horseman'], minMoves: 2, atkBonus: 0.25, blockedBy: ['forest'] };
+
 // Random events at the start of a player's turn (from turn fromTurn, with probability chance).
 // They hit a random city of the player; weight = relative frequency.
 // harvest: extra gold; plague: units in and around the city lose HP (they don't die);

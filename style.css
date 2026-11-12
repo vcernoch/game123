@@ -139,6 +139,7 @@ fieldset .seed-row + small { margin-left: 0; }
 .disband { margin-bottom: 10px; }
 .disband.armed { background: #c0392b; color: #fff; }
 .order { color: #ffe27a; }
+.charge { color: #ffb74d; font-weight: 600; }
 .resource { color: #f2c94c; }
 kbd { font: 600 11px ui-monospace, monospace; background: #3c434f; color: var(--text); border-radius: 4px; padding: 1px 5px; border-bottom: 2px solid #20242c; }
 .hotkey { margin-right: 4px; opacity: 0.85; }
