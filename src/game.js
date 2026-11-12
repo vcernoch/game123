@@ -2,7 +2,7 @@
 import { key, neighbors, distance } from './hex.js';
 import { generateMap, hasRiverEdge } from './map.js';
 import {
-  TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY, VISION, DIFFICULTY, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, ROAD_COST, RIVER, FLANK,
+  TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY, VISION, DIFFICULTY, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, ROAD_COST, RIVER, FLANK, HIGH_GROUND,
   FACTIONS, NO_FACTION, MAP_SIZES, HAPPENINGS, FORTIFY, TERRITORY, RESOURCES,
   UPGRADES, UPGRADE, DISBAND,
 } from './rules.js';
@@ -475,6 +475,12 @@ export function flankBonus(state, attacker, defender) {
   return FLANK.perUnit * Math.min(FLANK.max, flankers(state, attacker, defender).length);
 }
 
+// High ground: attack bonus for an attacker on hills against a defender below it (0 otherwise).
+export function highGroundBonus(state, attacker, defender) {
+  const high = (u) => { const t = tileAt(state, u.q, u.r); return !!t && HIGH_GROUND.terrain.includes(t.terrain); };
+  return high(attacker) && !high(defender) ? HIGH_GROUND.atkBonus : 0;
+}
+
 // Searches reachable tiles (Dijkstra). Returns costs and predecessors so a path can be built.
 // Own units can be passed through but not stopped on.
 function searchMoves(state, unit) {
@@ -837,7 +843,8 @@ function attackPower(state, unit, target) {
 // Combat estimate without randomness – used by both UI and AI.
 export function previewAttack(state, attacker, defender) {
   const flank = flankBonus(state, attacker, defender);
-  const atk = attackPower(state, attacker, defender) * hpFactor(attacker) * (1 + flank);
+  const high = highGroundBonus(state, attacker, defender);
+  const atk = attackPower(state, attacker, defender) * hpFactor(attacker) * (1 + flank + high);
   const def = defenseValue(state, defender, attacker) * (1 + riverDefense(state, attacker, defender));
   const damage = Math.max(1, Math.round((4 * atk) / def));
   const defenderHp = Math.max(0, defender.hp - damage);
@@ -848,7 +855,7 @@ export function previewAttack(state, attacker, defender) {
     const cDef = defenseValue(state, attacker, defender);
     counter = Math.max(1, Math.round((3 * cAtk) / cDef));
   }
-  return { damage, counter, kills: defenderHp === 0, dies: attacker.hp - counter <= 0, flank };
+  return { damage, counter, kills: defenderHp === 0, dies: attacker.hp - counter <= 0, flank, high };
 }
 
 function hpFactor(unit) {

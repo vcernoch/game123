@@ -5,7 +5,7 @@ import {
   previewAttack, cloneState, pathTo, nextActiveUnit, tileAt, cityInfo, incomeOf, defenseValue,
   drainEvents, applyEvent, migrateState, STATE_VERSION,
   visibleTiles, exploredTiles, build, unitCost, rankOf, stepCost, getUnit,
-  buildingCost, unitMove, factionOf, armyPower, riverBetween, riverDefense, flankers, flankBonus,
+  buildingCost, unitMove, factionOf, armyPower, riverBetween, riverDefense, flankers, flankBonus, highGroundBonus,
   rollHappening, applyHappening, cityIncome, logFor, isUndoableMove, canFortify, fortify, activeUnits, territoryMap, territoryOwner, planRoute, setOrder, runOrders, cancelOrder, cityHeal, citySight, cityResources, unitSummary, zocTiles,
   exportGame, importGame, saveFileName, stateProblem, SAVE_FORMAT, threatTiles, parseSeed, restartOptions, MAX_SEED,
   upgradeOptions, upgradeUnit, upgradeCost, canDisband, disbandRefund, disbandUnit,
@@ -24,7 +24,7 @@ import { GAME_VERSION, GAME_DATE } from '../src/version.js';
 import { pathExists, generateMap, dirTo } from '../src/map.js';
 import { distance, key, neighbors } from '../src/hex.js';
 import {
-  RESOURCES, FORTIFY, TERRITORY, ECONOMY, UNIT_TYPES, TERRAIN, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FLANK,
+  RESOURCES, FORTIFY, TERRITORY, ECONOMY, UNIT_TYPES, TERRAIN, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FLANK, HIGH_GROUND,
   UPGRADES, UPGRADE, DISBAND,
 } from '../src/rules.js';
 
@@ -1912,4 +1912,46 @@ test('AI line-up: a lone kill is struck at once, a doomed target is left to the 
   const doomed = [{ unitId: 999, targetId: foe2.id, damage: foe2.hp }];
   assert.equal(planStrike(s, b, aiKnowledge(s, 1), new Map(), { lineUp: doomed }), false);
   assert.deepEqual([getUnit(s, b.id).q, getUnit(s, b.id).r], [ring[3].q, ring[3].r], 'it did not move');
+});
+
+test('high ground: an attacker on hills against a unit below gets the bonus, stacks with flanking, counter not boosted', () => {
+  const s = createGame({ seed: 1, fog: false });
+  for (const t of Object.values(s.tiles)) { t.terrain = 'plains'; delete t.rivers; delete t.road; }
+  s.cities = s.cities.filter((c) => distance(c, { q: 5, r: 4 }) > 3);
+  const center = tileAt(s, 5, 4);
+  const around = neighbors(center.q, center.r);
+  const mk = (id, owner, p, type = 'warrior') => ({ id, type, owner, q: p.q, r: p.r, hp: UNIT_TYPES[type].hp, movesLeft: 2, hasAttacked: false, xp: 0 });
+  const foe = mk(901, 1, center);
+  const me = mk(900, 0, around[0]);
+  s.units = [me, foe];
+  const flat = previewAttack(s, me, foe);
+  assert.equal(flat.high, 0);
+  // attacker on hills, defender on plains: bonus
+  tileAt(s, me.q, me.r).terrain = 'hills';
+  assert.equal(highGroundBonus(s, me, foe), HIGH_GROUND.atkBonus);
+  const up = previewAttack(s, me, foe);
+  assert.equal(up.high, HIGH_GROUND.atkBonus);
+  assert.ok(up.damage > flat.damage, `high ground ${up.damage} > flat ${flat.damage}`);
+  // the counterattack is never stronger; the attacker's hills defense even weakens it
+  assert.ok(up.counter <= flat.counter);
+  // the defender's counter from below never gets the bonus, and both on hills = no bonus
+  assert.equal(highGroundBonus(s, foe, me), 0);
+  tileAt(s, foe.q, foe.r).terrain = 'hills';
+  assert.equal(highGroundBonus(s, me, foe), 0);
+  assert.equal(previewAttack(s, me, foe).high, 0);
+  tileAt(s, foe.q, foe.r).terrain = 'plains';
+  // works for a ranged attacker two tiles away, too
+  const archer = mk(950, 0, { q: center.q + 2, r: center.r - 1 }, 'archer');
+  tileAt(s, archer.q, archer.r).terrain = 'hills';
+  assert.equal(highGroundBonus(s, archer, foe), HIGH_GROUND.atkBonus);
+  // stacks additively with flanking
+  s.units.push(mk(911, 0, around[1]));
+  const both = previewAttack(s, me, foe);
+  assert.ok(Math.abs(both.flank - FLANK.perUnit) < 1e-9);
+  assert.ok(both.damage >= up.damage);
+  // the real attack deals the previewed damage
+  s.current = 0;
+  const expected = previewAttack(s, me, foe).damage;
+  assert.ok(attack(s, me.id, foe.id));
+  assert.equal(getUnit(s, foe.id) ? getUnit(s, foe.id).hp : 0, Math.max(0, UNIT_TYPES.warrior.hp - expected));
 });

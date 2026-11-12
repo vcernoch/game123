@@ -572,6 +572,18 @@ try {
   const flankTip = await page.textContent('#tooltip');
   if (!flankTip.includes('Flanking attack (+20 %)')) throw new Error(`flank: tooltip does not show the bonus (${flankTip})`);
   await page.screenshot({ path: 'artifacts/screenshot-flank.png' });
+  // high ground: the attacker's tile turns into hills – the tooltip adds the bonus
+  await page.evaluate(() => {
+    const st = window.__game.getState();
+    const me = st.units.find((u) => u.owner === 0 && u.movesLeft > 0);
+    st.tiles[`${me.q},${me.r}`].terrain = 'hills';
+    window.__game.refresh();
+  });
+  await page.mouse.move(flank.me.x, flank.me.y); // leave the target hex so the tooltip is rebuilt
+  await page.mouse.move(flank.foe.x - 1, flank.foe.y - 1);
+  const highTip = await page.textContent('#tooltip');
+  if (!highTip.includes('high ground +20 %')) throw new Error(`high ground: tooltip does not show the bonus (${highTip})`);
+  await page.screenshot({ path: 'artifacts/screenshot-highground.png' });
 
   // save file: the button downloads the game, loading the file through the file input restores it,
   // a broken file shows an error and keeps the current game

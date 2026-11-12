@@ -16,7 +16,7 @@ import { SHORTCUTS, keyAction, recruitKey } from './keys.js';
 import { render, canvasSize, pickHex } from './render.js';
 import { key } from './hex.js';
 import {
-  UNIT_TYPES, TERRAIN, PLAYERS, DIFFICULTY, BUILDINGS, RANKS, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FORTIFY, TERRITORY, ECONOMY, RESOURCES,
+  UNIT_TYPES, TERRAIN, PLAYERS, DIFFICULTY, BUILDINGS, RANKS, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FORTIFY, TERRITORY, ECONOMY, RESOURCES, HIGH_GROUND,
 } from './rules.js';
 
 const SAVE_KEY = 'game123-save';
@@ -102,6 +102,7 @@ function rankLine(u) {
 function attackLabel(attacker, target, preview) {
   let label = riverDefense(state, attacker, target) ? 'Attack across a river' : 'Attack';
   if (preview.flank) label = `${label.replace('Attack', 'Flanking attack')} (+${Math.round(preview.flank * 100)} %)`;
+  if (preview.high) label += ` · high ground +${Math.round(preview.high * 100)} %`;
   return label;
 }
 
@@ -241,7 +242,8 @@ function updateHud() {
     const t = TERRAIN[tile.terrain];
     const road = tile.road ? ' · road (move cost ½ along roads)' : '';
     const river = tile.rivers && tile.rivers.length ? ` · river (crossing +${RIVER.crossCost} move, defender +${Math.round(RIVER.defBonus * 100)} %)` : '';
-    html = `<p>${t.name}${t.passable ? ` · move ${t.cost} · defense +${Math.round(t.defBonus * 100)} %` : ' · impassable'}${road}${river}</p>`;
+    const high = HIGH_GROUND.terrain.includes(tile.terrain) ? ` · high ground (attack +${Math.round(HIGH_GROUND.atkBonus * 100)} % against units below)` : '';
+    html = `<p>${t.name}${t.passable ? ` · move ${t.cost} · defense +${Math.round(t.defBonus * 100)} %` : ' · impassable'}${high}${road}${river}</p>`;
     if (tile.terrain && t.passable && zocTiles(state, 0).has(key(hover.q, hover.r))) {
       html += '<p class="hint">Enemy zone of control – a unit that steps here must stop</p>';
     }

@@ -98,11 +98,15 @@ export const FORTIFY = { defBonus: 0.25 };
 // Rivers flow along hex edges. Crossing a river costs extra movement (a bridge = road on both sides
 // is free) and a unit attacked in melee across a river gets a defense bonus.
 // perTiles: one river per this many map tiles (small 1, medium 2, large 4); length in edges.
+export const RIVER = { crossCost: 1, defBonus: 0.25, minLength: 3, maxLength: 14, perTiles: 70 };
+
 // Flanking: an attack gets +perUnit attack for every other unit of the attacker standing next to the
 // defender (up to `max` such units). It doesn't help the defender's counterattack.
 export const FLANK = { perUnit: 0.1, max: 3 };
 
-export const RIVER = { crossCost: 1, defBonus: 0.25, minLength: 3, maxLength: 14, perTiles: 70 };
+// High ground: a unit standing on one of `terrain` that attacks a defender standing lower (not on such a
+// terrain) gets +atkBonus attack. Like flanking it adds to the attack only, not to the counterattack.
+export const HIGH_GROUND = { atkBonus: 0.2, terrain: ['hills'] };
 
 // Random events at the start of a player's turn (from turn fromTurn, with probability chance).
 // They hit a random city of the player; weight = relative frequency.

@@ -2,6 +2,16 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-12 – High ground (v0.18.0)
+- **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.9.0–v0.18.0) is far ahead of `main` (v0.8.0) – please merge it.
+- Phase 9 (battlefield tactics, own improvement) got a new task. `HIGH_GROUND` in `rules.js` (`atkBonus` 0.2, `terrain` ['hills']). `highGroundBonus` in `game.js`: an attacker standing on hills that attacks a unit not on hills gets +20 % attack – melee and ranged alike. It adds to the flank bonus (`1 + flank + high`) and, like flanking, doesn't boost the counterattack. `previewAttack` returns `high`, so the real attack, the UI and the AI use the same number.
+- UI: the attack tooltip / touch confirmation appends "· high ground +20 %"; the tile panel for hills says "high ground (attack +20 % against units below)". Help text updated.
+- AI: no special code – `planStrike` evaluates attacks from every reachable tile via `previewAttack` and already liked hills for their defense, so it now picks hilltop strike positions a bit more often.
+- Small cleanup: the `RIVER` constant in `rules.js` was separated from its comment by `FLANK`; moved back.
+- No state structure change (`state.version` stays 16).
+- Tests: +1 logic (bonus only from hills against a unit below, not hills vs. hills, not on the counter, ranged attackers too, stacks with flanking, the real attack deals the previewed damage). Smoke test turns the flanking attacker's tile into hills, checks the tooltip and saves `artifacts/screenshot-highground.png`.
+- Status: `npm run check` green (70 logic tests + smoke).
+
 ## 2026-11-11 – AI lines up flanking attacks (v0.17.0)
 - **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.9.0–v0.17.0) is far ahead of `main` (v0.8.0) – please merge it.
 - Follow-up to flanking (phase 9). Before, AI melee units moved and attacked one at a time, so the first attacker on a target never had a flank bonus. Now `planStrike(…, { lineUp })` only moves a melee unit into its strike position and returns the plan `{ unitId, targetId, damage }`; `strikeLinedUp` makes the attacks after all units have acted, in plan order, so every strike counts the others standing next to the target.
