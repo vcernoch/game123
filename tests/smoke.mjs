@@ -476,6 +476,39 @@ try {
   if (plague.hidden || !plague.text.includes('Plague') || !plague.hits) throw new Error(`happening: ${JSON.stringify(plague)}`);
   await page.screenshot({ path: 'artifacts/screenshot-happening.png' });
 
+  // enemy turn report: an enemy horseman destroys a weak own unit, the banner names the loss
+  const report = await page.evaluate(async () => {
+    const g = await import('./src/game.js');
+    window.__game.newGame(777, { fog: false });
+    const st = window.__game.getState();
+    const mine = st.units.find((u) => u.owner === 0);
+    const foe = st.units.find((u) => u.owner === 1);
+    const spot = Object.values(st.tiles).find((t) => g.isPassable(st, t.q, t.r) && !g.unitAt(st, t.q, t.r)
+      && Math.max(Math.abs(t.q - mine.q), Math.abs(t.r - mine.r), Math.abs(t.q + t.r - mine.q - mine.r)) === 1);
+    foe.type = 'horseman'; foe.q = spot.q; foe.r = spot.r; foe.movesLeft = 4; foe.hasAttacked = false;
+    mine.hp = 1;
+    st.current = 1;
+    const before = g.cloneState(st);
+    const ok = g.attack(st, foe.id, mine.id);
+    const events = g.drainEvents(st);
+    st.current = 0;
+    window.__game.showReport(before, events);
+    const el = document.getElementById('notice');
+    const mark = window.__game.lossMarks()[0];
+    return { ok, text: el.textContent, hidden: el.hidden, cls: el.className, marked: !!mark && mark.q === mine.q && mark.r === mine.r };
+  });
+  if (!report.ok || report.hidden || report.cls !== 'bad' || !report.text.startsWith('Enemy turn: you lost') || !report.marked) {
+    throw new Error(`turn report: ${JSON.stringify(report)}`);
+  }
+  if (await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1)) {
+    throw new Error('turn report: banner caused horizontal page scroll');
+  }
+  await page.screenshot({ path: 'artifacts/screenshot-report.png' });
+  // ending the turn clears the banner and the marks
+  const cleared = await page.evaluate(() => { window.__game.endTurn(); return window.__game.lossMarks().length; });
+  if (cleared) throw new Error('turn report: loss marks not cleared at end of turn');
+  await page.waitForFunction(() => !window.__game.isBusy(), null, { timeout: 15000 });
+
   // rivers: large map without fog, hovering a river tile shows its description in the panel
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.evaluate(() => { window.__game.newGame(4242, { size: 'large', fog: false }); });

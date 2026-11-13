@@ -1226,6 +1226,67 @@ export function logFor(state, viewer) {
   return out;
 }
 
+// ---------- enemy turn report ----------
+// What the enemy did to the viewer during its turn, for the banner at the start of the viewer's turn.
+// before = state before the enemy turn, events = what happened in it. The events are replayed on a copy,
+// so units recruited during the turn are known too. Only things the viewer always knows about are
+// counted (attacks on own units, lost cities), so nothing hidden in the fog leaks out.
+// Returns { lost: { type: count }, wounded, fell, citiesLost: [phrases like 'the city Oakford'], spots: [{ q, r, kind }] }.
+export function turnReport(before, events, viewer) {
+  const st = cloneState(before);
+  const rep = { lost: {}, wounded: 0, fell: 0, citiesLost: [], spots: [] };
+  const wounded = new Set();
+  for (const ev of events) {
+    if (ev.type === 'attack') {
+      const a = getUnit(st, ev.attackerId);
+      const d = getUnit(st, ev.defenderId);
+      if (a && d && d.owner === viewer && a.owner !== viewer) {
+        if (ev.killed) {
+          rep.lost[d.type] = (rep.lost[d.type] || 0) + 1;
+          rep.spots.push({ q: d.q, r: d.r, kind: 'lost' });
+          wounded.delete(d.id);
+        } else {
+          wounded.add(d.id);
+        }
+        if (ev.died) rep.fell++;
+      }
+    } else if (ev.type === 'capture') {
+      const c = st.cities.find((x) => x.id === ev.cityId);
+      if (c && c.owner === viewer && ev.owner !== viewer) {
+        rep.citiesLost.push(c.name === 'Your Capital' ? 'your capital' : `the city ${c.name}`);
+        rep.spots.push({ q: c.q, r: c.r, kind: 'city' });
+      }
+    } else if (ev.type === 'disband') {
+      wounded.delete(ev.unitId);
+    }
+    applyEvent(st, ev);
+  }
+  rep.wounded = wounded.size;
+  return rep;
+}
+
+// "Warrior ×2, Archer and the city Oakford" style list.
+function joinList(items) {
+  return items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
+}
+
+// One sentence for the banner; '' when the enemy didn't touch the viewer.
+export function reportText(rep) {
+  const losses = Object.entries(rep.lost).map(([t, n]) => `${UNIT_TYPES[t].name}${n > 1 ? ` ×${n}` : ''}`);
+  losses.push(...rep.citiesLost);
+  const parts = [];
+  if (losses.length) parts.push(`you lost ${joinList(losses)}.`);
+  if (rep.wounded) parts.push(`${rep.wounded} unit${rep.wounded === 1 ? ' was' : 's were'} wounded.`);
+  if (rep.fell) parts.push(`${rep.fell} attacker${rep.fell === 1 ? '' : 's'} fell to your counterattacks.`);
+  if (!parts.length) return '';
+  return `Enemy turn: ${parts.join(' ')}`;
+}
+
+// Whether the report contains a loss (the banner turns red).
+export function reportIsBad(rep) {
+  return Object.keys(rep.lost).length > 0 || rep.citiesLost.length > 0 || rep.wounded > 0;
+}
+
 // ---------- save files ----------
 // A save file is JSON: { format, gameVersion, saved, state }. importGame also accepts a bare state
 // (the shape kept in localStorage). Imported states are migrated and checked before use.

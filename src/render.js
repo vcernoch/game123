@@ -117,7 +117,32 @@ export function render(ctx, state, view = {}) {
     if (view.flankers && view.flankers.has(u.id)) drawFlankBadge(ctx, c.x, c.y);
   }
 
+  // where the player lost units or cities in the last enemy turn (until the player ends the turn)
+  for (const m of view.lossMarks || []) {
+    const c = tileCenter(m.q, m.r);
+    drawLossMark(ctx, c.x + HEX_SIZE * 0.42, c.y - HEX_SIZE * 0.5);
+  }
+
   for (const f of view.floaters || []) drawFloater(ctx, f);
+}
+
+// A small red cross in a dark disc at the top-right of a tile: "you lost something here".
+function drawLossMark(ctx, x, y) {
+  const r = Math.max(5, HEX_SIZE * 0.2);
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(20,22,30,0.85)';
+  ctx.fill();
+  ctx.strokeStyle = '#ff6b5a';
+  ctx.lineWidth = Math.max(2, r * 0.35);
+  ctx.lineCap = 'round';
+  const d = r * 0.5;
+  ctx.beginPath();
+  ctx.moveTo(x - d, y - d); ctx.lineTo(x + d, y + d);
+  ctx.moveTo(x + d, y - d); ctx.lineTo(x - d, y + d);
+  ctx.stroke();
+  ctx.restore();
 }
 
 // Small badge with crossed swords at the top-left of a unit that helps a flanking attack.

@@ -9,6 +9,7 @@ import {
   rollHappening, applyHappening, cityIncome, logFor, isUndoableMove, canFortify, fortify, activeUnits, territoryMap, territoryOwner, planRoute, setOrder, runOrders, cancelOrder, cityHeal, citySight, cityResources, unitSummary, zocTiles,
   exportGame, importGame, saveFileName, stateProblem, SAVE_FORMAT, threatTiles, parseSeed, restartOptions, MAX_SEED,
   upgradeOptions, upgradeUnit, upgradeCost, canDisband, disbandRefund, disbandUnit,
+  turnReport, reportText, reportIsBad,
 } from '../src/game.js';
 import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
@@ -2026,4 +2027,94 @@ test('cavalry charge: the AI counts the moves it spends on the approach', () => 
   assert.equal(distance(h, center), 1, 'the horseman rode up to the target');
   assert.ok(h.hasAttacked);
   assert.equal(getUnit(s, foe.id).hp, UNIT_TYPES.warrior.hp - expected.damage, 'the strike carried the charge');
+});
+
+test('enemy turn report: losses, wounded units, fallen attackers and lost cities from the enemy turn', () => {
+  const s = createGame({ seed: 1, fog: false, happenings: false });
+  for (const t of Object.values(s.tiles)) { t.terrain = 'plains'; delete t.rivers; delete t.road; }
+  s.cities = s.cities.filter((c) => distance(c, { q: 5, r: 4 }) > 3);
+  const center = { q: 5, r: 4 };
+  const around = neighbors(center.q, center.r);
+  const mk = (id, owner, p, type = 'warrior', hp = UNIT_TYPES[type].hp) => ({ id, type, owner, q: p.q, r: p.r, hp, movesLeft: 2, hasAttacked: false, xp: 0 });
+  // own: a weak archer (dies), a tough spearman (wounded), a warrior that kills a weak attacker
+  const weak = mk(900, 0, center, 'archer', 1);
+  const tough = mk(901, 0, around[3], 'spearman');
+  const strong = mk(902, 0, tileAt(s, 8, 4), 'warrior');
+  const a1 = mk(910, 1, around[0], 'horseman');
+  const a2 = mk(911, 1, around[2], 'warrior');
+  const a3 = mk(912, 1, tileAt(s, 9, 4), 'archer', 1);
+  s.units = [weak, tough, strong, a1, a2, a3];
+  s.current = 1;
+  const before = cloneState(s);
+  assert.ok(attack(s, a1.id, weak.id));
+  assert.ok(attack(s, a2.id, tough.id));
+  assert.ok(attack(s, a3.id, strong.id));
+  assert.ok(!getUnit(s, a3.id), 'the weak archer fell to the counter (precondition)');
+  const events = drainEvents(s);
+  const rep = turnReport(before, events, 0);
+  assert.deepEqual(rep.lost, { archer: 1 });
+  assert.equal(rep.wounded, 2, 'spearman and warrior survived their fights');
+  assert.equal(rep.fell, 1);
+  assert.deepEqual(rep.citiesLost, []);
+  assert.deepEqual(rep.spots, [{ q: 5, r: 4, kind: 'lost' }]);
+  assert.ok(reportIsBad(rep));
+  const text = reportText(rep);
+  assert.ok(text.startsWith('Enemy turn: you lost Archer.'), text);
+  assert.ok(text.includes('2 units were wounded.') && text.includes('1 attacker fell'), text);
+  // the report doesn't change `before`, and from the enemy's side nothing of this is "its" loss
+  assert.equal(getUnit(before, weak.id).hp, 1);
+  const theirs = turnReport(before, events, 1);
+  assert.deepEqual(theirs.lost, {});
+  assert.equal(reportText(theirs), '');
+
+  // a wounded unit that is then destroyed counts only as lost; a city captured from the player is listed
+  const s2 = createGame({ seed: 1, fog: false, happenings: false });
+  for (const t of Object.values(s2.tiles)) { t.terrain = 'plains'; delete t.rivers; delete t.road; }
+  const city = s2.cities.find((c) => c.owner === null);
+  city.owner = 0;
+  const near = neighbors(city.q, city.r).filter((p) => tileAt(s2, p.q, p.r));
+  const guard = mk(950, 0, city, 'warrior', 2);
+  const b1 = mk(960, 1, near[0], 'archer');
+  const b2 = mk(961, 1, near[1], 'horseman');
+  s2.units = [...s2.units.filter((u) => distance(u, city) > 3), guard, b1, b2];
+  s2.current = 1;
+  const before2 = cloneState(s2);
+  attack(s2, b1.id, guard.id);
+  if (getUnit(s2, guard.id)) attack(s2, b2.id, guard.id);
+  assert.ok(!getUnit(s2, guard.id), 'guard destroyed (precondition)');
+  const mover = getUnit(s2, b2.id) || getUnit(s2, b1.id);
+  mover.movesLeft = 3; mover.hasAttacked = false;
+  assert.ok(moveUnit(s2, mover.id, city.q, city.r));
+  const rep2 = turnReport(before2, drainEvents(s2), 0);
+  assert.deepEqual(rep2.lost, { warrior: 1 });
+  assert.equal(rep2.wounded, 0);
+  assert.deepEqual(rep2.citiesLost, [`the city ${city.name}`]);
+  assert.equal(reportText(rep2), `Enemy turn: you lost Warrior and the city ${city.name}.`);
+
+  // nothing happened to the player: no text; only attackers fell: not a bad report
+  const quiet = { lost: {}, wounded: 0, fell: 0, citiesLost: [], spots: [] };
+  assert.equal(reportText(quiet), '');
+  assert.ok(!reportIsBad(quiet));
+  assert.ok(!reportIsBad({ ...quiet, fell: 2 }));
+  assert.equal(reportText({ ...quiet, lost: { warrior: 2, archer: 1 } }), 'Enemy turn: you lost Warrior ×2 and Archer.');
+  assert.equal(reportText({ ...quiet, lost: { warrior: 1 }, citiesLost: ['the city A', 'your capital'] }),
+    'Enemy turn: you lost Warrior, the city A and your capital.');
+});
+
+test('enemy turn report: a real AI turn gives a consistent report', () => {
+  for (const seed of [3, 7, 11]) {
+    const s = createGame({ seed, fog: true, happenings: false });
+    for (let i = 0; i < 12 && s.winner === null; i++) {
+      endTurn(s);
+      drainEvents(s);
+      const before = cloneState(s);
+      const myBefore = s.units.filter((u) => u.owner === 0).length;
+      runAITurn(s);
+      const rep = turnReport(before, drainEvents(s), 0);
+      const lost = Object.values(rep.lost).reduce((a, b) => a + b, 0);
+      assert.equal(myBefore - s.units.filter((u) => u.owner === 0).length, lost, `seed ${seed} round ${i}`);
+      assert.equal(rep.citiesLost.length, before.cities.filter((c) => c.owner === 0).length - s.cities.filter((c) => c.owner === 0).length);
+      if (s.winner === null) endTurn(s);
+    }
+  }
 });

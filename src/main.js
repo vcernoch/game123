@@ -2,7 +2,7 @@
 import {
   createGame, reachable, attackTargets, moveUnit, attack, buyUnit, endTurn,
   unitAt, cityAt, getUnit, incomeOf, previewAttack, tileAt, pathTo, nextActiveUnit, cityInfo,
-  cloneState, drainEvents, migrateState, logFor, isUndoableMove, canFortify, fortify, activeUnits, territoryOwner, cityResources, unitSummary, planRoute, setOrder, runOrders, cancelOrder, visibleTiles, exploredTiles, build, unitCost, hasBuilding,
+  cloneState, drainEvents, migrateState, logFor, turnReport, reportText, reportIsBad, isUndoableMove, canFortify, fortify, activeUnits, territoryOwner, cityResources, unitSummary, planRoute, setOrder, runOrders, cancelOrder, visibleTiles, exploredTiles, build, unitCost, hasBuilding,
   rankOf, rankMult, buildingCost, unitMove, factionOf, riverDefense, flankers, zocTiles, threatTiles, exportGame, importGame, saveFileName, parseSeed, restartOptions,
   upgradeOptions, upgradeUnit, canDisband, disbandRefund, disbandUnit, chargeReady,
 } from './game.js';
@@ -38,6 +38,7 @@ let endArmTimer = null;
 let disbandArmed = null;   // id of the unit whose Disband button was pressed once (asks for a second press)
 let disbandArmTimer = null;
 let undoStack = [];        // states before undoable moves this turn (memory only)
+let lossMarks = [];        // tiles where the player lost units/cities in the last enemy turn (memory only)
 const sound = createSound();
 sound.enabled = loadPrefs().sound !== false;
 const anim = createAnimator(
@@ -157,6 +158,7 @@ function drawBoard() {
     targets: mine ? new Set(attackTargets(state, u).map((t) => t.id)) : null,
     hover,
     flankers: mine ? flankView(u) : null,
+    lossMarks: busy() ? null : lossMarks,
     ...pathView(u, mine),
   });
 }
@@ -508,6 +510,8 @@ function doEndTurn(force = false) {
     const events = drainEvents(state);
     if (state.winner === null) endTurn(state);
     const happened = drainEvents(state).filter((e) => e.type === 'happening' && e.player === 0);
+    // the report must be made before the animation, which plays the events on top of `before`
+    const report = state.winner === null ? turnReport(before, events, 0) : null;
     save();
     await anim.play(before, events);
     // the player's units with move orders walk on
@@ -519,7 +523,7 @@ function doEndTurn(force = false) {
     aiRunning = false;
     const stopped = orders.filter((o) => o.result === 'interrupted' || o.result === 'blocked')
       .map((o) => orderText(getUnit(state, o.unitId), o.result));
-    showNotice(happened, stopped);
+    showNotice(happened, stopped, report);
     draw();
   }, 250);
 }
@@ -530,18 +534,33 @@ function orderText(unit, result) {
   return result === 'interrupted' ? `${name} stopped its march: enemy in sight.` : `${name} can't get through – order cancelled.`;
 }
 
-// Banner for a random event that hit the player at the start of the turn (cleared at the next end of turn).
-// extra = further messages (stopped move orders) appended to the banner.
-function showNotice(happened, extra = []) {
+// Banner at the start of the player's turn (cleared at the next end of turn): a random event that hit
+// the player, what the enemy did to them (report from turnReport) and further messages (stopped move orders).
+function showNotice(happened, extra = [], report = null) {
   const el = $('notice');
-  if (!happened.length && !extra.length) { el.hidden = true; return; }
-  if (!happened.length) {
-    el.textContent = extra.join(' ');
-    el.className = 'bad';
-    el.hidden = false;
-    return;
-  }
+  if (report) lossMarks = report.spots;
+  else if (!happened.length && !extra.length) lossMarks = []; // cleared together with the banner
   const ev = happened[0];
+  const parts = [];
+  let good = false;
+  if (ev) {
+    parts.push(happeningText(ev));
+    good = ev.kind === 'harvest' || ev.suppressed;
+  }
+  const rep = report ? reportText(report) : '';
+  if (rep) {
+    parts.push(rep);
+    if (reportIsBad(report)) good = false;
+  }
+  parts.push(...extra);
+  if (!parts.length) { el.hidden = true; return; }
+  el.textContent = parts.join(' ');
+  el.className = good || (!ev && !extra.length && rep && !reportIsBad(report)) ? 'good' : 'bad';
+  el.hidden = false;
+  if (ev) sound.play(soundFor(ev, 0));
+}
+
+function happeningText(ev) {
   const city = state.cities.find((c) => c.id === ev.cityId);
   const name = HAPPENINGS.kinds[ev.kind].name;
   const place = city ? ` in ${city.name}` : '';
@@ -551,12 +570,7 @@ function showNotice(happened, extra = []) {
   else if (ev.kind === 'plague') text += ev.hits.length ? `: infected units lost HP (${ev.hits.length}).` : ', but no unit was nearby.';
   else if (ev.suppressed) text += ev.reason === 'temple' ? ', but the temple kept the peace.' : ', but the garrison kept order.';
   else text += `: the city paid no taxes this turn (${ev.gold} gold).`;
-  const good = ev.kind === 'harvest' || ev.suppressed;
-  if (extra.length) text += ` ${extra.join(' ')}`;
-  el.textContent = text;
-  el.className = good ? 'good' : 'bad';
-  el.hidden = false;
-  sound.play(soundFor(ev, 0));
+  return text;
 }
 
 // Last choices in the new game dialog (convenience only; the game works without storage).
@@ -856,6 +870,9 @@ window.__game = {
   refresh: () => { resize(); draw(); },
   newGame: (seed, options = {}) => { state = createGame({ seed, ...options }); undoStack = []; showNotice([]); resize(); draw(); },
   showNotice: (events) => { showNotice(events); draw(); },
+  // shows the enemy-turn banner for events made on top of the state `before`
+  showReport: (before, events) => { showNotice([], [], turnReport(before, events, 0)); draw(); },
+  lossMarks: () => lossMarks,
   threatsShown: () => showThreats,
   exportText: () => exportGame(state, GAME_VERSION),
   loadText: loadFromText,

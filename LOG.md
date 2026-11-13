@@ -2,6 +2,15 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-13 – Enemy turn report (v0.20.0)
+- **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.9.0–v0.20.0) is far ahead of `main` (v0.8.0) – please merge it.
+- Phase 9 was done, so I opened phase 10 (clarity and feedback, own improvement). The AI turn animates fast and a lot happens around the map; now it's clear afterwards what it cost you.
+- `turnReport(before, events, viewer)` in `game.js` (pure): replays the enemy turn's events on a copy of the state from before it and counts own units lost (by type), own units wounded (and still alive), attackers that fell to counterattacks and own cities lost, plus `spots` (tiles of the losses). Only things the player always knows about are counted, so nothing hidden in the fog leaks. `reportText()` makes one sentence ("Enemy turn: you lost Warrior ×2 and the city Oakford. 1 unit was wounded."), `reportIsBad()` decides the colour.
+- UI: the existing notice bar below the header shows the report after the AI turn (together with a random event or stopped move orders), red when something was lost, green when only attackers fell; nothing when the enemy didn't touch you. Tiles of the losses get a small red ✕ until the turn ends. `showNotice` was split (`happeningText`). Help text updated.
+- No state structure change (`state.version` stays 16); the report and marks live only in memory.
+- Tests: +2 logic (losses/wounded/fallen/spots from a staged turn, a wounded-then-destroyed unit counts only as lost, a captured city incl. "your capital", the enemy's own view is empty, texts; real AI turns on 3 seeds: reported losses = actual drop in own units and cities). Smoke test stages an AI horseman killing a unit, checks the red banner and the ✕ mark at 390 px without horizontal scroll, and that ending the turn clears it (`artifacts/screenshot-report.png`).
+- Status: `npm run check` green (74 logic tests + smoke).
+
 ## 2026-11-12 – Cavalry charge (v0.19.0)
 - **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.9.0–v0.19.0) is far ahead of `main` (v0.8.0) – please merge it.
 - Phase 9 (battlefield tactics, own improvement), new task. `CHARGE` in `rules.js` (`types` ['horseman'], `minMoves` 2, `atkBonus` 0.25, `blockedBy` ['forest']). `movesSpent`, `chargeReady`, `chargeBonus` in `game.js`: a horseman that has spent at least 2 move points this turn before attacking gets +25 % attack; no charge against a defender in forest. Adds to flank and high ground (`1 + flank + high + charge`), never to the counterattack. `previewAttack` returns `charge`, so the real attack, the UI and the AI use the same number. Spearmen keep their double strength against horsemen, so a charge into spears is still a bad idea.

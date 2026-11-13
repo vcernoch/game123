@@ -70,5 +70,8 @@ Check off `[x]` when done. Add new ideas to the end of the relevant phase or to 
 - [x] High ground: a unit on hills attacking a unit below it gets +20 % attack (shown in the attack preview and the tile panel)
 - [x] Cavalry charge: a horseman that has spent 2+ move points this turn gets +25 % attack, but not against a unit in forest; the AI counts the approach
 
+## Phase 10 – clarity and feedback (own improvements)
+- [x] Enemy turn report: at the start of your turn a bar sums up what the enemy did to you (units lost/wounded, cities lost, attackers that fell) and red ✕ marks show where you lost something
+
 ## Ideas (unordered)
 - Diplomacy with multiple AIs
