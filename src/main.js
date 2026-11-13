@@ -5,6 +5,7 @@ import {
   cloneState, drainEvents, migrateState, logFor, turnReport, reportText, reportIsBad, isUndoableMove, canFortify, fortify, activeUnits, territoryOwner, cityResources, unitSummary, planRoute, setOrder, runOrders, cancelOrder, visibleTiles, exploredTiles, build, unitCost, hasBuilding,
   rankOf, rankMult, buildingCost, unitMove, factionOf, riverDefense, flankers, zocTiles, threatTiles, exportGame, importGame, saveFileName, parseSeed, restartOptions,
   upgradeOptions, upgradeUnit, canDisband, disbandRefund, disbandUnit, chargeReady,
+  updateSightings, lastSeen, lastSeenAt, lastSeenText,
 } from './game.js';
 import { createAnimator } from './anim.js';
 import { decideTap } from './input.js';
@@ -159,6 +160,7 @@ function drawBoard() {
     hover,
     flankers: mine ? flankView(u) : null,
     lossMarks: busy() ? null : lossMarks,
+    ghosts: busy() ? null : lastSeen(state, 0),
     ...pathView(u, mine),
   });
 }
@@ -263,6 +265,8 @@ function updateHud() {
       html = `<h3>${hc.name}</h3><p>Income +${ci.income} gold/turn · Garrison defense +${ci.defensePct} %</p>` + html;
     }
   }
+  const ghost = !u && !city && hover && lastSeenAt(state, 0, hover.q, hover.r);
+  if (ghost) html += `<p class="hint ghost">${lastSeenText(state, ghost)}</p>`;
   if (pending && u) {
     const target = seenUnitAt(pending.q, pending.r);
     if (target && target.owner !== u.owner) {
@@ -423,6 +427,9 @@ function showTooltip(ev, hex) {
     if (city) lines.push(cityTipText(city));
     tip.textContent = lines.join('\n');
     placeTip(tip, ev);
+  } else if (hex && lastSeenAt(state, 0, hex.q, hex.r) && !busy()) {
+    tip.textContent = lastSeenText(state, lastSeenAt(state, 0, hex.q, hex.r));
+    placeTip(tip, ev);
   } else if (sel && hex && sel.owner === state.current && zocTiles(state, sel.owner).has(key(hex.q, hex.r))
     && reachable(state, sel).has(key(hex.q, hex.r))) {
     tip.textContent = 'Enemy zone of control – the move ends here';
@@ -453,6 +460,7 @@ function cityTipText(city) {
 // After a player action: save and replay what happened (before = state before the action).
 async function afterAction(before = null) {
   const events = drainEvents(state);
+  updateSightings(state, 0, events);
   save();
   draw();
   if (before && events.length) {
@@ -512,12 +520,14 @@ function doEndTurn(force = false) {
     const happened = drainEvents(state).filter((e) => e.type === 'happening' && e.player === 0);
     // the report must be made before the animation, which plays the events on top of `before`
     const report = state.winner === null ? turnReport(before, events, 0) : null;
+    updateSightings(state, 0, events);
     save();
     await anim.play(before, events);
     // the player's units with move orders walk on
     const beforeOrders = cloneState(state);
     const orders = state.winner === null && state.current === 0 ? runOrders(state, 0) : [];
     const walked = drainEvents(state);
+    updateSightings(state, 0, walked);
     save();
     if (walked.length) await anim.play(beforeOrders, walked);
     aiRunning = false;
@@ -601,6 +611,7 @@ function newGame({ firstVisit = false } = {}) {
 
 function startNewGame(options) {
   state = createGame({ ...options, seed: options.seed ?? randomSeed() });
+  updateSightings(state, 0);
   undoStack = [];
   showNotice([]);
   selectedId = null;
@@ -662,6 +673,7 @@ function loadFromText(text) {
     return false;
   }
   state = loaded;
+  updateSightings(state, 0);
   undoStack = [];
   selectedId = null;
   selectedCityId = null;
@@ -868,11 +880,14 @@ window.__game = {
   version: GAME_VERSION,
   setAnimSpeed: (x) => { anim.speed = x; },
   refresh: () => { resize(); draw(); },
-  newGame: (seed, options = {}) => { state = createGame({ seed, ...options }); undoStack = []; showNotice([]); resize(); draw(); },
+  newGame: (seed, options = {}) => { state = createGame({ seed, ...options }); updateSightings(state, 0); undoStack = []; showNotice([]); resize(); draw(); },
   showNotice: (events) => { showNotice(events); draw(); },
   // shows the enemy-turn banner for events made on top of the state `before`
   showReport: (before, events) => { showNotice([], [], turnReport(before, events, 0)); draw(); },
   lossMarks: () => lossMarks,
+  ghosts: () => lastSeen(state, 0),
+  // recomputes the last-seen markers after a test changed the state directly
+  updateSightings: (events = []) => { updateSightings(state, 0, events); draw(); },
   threatsShown: () => showThreats,
   exportText: () => exportGame(state, GAME_VERSION),
   loadText: loadFromText,
@@ -888,6 +903,7 @@ $('faction-options').innerHTML = Object.entries(FACTIONS).map(([id, f], i) => `
 $('version').textContent = `v${GAME_VERSION}`;
 $('version').title = `Version ${GAME_VERSION} from ${GAME_DATE}`;
 
+updateSightings(state, 0);
 resize();
 draw();
 // first visit (no saved game): the new game dialog acts as the main menu

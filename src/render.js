@@ -94,6 +94,12 @@ export function render(ctx, state, view = {}) {
 
   if (view.path && view.path.length > 1) drawPath(ctx, view.path, view.pathTurns, view.pathFaint);
 
+  // last-seen markers of enemy units that went into the fog
+  for (const g of view.ghosts || []) {
+    const c = tileCenter(g.q, g.r);
+    drawGhost(ctx, g, c.x, c.y);
+  }
+
   // animated units are drawn last so they sit on top
   const moving = view.unitPos || new Map();
   const units = [...state.units].sort((a, b) => moving.has(a.id) - moving.has(b.id));
@@ -124,6 +130,38 @@ export function render(ctx, state, view = {}) {
   }
 
   for (const f of view.floaters || []) drawFloater(ctx, f);
+}
+
+// Faded, dashed copy of an enemy unit where it was last seen, with a small "?" badge.
+function drawGhost(ctx, g, x, y) {
+  const t = UNIT_TYPES[g.type];
+  ctx.save();
+  ctx.globalAlpha = 0.55;
+  ctx.beginPath();
+  ctx.arc(x, y + 3, 13, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(20,22,30,0.55)';
+  ctx.fill();
+  ctx.setLineDash([3, 3]);
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = PLAYERS[g.owner].light;
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = PLAYERS[g.owner].light;
+  ctx.font = 'bold 13px system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(t.symbol, x, y + 4);
+  ctx.globalAlpha = 0.9;
+  const bx = x + 11;
+  const by = y - 8;
+  ctx.beginPath();
+  ctx.arc(bx, by, 6, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(20,22,30,0.9)';
+  ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 9px system-ui, sans-serif';
+  ctx.fillText('?', bx, by + 0.5);
+  ctx.restore();
 }
 
 // A small red cross in a dark disc at the top-right of a tile: "you lost something here".

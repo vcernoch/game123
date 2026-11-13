@@ -9,7 +9,7 @@ import {
   rollHappening, applyHappening, cityIncome, logFor, isUndoableMove, canFortify, fortify, activeUnits, territoryMap, territoryOwner, planRoute, setOrder, runOrders, cancelOrder, cityHeal, citySight, cityResources, unitSummary, zocTiles,
   exportGame, importGame, saveFileName, stateProblem, SAVE_FORMAT, threatTiles, parseSeed, restartOptions, MAX_SEED,
   upgradeOptions, upgradeUnit, upgradeCost, canDisband, disbandRefund, disbandUnit,
-  turnReport, reportText, reportIsBad,
+  turnReport, reportText, reportIsBad, updateSightings, lastSeen, lastSeenAt, lastSeenText,
 } from '../src/game.js';
 import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
@@ -27,6 +27,7 @@ import { distance, key, neighbors } from '../src/hex.js';
 import {
   RESOURCES, FORTIFY, TERRITORY, ECONOMY, UNIT_TYPES, TERRAIN, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FLANK, HIGH_GROUND, CHARGE,
   UPGRADES, UPGRADE, DISBAND,
+  SIGHTINGS,
 } from '../src/rules.js';
 
 test('map is deterministic and starting cities are connected', () => {
@@ -2115,6 +2116,112 @@ test('enemy turn report: a real AI turn gives a consistent report', () => {
       assert.equal(myBefore - s.units.filter((u) => u.owner === 0).length, lost, `seed ${seed} round ${i}`);
       assert.equal(rep.citiesLost.length, before.cities.filter((c) => c.owner === 0).length - s.cities.filter((c) => c.owner === 0).length);
       if (s.winner === null) endTurn(s);
+    }
+  }
+});
+
+test('last-seen markers: an enemy that leaves sight leaves a marker, seeing the tile again clears it', () => {
+  const s = createGame({ seed: 1, fog: true, happenings: false });
+  for (const t of Object.values(s.tiles)) { t.terrain = 'plains'; delete t.rivers; delete t.road; }
+  s.cities = s.cities.filter((c) => distance(c, { q: 4, r: 4 }) > 6);
+  const mk = (id, owner, q, r, type = 'warrior') => ({ id, type, owner, q, r, hp: UNIT_TYPES[type].hp, movesLeft: UNIT_TYPES[type].move, hasAttacked: false, xp: 0 });
+  for (const [q, r] of [[0, 4], [2, 4], [4, 4], [5, 4], [6, 4], [10, 4]]) assert.ok(tileAt(s, q, r), `tile ${q},${r}`);
+  const scout = mk(900, 0, 2, 4);
+  const rider = mk(910, 1, 4, 4, 'horseman');
+  const far = mk(911, 1, 10, 4, 'archer');
+  s.units = [scout, rider, far];
+  assert.deepEqual(updateSightings(s, 0).map((x) => x.unitId), [rider.id], 'only the unit in sight is remembered');
+  assert.deepEqual(lastSeen(s, 0), [], 'a unit in sight is not a marker');
+
+  // our unit walks away: the rider stays as a marker where it stood
+  scout.q = 0;
+  updateSightings(s, 0);
+  assert.ok(!visibleTiles(s, 0).has(key(4, 4)), 'precondition: the rider is out of sight');
+  const g = lastSeenAt(s, 0, 4, 4);
+  assert.ok(g && g.unitId === rider.id && g.type === 'horseman' && g.owner === 1 && !g.left);
+  assert.equal(lastSeenText(s, g), 'AI: Horseman – last seen here this turn (HP 10/10)');
+  assert.ok(!lastSeen(s, 0).some((x) => x.unitId === far.id), 'a unit never seen leaves no marker');
+
+  // markers age and are forgotten after SIGHTINGS.maxAge turns
+  s.turn += SIGHTINGS.maxAge;
+  updateSightings(s, 0);
+  assert.ok(lastSeenAt(s, 0, 4, 4), 'still remembered at the maximum age');
+  assert.ok(lastSeenText(s, g).includes(`${SIGHTINGS.maxAge} turns ago`));
+  s.turn += 1;
+  updateSightings(s, 0);
+  assert.deepEqual(lastSeen(s, 0), [], 'forgotten when too old');
+
+  // the rider walks out of sight: the marker sits on the first fogged tile of its path, not where it ended
+  scout.q = 2;
+  updateSightings(s, 0);
+  s.current = 1;
+  assert.ok(moveUnit(s, rider.id, 6, 4));
+  const evs = drainEvents(s);
+  const path = evs.find((e) => e.type === 'move').path;
+  updateSightings(s, 0, evs);
+  const seen = visibleTiles(s, 0);
+  const walked = lastSeen(s, 0);
+  assert.equal(walked.length, 1);
+  assert.ok(walked[0].left && !seen.has(key(walked[0].q, walked[0].r)));
+  const idx = path.findIndex((p) => p.q === walked[0].q && p.r === walked[0].r);
+  assert.ok(idx > 0 && seen.has(key(path[idx - 1].q, path[idx - 1].r)), 'right after the last tile in sight');
+  assert.ok(lastSeenText(s, walked[0]).includes('seen heading here'));
+
+  // seeing the marked tile again with nobody there clears the marker
+  s.current = 0;
+  scout.q = walked[0].q - 2;
+  updateSightings(s, 0);
+  assert.ok(visibleTiles(s, 0).has(key(walked[0].q, walked[0].r)));
+  assert.ok(!visibleTiles(s, 0).has(key(rider.q, rider.r)), 'precondition: the rider itself is still hidden');
+  assert.deepEqual(lastSeen(s, 0), [], 'the marked tile is empty, so the marker is gone');
+  // seeing the unit itself replaces the marker with its real position
+  scout.q = 4;
+  updateSightings(s, 0);
+  assert.deepEqual(lastSeen(s, 0), []);
+  assert.ok(s.sightings[0].some((x) => x.unitId === rider.id && x.q === rider.q && x.r === rider.r));
+
+  // own units are never markers; no fog or a finished game: nothing; the state stays JSON
+  assert.ok(!s.sightings[0].some((x) => x.owner === 0));
+  assert.deepEqual(JSON.parse(JSON.stringify(s)).sightings, s.sightings);
+  s.winner = 0;
+  assert.deepEqual(updateSightings(s, 0), []);
+  const open = createGame({ seed: 1, fog: false });
+  assert.deepEqual(updateSightings(open, 0), []);
+  assert.deepEqual(lastSeen(open, 0), []);
+
+  // migration from version 16 adds empty markers
+  const old = createGame({ seed: 2 });
+  old.version = 16;
+  delete old.sightings;
+  const m = migrateState(old);
+  assert.equal(m.version, STATE_VERSION);
+  assert.deepEqual(m.sightings, [[], []]);
+});
+
+test('last-seen markers: real AI turns never put a marker on a tile in sight or keep one too long', () => {
+  for (const seed of [3, 7, 11]) {
+    const s = createGame({ seed, fog: true, happenings: false });
+    updateSightings(s, 0);
+    for (let i = 0; i < 15 && s.winner === null; i++) {
+      endTurn(s);
+      drainEvents(s);
+      runAITurn(s);
+      const events = drainEvents(s);
+      if (s.winner === null) endTurn(s);
+      drainEvents(s);
+      updateSightings(s, 0, events);
+      const seen = visibleTiles(s, 0);
+      for (const g of lastSeen(s, 0)) {
+        assert.ok(!seen.has(key(g.q, g.r)), `seed ${seed} round ${i}`);
+        assert.ok(s.turn - g.turn <= SIGHTINGS.maxAge);
+        assert.equal(g.owner, 1);
+      }
+      // the player's units step forward a little so sight changes
+      for (const u of s.units.filter((x) => x.owner === 0)) {
+        const to = [...reachable(s, u).keys()][0];
+        if (to) { const [q, r] = to.split(',').map(Number); moveUnit(s, u.id, q, r); }
+      }
+      updateSightings(s, 0, drainEvents(s));
     }
   }
 });

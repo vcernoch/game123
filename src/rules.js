@@ -148,6 +148,10 @@ export const RESOURCES = {
 // Fog of war: city sight range and the hills bonus.
 export const VISION = { city: 2, hillsBonus: 1 };
 
+// Last-seen markers: an enemy unit that disappears into the fog leaves a faded marker where it was
+// last seen; the marker is forgotten after `maxAge` turns or when the tile is seen again.
+export const SIGHTINGS = { maxAge: 3 };
+
 export const NEUTRAL_COLOR = '#e8e2d0';
 
 export const ECONOMY = {

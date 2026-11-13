@@ -2,6 +2,15 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-13 – Last-seen markers (v0.21.0)
+- **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.9.0–v0.21.0) is far ahead of `main` (v0.8.0) – please merge it.
+- Phase 10 (clarity and feedback, own improvement), new task. In the fog an enemy that steps out of sight simply vanished, so the player had to remember where it went. Now it leaves a marker.
+- `SIGHTINGS` in `rules.js` (`maxAge` 3). `updateSightings(state, viewer, events)` in `game.js` keeps `state.sightings[viewer]`: enemy units in sight are remembered with type, HP and turn; a unit seen walking out of sight (a `move` event whose path leaves the visible tiles) is put on the first fogged tile of its path – where it was last seen heading, never where it really ended; a marker is dropped when its tile is in sight again, when the unit itself is seen again (it moves to the real position), or after 3 turns. `lastSeen`, `lastSeenAt`, `lastSeenText` for drawing and texts. Without fog or after the game ends there are none. Only things the player saw are stored, so nothing leaks (a marker may sit on a still-unexplored tile the unit was seen walking into; the tile stays dark).
+- UI: the faded, dashed unit symbol in the owner's light colour with a small "?" badge; hovering it shows "AI: Horseman – last seen here 1 turn ago (HP 8/10)" in the tooltip and the side panel (so it works on touch too). Markers are hidden while the AI turn is animating. Updated after every player action, after the AI turn and after move orders walk on; undo restores them with the state. Help text updated.
+- State structure: `state.version` 17 (`sightings`), migration from 16 gives empty markers.
+- Tests: +2 logic (marker when our unit walks away, text, aging and forgetting at `maxAge`, walking out of sight puts the marker right after the last visible tile of the path, seeing the tile clears it, seeing the unit replaces it, no own units, no fog / game over gives none, JSON, migration; real AI turns on 3 seeds with the player moving: no marker ever on a tile in sight or older than 3 turns). Smoke test makes an AI horseman step from a visible tile into the fog, checks the single marker, the tooltip and the panel text, and saves `artifacts/screenshot-lastseen.png`.
+- Status: `npm run check` green (76 logic tests + smoke).
+
 ## 2026-11-13 – Enemy turn report (v0.20.0)
 - **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.9.0–v0.20.0) is far ahead of `main` (v0.8.0) – please merge it.
 - Phase 9 was done, so I opened phase 10 (clarity and feedback, own improvement). The AI turn animates fast and a lot happens around the map; now it's clear afterwards what it cost you.

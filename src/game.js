@@ -4,7 +4,7 @@ import { generateMap, hasRiverEdge } from './map.js';
 import {
   TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY, VISION, DIFFICULTY, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, ROAD_COST, RIVER, FLANK, HIGH_GROUND, CHARGE,
   FACTIONS, NO_FACTION, MAP_SIZES, HAPPENINGS, FORTIFY, TERRITORY, RESOURCES,
-  UPGRADES, UPGRADE, DISBAND,
+  UPGRADES, UPGRADE, DISBAND, SIGHTINGS,
 } from './rules.js';
 import { createRng } from './rng.js';
 
@@ -45,6 +45,7 @@ export function createGame({
     history: [],
     stats: emptyStats(),
     explored: PLAYERS.map(() => []),
+    sightings: PLAYERS.map(() => []),
   };
   starts.forEach((s, owner) => {
     spawnUnit(state, 'warrior', owner, s.q, s.r);
@@ -127,7 +128,7 @@ function countStat(state, name, player) {
   state.stats[name][player]++;
 }
 
-export const STATE_VERSION = 16;
+export const STATE_VERSION = 17;
 
 // Converts a saved state of an older version to the current one; returns null for an unknown format.
 export function migrateState(s) {
@@ -196,6 +197,10 @@ export function migrateState(s) {
     s.zoc = false; // zone of control arrived in version 16 – a game in progress keeps its rules
     s.version = 16;
   }
+  if (s.version === 16) {
+    s.sightings = PLAYERS.map(() => []); // last-seen markers arrived in version 17
+    s.version = 17;
+  }
   return s.version === STATE_VERSION ? s : null;
 }
 
@@ -262,6 +267,72 @@ export function updateExplored(state, player) {
 export function exploredTiles(state, player) {
   if (!state.fog) return new Set(Object.keys(state.tiles));
   return new Set(state.explored ? state.explored[player] : []);
+}
+
+// ---------- last-seen markers ----------
+// state.sightings[viewer] = [{ unitId, type, owner, q, r, hp, turn, left? }]: enemy units the viewer has
+// seen but can't see now. `turn` is when it was last seen; `left` means it was seen walking out of
+// sight onto that tile. The UI calls updateSightings after every action and after the enemy turn.
+
+// Updates the viewer's markers. events = what happened since the last update (enemy moves are used
+// to place a marker on the tile where a unit walked into the fog). Returns the new list.
+export function updateSightings(state, viewer, events = []) {
+  if (!state.sightings) state.sightings = PLAYERS.map(() => []);
+  if (!state.fog || state.winner !== null) {
+    state.sightings[viewer] = [];
+    return state.sightings[viewer];
+  }
+  const visible = visibleTiles(state, viewer);
+  const byId = new Map((state.sightings[viewer] || []).map((s) => [s.unitId, s]));
+  // units seen walking out of sight: the first fogged tile after the last visible one on their path
+  for (const ev of events) {
+    if (ev.type !== 'move') continue;
+    const u = getUnit(state, ev.unitId);
+    if (!u || u.owner === viewer) continue;
+    let last = -1;
+    ev.path.forEach((p, i) => { if (visible.has(key(p.q, p.r))) last = i; });
+    if (last < 0 || last === ev.path.length - 1) continue;
+    const at = ev.path[last + 1];
+    byId.set(u.id, { unitId: u.id, type: u.type, owner: u.owner, q: at.q, r: at.r, hp: u.hp, turn: state.turn, left: true });
+  }
+  // units in sight now replace their old marker; markers on tiles in sight with nobody there are dropped
+  for (const u of state.units) {
+    if (u.owner !== viewer && visible.has(key(u.q, u.r))) byId.delete(u.id);
+  }
+  const list = [];
+  for (const s of byId.values()) {
+    if (visible.has(key(s.q, s.r))) continue;
+    if (state.turn - s.turn > SIGHTINGS.maxAge) continue;
+    list.push(s);
+  }
+  // remember the units in sight now, so a later update knows where they were
+  for (const u of state.units) {
+    if (u.owner !== viewer && visible.has(key(u.q, u.r))) {
+      list.push({ unitId: u.id, type: u.type, owner: u.owner, q: u.q, r: u.r, hp: u.hp, turn: state.turn });
+    }
+  }
+  state.sightings[viewer] = list;
+  return list;
+}
+
+// Markers to draw: the viewer's sightings of units out of sight now (tiles in fog only).
+export function lastSeen(state, viewer) {
+  if (!state.fog || state.winner !== null || !state.sightings) return [];
+  const visible = visibleTiles(state, viewer);
+  return (state.sightings[viewer] || []).filter((s) => !visible.has(key(s.q, s.r)));
+}
+
+// Marker on a tile (for the tooltip), or null.
+export function lastSeenAt(state, viewer, q, r) {
+  return lastSeen(state, viewer).find((s) => s.q === q && s.r === r) || null;
+}
+
+// "Enemy Horseman, last seen this turn (HP 8/10)" – tooltip text for a marker.
+export function lastSeenText(state, s) {
+  const ago = state.turn - s.turn;
+  const when = ago <= 0 ? 'this turn' : ago === 1 ? '1 turn ago' : `${ago} turns ago`;
+  const what = `${PLAYERS[s.owner].name}: ${UNIT_TYPES[s.type].name}`;
+  return `${what} – ${s.left ? 'seen heading here' : 'last seen here'} ${when} (HP ${s.hp}/${UNIT_TYPES[s.type].hp})`;
 }
 
 // ---------- events for animations ----------

@@ -509,6 +509,49 @@ try {
   if (cleared) throw new Error('turn report: loss marks not cleared at end of turn');
   await page.waitForFunction(() => !window.__game.isBusy(), null, { timeout: 15000 });
 
+  // last-seen marker: an enemy horseman steps out of sight, a faded "?" marker stays on the tile it entered
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.evaluate(() => { window.__game.newGame(777, { fog: true }); });
+  const ghost = await page.evaluate(async () => {
+    const g = await import('./src/game.js');
+    const hx = await import('./src/hex.js');
+    const rnd = await import('./src/render.js');
+    const st = window.__game.getState();
+    const seen = g.visibleTiles(st, 0);
+    const foe = st.units.find((u) => u.owner === 1);
+    const free = (t) => t && g.isPassable(st, t.q, t.r) && !g.unitAt(st, t.q, t.r) && !g.cityAt(st, t.q, t.r)
+      && g.tileAt(st, t.q, t.r).terrain === 'plains';
+    let from = null; let to = null;
+    for (const t of Object.values(st.tiles)) {
+      if (!seen.has(hx.key(t.q, t.r)) || !free(t)) continue;
+      const n = hx.neighbors(t.q, t.r).map((p) => g.tileAt(st, p.q, p.r)).find((x) => free(x) && !seen.has(hx.key(x.q, x.r)) && !(x.rivers && x.rivers.length));
+      if (n && !(t.rivers && t.rivers.length)) { from = t; to = n; break; }
+    }
+    if (!from) return { error: 'no edge of sight found' };
+    foe.type = 'horseman'; foe.q = from.q; foe.r = from.r; foe.movesLeft = 4; foe.hasAttacked = false; foe.hp = 7;
+    window.__game.updateSightings();
+    st.current = 1;
+    const ok = g.moveUnit(st, foe.id, to.q, to.r);
+    const events = g.drainEvents(st);
+    st.current = 0;
+    window.__game.updateSightings(events);
+    const marks = window.__game.ghosts();
+    const c = rnd.tileCenter(to.q, to.r);
+    const rect = document.getElementById('board').getBoundingClientRect();
+    const k = rect.width / rnd.canvasSize(st).w;
+    return { ok, marks, to: { q: to.q, r: to.r }, x: rect.left + c.x * k, y: rect.top + c.y * k };
+  });
+  if (ghost.error || !ghost.ok || ghost.marks.length !== 1 || ghost.marks[0].q !== ghost.to.q || ghost.marks[0].r !== ghost.to.r) {
+    throw new Error(`last seen: ${JSON.stringify(ghost)}`);
+  }
+  await page.mouse.move(ghost.x, ghost.y);
+  const ghostTip = await page.textContent('#tooltip');
+  const ghostInfo = await page.textContent('#info');
+  if (!ghostTip.includes('Horseman – seen heading here') || !ghostInfo.includes('HP 7/10')) {
+    throw new Error(`last seen: tooltip/panel missing (${ghostTip} | ${ghostInfo})`);
+  }
+  await page.screenshot({ path: 'artifacts/screenshot-lastseen.png' });
+
   // rivers: large map without fog, hovering a river tile shows its description in the panel
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.evaluate(() => { window.__game.newGame(4242, { size: 'large', fog: false }); });
