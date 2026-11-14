@@ -73,6 +73,7 @@ Check off `[x]` when done. Add new ideas to the end of the relevant phase or to 
 ## Phase 10 – clarity and feedback (own improvements)
 - [x] Enemy turn report: at the start of your turn a bar sums up what the enemy did to you (units lost/wounded, cities lost, attackers that fell) and red ✕ marks show where you lost something
 - [x] Last-seen markers: an enemy unit that disappears into the fog leaves a faded "?" marker where it was last seen (or the tile it walked off into), with a tooltip saying how long ago; forgotten after 3 turns or when the tile is seen again
+- [x] Army panel: a collapsible list of all own units (ready first, then marching, fortified, done) with HP, rank and where they stand; clicking a row selects the unit and scrolls the zoomed map to it
 
 ## Ideas (unordered)
 - Diplomacy with multiple AIs

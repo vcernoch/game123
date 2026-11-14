@@ -2,6 +2,15 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-14 – Army panel (v0.22.0)
+- **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.9.0–v0.22.0) is far ahead of `main` (v0.8.0) – please merge it.
+- Phase 10 (clarity and feedback, own improvement), new task. With a bigger army it was hard to see who still needs orders and where everyone is; Tab only walks through ready units one by one.
+- `unitStatus`, `unitWhere`, `armyOverview` and `ARMY_STATUS` in `game.js` (pure): every own unit gets a status – ready (same rule as Tab / `activeUnits`), marching (move order, no moves left), fortified, done – and a place in words ("in Oakford", "2 tiles from Oakford"). Only cities the player has explored are named, so the list never gives away a city in the fog. Rows are sorted ready → marching → fortified → done, then by id.
+- UI: a collapsible "Army" panel at the top of the side panel. Its summary shows "5 units · 2 ready" even when closed; open, each row has the unit symbol, name with rank stars, place, HP (red when wounded) and a status badge (ready in gold, done faded). Clicking a row selects the unit (and the city under it); on a phone with the zoomed map the frame scrolls to the unit. Rows are disabled during animations, the list is redrawn only on change. Help text updated.
+- No state structure change (`state.version` stays 17).
+- Tests: +1 logic (statuses and their order, ready rows = `activeUnits`, enemy units not listed, place texts incl. "1 tile from", a fogged enemy city is never named, without fog it is, empty army, JSON). Smoke test opens the panel with a fortified unit and a wounded, finished veteran, checks rows, order, summary and HP text, clicks a row to select (`artifacts/screenshot-army.png`), then on a 390 px phone with the zoomed Large map checks that picking a unit scrolls it into the frame without horizontal page scroll (`artifacts/screenshot-army-mobile.png`).
+- Status: `npm run check` green (77 logic tests + smoke).
+
 ## 2026-11-13 – Last-seen markers (v0.21.0)
 - **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.9.0–v0.21.0) is far ahead of `main` (v0.8.0) – please merge it.
 - Phase 10 (clarity and feedback, own improvement), new task. In the fog an enemy that steps out of sight simply vanished, so the player had to remember where it went. Now it leaves a marker.

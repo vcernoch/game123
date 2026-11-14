@@ -806,6 +806,56 @@ export function nextActiveUnit(state, player, afterId = null) {
   return mine.find((u) => afterId === null || u.id > afterId) || mine[0];
 }
 
+// ---------- army overview ----------
+// Order of the statuses in the army list: units that still need orders come first.
+export const ARMY_STATUS = {
+  ready:     { order: 0, label: 'ready' },
+  marching:  { order: 1, label: 'marching' },
+  fortified: { order: 2, label: 'fortified' },
+  done:      { order: 3, label: 'done' },
+};
+
+// What a unit is doing this turn: ready (can still move or attack), marching (has a move order and no
+// moves left), fortified, or done.
+export function unitStatus(state, unit) {
+  if (unit.fortified) return 'fortified';
+  if (unit.movesLeft > 0 || attackTargets(state, unit).length > 0) return 'ready'; // same rule as activeUnits / Tab
+  return unit.goto ? 'marching' : 'done';
+}
+
+// Where a unit stands, in words for the army list: "in Oakford" or "2 tiles from Oakford". Only cities
+// the player has explored are named (an own city is always explored), so nothing leaks through the fog.
+export function unitWhere(state, unit, explored = exploredTiles(state, unit.owner)) {
+  let best = null;
+  let bestD = Infinity;
+  for (const c of state.cities) {
+    if (!explored.has(key(c.q, c.r))) continue;
+    const d = distance(unit, c);
+    // ties: prefer an own city, then the lower id (stable)
+    if (d < bestD || (d === bestD && c.owner === unit.owner && best.owner !== unit.owner)) { best = c; bestD = d; }
+  }
+  if (!best) return 'far from any city';
+  if (bestD === 0) return `in ${best.name}`;
+  return `${bestD} tile${bestD === 1 ? '' : 's'} from ${best.name}`;
+}
+
+// The player's units for the army list: [{ id, type, name, symbol, hp, maxHp, rank, status, where }],
+// units that still need orders first, then marching, fortified and done; by id inside a group.
+// counts = number of units per status.
+export function armyOverview(state, player) {
+  const explored = exploredTiles(state, player);
+  const rows = state.units.filter((u) => u.owner === player).map((u) => {
+    const t = UNIT_TYPES[u.type];
+    return {
+      id: u.id, type: u.type, name: t.name, symbol: t.symbol, hp: u.hp, maxHp: t.hp,
+      rank: rankOf(u), status: unitStatus(state, u), where: unitWhere(state, u, explored),
+    };
+  });
+  rows.sort((a, b) => ARMY_STATUS[a.status].order - ARMY_STATUS[b.status].order || a.id - b.id);
+  const counts = Object.fromEntries(Object.keys(ARMY_STATUS).map((s) => [s, rows.filter((r) => r.status === s).length]));
+  return { rows, counts };
+}
+
 // Can the move be undone? before/after = state before and after the action of player `viewer`, events = what it caused.
 // Only a plain move that revealed nothing new can be undone: no capture or promotion,
 // no newly explored tile, and no foreign unit or foreign city on newly visible tiles.

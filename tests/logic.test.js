@@ -10,6 +10,7 @@ import {
   exportGame, importGame, saveFileName, stateProblem, SAVE_FORMAT, threatTiles, parseSeed, restartOptions, MAX_SEED,
   upgradeOptions, upgradeUnit, upgradeCost, canDisband, disbandRefund, disbandUnit,
   turnReport, reportText, reportIsBad, updateSightings, lastSeen, lastSeenAt, lastSeenText,
+  armyOverview, unitStatus, unitWhere, ARMY_STATUS,
 } from '../src/game.js';
 import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
@@ -2224,4 +2225,55 @@ test('last-seen markers: real AI turns never put a marker on a tile in sight or 
       updateSightings(s, 0, drainEvents(s));
     }
   }
+});
+
+test('army overview lists own units by status with a fog-safe location', () => {
+  const s = createGame({ seed: 5 });
+  const mine = s.units.filter((u) => u.owner === 0).sort((x, y) => x.id - y.id);
+  const capital = s.cities.find((c) => c.owner === 0 && c.capital);
+  const enemyCity = s.cities.find((c) => c.owner === 1);
+  // a fresh game: every own unit is ready, enemy units are not listed
+  let ov = armyOverview(s, 0);
+  assert.equal(ov.rows.length, mine.length);
+  assert.ok(ov.rows.every((r) => r.status === 'ready' && s.units.find((u) => u.id === r.id).owner === 0));
+  assert.equal(ov.counts.ready, mine.length);
+  assert.deepEqual(Object.keys(ov.counts), Object.keys(ARMY_STATUS));
+
+  // statuses: fortified, done, marching (order and no moves left), ready
+  const [a, b] = mine;
+  const c = spawnUnit(s, 'archer', 0, capital.q, capital.r);
+  const d = spawnUnit(s, 'scout', 0, capital.q, capital.r);
+  d.movesLeft = 3; // freshly recruited units wait a turn
+  a.fortified = true;
+  b.movesLeft = 0; b.hasAttacked = true;
+  c.movesLeft = 0; c.hasAttacked = true; c.goto = { q: enemyCity.q, r: enemyCity.r };
+  assert.equal(unitStatus(s, a), 'fortified');
+  assert.equal(unitStatus(s, b), 'done');
+  assert.equal(unitStatus(s, c), 'marching');
+  assert.equal(unitStatus(s, d), 'ready');
+  ov = armyOverview(s, 0);
+  assert.deepEqual(ov.rows.map((r) => r.id), [d.id, c.id, a.id, b.id], 'ready → marching → fortified → done');
+  assert.deepEqual(ov.counts, { ready: 1, marching: 1, fortified: 1, done: 1 });
+  // the ready list agrees with Tab
+  assert.deepEqual(ov.rows.filter((r) => r.status === 'ready').map((r) => r.id), activeUnits(s, 0).map((u) => u.id));
+  const row = ov.rows.find((r) => r.id === c.id);
+  assert.equal(row.name, 'Archer'); assert.equal(row.symbol, 'A'); assert.equal(row.maxHp, UNIT_TYPES.archer.hp);
+
+  // location: in a city, n tiles from the nearest explored city; an unexplored enemy city is never named
+  assert.equal(unitWhere(s, d), `in ${capital.name}`);
+  const fogged = s.cities.filter((x) => !exploredTiles(s, 0).has(key(x.q, x.r)));
+  assert.ok(fogged.some((x) => x.id === enemyCity.id), 'the enemy capital starts in the fog');
+  d.q = enemyCity.q; d.r = enemyCity.r; // stand on the enemy capital without exploring it
+  const w = unitWhere(s, d);
+  assert.ok(!fogged.some((x) => w.includes(x.name)), `fogged city named: ${w}`);
+  assert.match(w, /^\d+ tiles? from /);
+  s.fog = false;
+  assert.equal(unitWhere(s, d), `in ${enemyCity.name}`, 'without fog every city is known');
+  const n = neighbors(capital.q, capital.r).find((p) => !s.cities.some((x) => distance(x, p) === 0));
+  d.q = n.q; d.r = n.r;
+  assert.equal(unitWhere(s, d), `1 tile from ${capital.name}`);
+  // no unit, no rows; the overview is plain JSON
+  s.units = s.units.filter((u) => u.owner !== 0);
+  assert.deepEqual(armyOverview(s, 0).rows, []);
+  assert.deepEqual(JSON.parse(JSON.stringify(ov)), ov);
 });

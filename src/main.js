@@ -5,7 +5,7 @@ import {
   cloneState, drainEvents, migrateState, logFor, turnReport, reportText, reportIsBad, isUndoableMove, canFortify, fortify, activeUnits, territoryOwner, cityResources, unitSummary, planRoute, setOrder, runOrders, cancelOrder, visibleTiles, exploredTiles, build, unitCost, hasBuilding,
   rankOf, rankMult, buildingCost, unitMove, factionOf, riverDefense, flankers, zocTiles, threatTiles, exportGame, importGame, saveFileName, parseSeed, restartOptions,
   upgradeOptions, upgradeUnit, canDisband, disbandRefund, disbandUnit, chargeReady,
-  updateSightings, lastSeen, lastSeenAt, lastSeenText,
+  updateSightings, lastSeen, lastSeenAt, lastSeenText, armyOverview, ARMY_STATUS,
 } from './game.js';
 import { createAnimator } from './anim.js';
 import { decideTap } from './input.js';
@@ -14,7 +14,7 @@ import { chartSvg, summaryRows } from './stats.js';
 import { GAME_VERSION, GAME_DATE } from './version.js';
 import { runAITurn } from './ai.js';
 import { SHORTCUTS, keyAction, recruitKey } from './keys.js';
-import { render, canvasSize, pickHex } from './render.js';
+import { render, canvasSize, pickHex, tileCenter } from './render.js';
 import { key } from './hex.js';
 import {
   UNIT_TYPES, TERRAIN, PLAYERS, DIFFICULTY, BUILDINGS, RANKS, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FORTIFY, TERRITORY, ECONOMY, RESOURCES, HIGH_GROUND, CHARGE,
@@ -311,6 +311,52 @@ function updateHud() {
     statsShownForEnd = false;
   }
   updateStats();
+  updateArmy();
+}
+
+let armyKey = '';
+
+// Army panel: every own unit with its status and place; a click selects it. The summary line shows the
+// counts even while the panel is closed. Redrawn only on change (updateHud runs on every mouse move).
+function updateArmy() {
+  const { rows, counts } = armyOverview(state, 0);
+  const sum = rows.length ? `${rows.length} unit${rows.length === 1 ? '' : 's'}${counts.ready ? ` · ${counts.ready} ready` : ''}` : 'no units';
+  const k = `${$('army-panel').open}:${selectedId}:${busy()}:${JSON.stringify(rows)}`;
+  if (k === armyKey) return;
+  armyKey = k;
+  $('army-count').textContent = sum;
+  if (!$('army-panel').open) return;
+  if (!rows.length) { $('army').innerHTML = '<li class="hint">You have no units. Recruit in a city.</li>'; return; }
+  $('army').innerHTML = rows.map((r) => {
+    const rank = RANKS[r.rank].symbol ? ` ${RANKS[r.rank].symbol}` : '';
+    const hurt = r.hp < r.maxHp ? ' hurt' : '';
+    return `<li><button type="button" data-army="${r.id}" class="army-row ${r.status}${r.id === selectedId ? ' sel' : ''}"
+      aria-pressed="${r.id === selectedId}" ${busy() ? 'disabled' : ''}>
+      <span class="sym">${r.symbol}</span>
+      <span class="nm">${r.name}${rank}<small>${r.where}</small></span>
+      <span class="hp${hurt}">${r.hp}/${r.maxHp}</span>
+      <span class="st">${ARMY_STATUS[r.status].label}</span></button></li>`;
+  }).join('');
+}
+
+// Selects a unit from the army list and brings it into view (also inside the zoomed map on a phone).
+function selectFromArmy(id) {
+  const u = getUnit(state, id);
+  if (busy() || !u || u.owner !== 0) return;
+  pending = null;
+  selectedId = u.id;
+  const city = cityAt(state, u.q, u.r);
+  selectedCityId = city ? city.id : null;
+  sound.play('click');
+  draw();
+  const wrap = canvas.parentElement;
+  if (wrap.classList.contains('zoomed')) {
+    const c = tileCenter(u.q, u.r);
+    const k = canvas.clientWidth / canvasSize(state).w;
+    wrap.scrollTo({ left: c.x * k - wrap.clientWidth / 2, top: c.y * k - wrap.clientHeight / 2 });
+  }
+  const rect = canvas.getBoundingClientRect();
+  if (rect.bottom < 0 || rect.top > window.innerHeight) wrap.scrollIntoView({ block: 'nearest' });
 }
 
 let statsShownForEnd = false;
@@ -731,6 +777,11 @@ $('banner-again').addEventListener('click', () => { if (!busy()) startNewGame(re
 $('seed-current').addEventListener('click', () => { $('seed-input').value = String(state.seed); });
 $('stats-panel').addEventListener('toggle', () => { statsKey = ''; updateStats(); });
 $('next-unit').addEventListener('click', selectNextUnit);
+$('army-panel').addEventListener('toggle', () => { armyKey = ''; updateArmy(); });
+$('army').addEventListener('click', (ev) => {
+  const row = ev.target.closest('button[data-army]');
+  if (row) selectFromArmy(Number(row.dataset.army));
+});
 $('info').addEventListener('click', (ev) => {
   if (ev.target.closest('button[data-undo]')) { undoMove(); return; }
   if (ev.target.closest('button[data-fortify]')) { fortifySelected(); return; }

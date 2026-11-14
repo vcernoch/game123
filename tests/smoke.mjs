@@ -552,6 +552,73 @@ try {
   }
   await page.screenshot({ path: 'artifacts/screenshot-lastseen.png' });
 
+  // army panel: lists own units (ready first), the summary counts them, a click selects the unit
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.evaluate(async () => {
+    const g = await import('./src/game.js');
+    window.__game.newGame(54321);
+    const st = window.__game.getState();
+    const cap = st.cities.find((c) => c.owner === 0 && c.capital);
+    const extra = g.spawnUnit(st, 'archer', 0, cap.q, cap.r);
+    extra.hp = 5; extra.xp = 4; extra.movesLeft = 0; extra.hasAttacked = true; // a wounded veteran that is done
+    const first = st.units.find((u) => u.owner === 0 && u.id !== extra.id);
+    first.fortified = true;
+    window.__game.refresh();
+  });
+  await page.click('#army-panel summary');
+  await page.waitForSelector('#army .army-row');
+  const army = await page.evaluate(() => {
+    const st = window.__game.getState();
+    const rows = [...document.querySelectorAll('#army .army-row')];
+    return { own: st.units.filter((u) => u.owner === 0).length, rows: rows.length,
+      statuses: rows.map((b) => b.querySelector('.st').textContent), ids: rows.map((b) => Number(b.dataset.army)),
+      count: document.getElementById('army-count').textContent, text: document.getElementById('army').textContent };
+  });
+  if (army.rows !== army.own || army.statuses[0] !== 'ready' || army.statuses[army.rows - 1] !== 'done'
+    || !army.statuses.includes('fortified') || !/\d+ units · \d+ ready/.test(army.count) || !army.text.includes('Archer ★')
+    || !army.text.includes('5/8')) {
+    throw new Error(`army panel: ${JSON.stringify(army)}`);
+  }
+  await page.click(`#army [data-army="${army.ids[1]}"]`);
+  const armySel = await page.evaluate(() => ({ id: window.__game.selectedId(),
+    sel: document.querySelector('#army .army-row.sel')?.dataset.army, info: document.getElementById('info').textContent }));
+  if (armySel.id !== army.ids[1] || Number(armySel.sel) !== army.ids[1]) throw new Error(`army panel: click did not select ${JSON.stringify(armySel)}`);
+  await page.screenshot({ path: 'artifacts/screenshot-army.png' });
+  // phone: the zoomed map scrolls to the unit picked in the list, and nothing scrolls sideways
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.evaluate(() => { window.__game.newGame(4242, { size: 'large', fog: false }); });
+  if (!(await page.evaluate(() => document.querySelector('.board-wrap').classList.contains('zoomed')))) await page.click('#zoom');
+  const far = await page.evaluate(() => {
+    const st = window.__game.getState();
+    const id = st.units.filter((u) => u.owner === 0)[0].id;
+    // scroll the frame to the corner farthest from the unit, so selecting it has to scroll back
+    const u = st.units.find((x) => x.id === id);
+    const wrap = document.querySelector('.board-wrap');
+    wrap.scrollTo(u.q < st.cols / 2 ? wrap.scrollWidth : 0, u.r < st.rows / 2 ? wrap.scrollHeight : 0);
+    return id;
+  });
+  await page.evaluate(() => document.getElementById('army-panel').scrollIntoView());
+  await page.click(`#army [data-army="${far}"]`);
+  const armyPhone = await page.evaluate(async (id) => {
+    const rnd = await import('./src/render.js');
+    const st = window.__game.getState();
+    const u = st.units.find((x) => x.id === id);
+    const wrap = document.querySelector('.board-wrap');
+    const canvas = document.getElementById('board');
+    const c = rnd.tileCenter(u.q, u.r);
+    const k = canvas.clientWidth / rnd.canvasSize(st).w;
+    const x = c.x * k - wrap.scrollLeft; const y = c.y * k - wrap.scrollTop; // unit position inside the frame
+    return { sel: window.__game.selectedId(), zoomed: wrap.classList.contains('zoomed'), x, y, w: wrap.clientWidth, h: wrap.clientHeight,
+      wide: document.documentElement.scrollWidth > window.innerWidth + 1 };
+  }, far);
+  if (armyPhone.sel !== far || armyPhone.wide || !armyPhone.zoomed || armyPhone.x < 0 || armyPhone.x > armyPhone.w
+    || armyPhone.y < 0 || armyPhone.y > armyPhone.h) throw new Error(`army panel on phone: ${JSON.stringify(armyPhone)}`);
+  await page.evaluate(() => document.getElementById('army-panel').scrollIntoView());
+  await page.screenshot({ path: 'artifacts/screenshot-army-mobile.png' });
+  await page.click('#zoom');
+  await page.keyboard.press('Escape'); // the next sections start without a selection
+  await page.click('#army-panel summary');
+
   // rivers: large map without fog, hovering a river tile shows its description in the panel
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.evaluate(() => { window.__game.newGame(4242, { size: 'large', fog: false }); });
