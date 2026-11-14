@@ -2,6 +2,19 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-14 – Ancient ruins (v0.23.0)
+- **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.9.0–v0.23.0) is far ahead of `main` (v0.8.0) – please merge it.
+- Phase 10 was done, so I opened phase 11 (exploration, own improvement). Exploring the fog had no reward of its own and scouts were only eyes; now there is something to find.
+- `RUINS` in `rules.js`. `placeRuins` in `map.js` (own RNG, so terrain, cities, roads, rivers and resources stay the same for all seeds): ruins come in pairs – one nearer each capital, at about the same distance from it – 1 pair on Small, 2 on Medium, 4 on Large; on passable land, not on resources, ≥ 3 from capitals, ≥ 2 from cities, ≥ 3 apart, reachable.
+- `exploreRuin` in `game.js`: the first unit (any type, scouts too) to end its move on a ruin explores it. The reward depends only on seed and tile (`ruinKind`): **Treasure** +15 gold (weight 3), **Forgotten drill yard** +3 XP (= Veteran, with the promotion heal; weight 2), **Old map** reveals the land within 4 tiles (weight 2; treasure instead without fog), **Wandering warriors** a free Warrior next to the explorer (weight 2; treasure if no free tile). New `ruin` event (replayable by `applyEvent`, own synthesized "discover" sound, floater "Ruins: +15 gold" etc.), chronicle entry seen only by those who saw it.
+- Fog: `tile.ruinGone` lists the players who know a ruin was looted; `ruinBelieved(state, q, r, viewer)` – a ruin looted in the fog keeps showing for the other side until they see that tile again, so nothing leaks. `updateExplored` teaches it.
+- AI: `ruinGoals` in `ai.js` – known (believed) ruins within 6 tiles become movement goals (weight 0.9) for all units incl. scouts; a ruin the AI knows is gone is not. Hard AI sees the truth.
+- UI: violet disc with broken columns on the tile (top left, resources are top right); the tile panel says "Ancient ruins: …"; help text updated. Looting is not undoable (it's an extra event).
+- State structure: `state.version` 18 (`tile.ruin`, `tile.ruinGone`), old maps get no ruins.
+- Tests adjusted (rules changed, not weakened): the scout test now allows ruin goals next to explore goals ("scouts only explore (or loot ruins)"); the smoke "Same map again" check now compares maps with looted ruins put back, since looting is the only change a game makes to its map.
+- Tests: +4 logic (fair placement on all sizes and seeds, deterministic; each reward incl. both fallbacks, event replay, not undoable, no second loot; looting in the fog: believed by the other side, hidden in the chronicle, learned on sight, AI goal appears/disappears, migration; AI armies loot ruins in real games). Smoke test hovers a ruin, checks the panel, moves a unit onto it, checks the chronicle (`artifacts/screenshot-ruins.png`).
+- Status: `npm run check` green (81 logic tests + smoke).
+
 ## 2026-11-14 – Army panel (v0.22.0)
 - **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.9.0–v0.22.0) is far ahead of `main` (v0.8.0) – please merge it.
 - Phase 10 (clarity and feedback, own improvement), new task. With a bigger army it was hard to see who still needs orders and where everyone is; Tab only walks through ready units one by one.

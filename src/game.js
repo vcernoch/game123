@@ -4,7 +4,7 @@ import { generateMap, hasRiverEdge } from './map.js';
 import {
   TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY, VISION, DIFFICULTY, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, ROAD_COST, RIVER, FLANK, HIGH_GROUND, CHARGE,
   FACTIONS, NO_FACTION, MAP_SIZES, HAPPENINGS, FORTIFY, TERRITORY, RESOURCES,
-  UPGRADES, UPGRADE, DISBAND, SIGHTINGS,
+  UPGRADES, UPGRADE, DISBAND, SIGHTINGS, RUINS,
 } from './rules.js';
 import { createRng } from './rng.js';
 
@@ -128,7 +128,7 @@ function countStat(state, name, player) {
   state.stats[name][player]++;
 }
 
-export const STATE_VERSION = 17;
+export const STATE_VERSION = 18;
 
 // Converts a saved state of an older version to the current one; returns null for an unknown format.
 export function migrateState(s) {
@@ -201,6 +201,10 @@ export function migrateState(s) {
     s.sightings = PLAYERS.map(() => []); // last-seen markers arrived in version 17
     s.version = 17;
   }
+  if (s.version === 17) {
+    // ancient ruins arrived in version 18 – old maps simply have none
+    s.version = 18;
+  }
   return s.version === STATE_VERSION ? s : null;
 }
 
@@ -259,7 +263,10 @@ export function visibleTiles(state, player) {
 export function updateExplored(state, player) {
   if (!state.explored) return;
   const all = new Set(state.explored[player] || []);
-  for (const k of visibleTiles(state, player)) all.add(k);
+  for (const k of visibleTiles(state, player)) {
+    all.add(k);
+    learnRuinGone(state.tiles[k], player);
+  }
   state.explored[player] = [...all].sort();
 }
 
@@ -388,6 +395,12 @@ export function applyEvent(state, ev) {
   } else if (ev.type === 'upgrade') {
     const u = getUnit(state, ev.unitId);
     if (u) { u.type = ev.to; u.hp = ev.hp; delete u.fortified; }
+  } else if (ev.type === 'ruin') {
+    const t = tileAt(state, ev.q, ev.r);
+    if (t) { delete t.ruin; t.ruinGone = [...ev.knownBy]; }
+    if (ev.gold) state.gold[ev.player] += ev.gold;
+    const u = getUnit(state, ev.unitId);
+    if (u && ev.xp !== undefined) { u.xp = ev.xp; u.hp = ev.hp; }
   } else if (ev.type === 'disband') {
     removeUnit(state, ev.unitId); // gold is not replayed, as for recruiting and upgrades
   }
@@ -1048,6 +1061,7 @@ export function moveUnit(state, unitId, q, r) {
     });
     if (prev !== null) checkWinner(state);
   }
+  if (tileAt(state, q, r).ruin && state.winner === null) exploreRuin(state, unit);
   updateExplored(state, unit.owner);
   return true;
 }
@@ -1219,6 +1233,80 @@ export function endTurn(state) {
   }
   if (state.happenings) rollHappening(state, state.current);
   return true;
+}
+
+// ---------- ancient ruins ----------
+// tile.ruin = an unexplored ruin. Once explored it is gone, and tile.ruinGone lists the players who know
+// that (the explorer and whoever saw it happen; others learn it when they next see the tile). Until
+// then a player still believes the ruin is there, so a ruin looted in the fog doesn't give anything away.
+
+function learnRuinGone(tile, player) {
+  if (tile && tile.ruinGone && !tile.ruinGone.includes(player)) {
+    tile.ruinGone = [...tile.ruinGone, player].sort();
+  }
+}
+
+// Does the viewer believe there is an unexplored ruin on the tile? (They must also have explored it to know.)
+export function ruinBelieved(state, q, r, viewer) {
+  const t = tileAt(state, q, r);
+  return !!t && (!!t.ruin || (!!t.ruinGone && !t.ruinGone.includes(viewer)));
+}
+
+// The reward of a ruin depends only on the seed and the tile, so the same game gives the same rewards.
+export function ruinKind(state, q, r) {
+  const rng = createRng((state.seed * 7349 + q * 911 + r * 397 + 4242) >>> 0);
+  const kinds = Object.entries(RUINS.kinds);
+  let roll = rng.next() * kinds.reduce((sum, [, k]) => sum + k.weight, 0);
+  for (const [id, k] of kinds) {
+    if ((roll -= k.weight) < 0) return id;
+  }
+  return kinds[kinds.length - 1][0];
+}
+
+// Tile next to the unit where ruin recruits can appear (free land, no city, no other ruin), or null.
+function recruitSpot(state, unit) {
+  return neighbors(unit.q, unit.r).find((n) => isFree(state, n.q, n.r) && !cityAt(state, n.q, n.r)
+    && !tileAt(state, n.q, n.r).ruin) || null;
+}
+
+// The unit standing on a ruin explores it. Returns the 'ruin' event or null when there is no ruin.
+export function exploreRuin(state, unit) {
+  const tile = tileAt(state, unit.q, unit.r);
+  if (!tile || !tile.ruin) return null;
+  let kind = ruinKind(state, tile.q, tile.r);
+  if (kind === 'map' && !state.fog) kind = 'treasure'; // nothing to reveal without fog
+  const spot = kind === 'recruits' ? recruitSpot(state, unit) : null;
+  if (kind === 'recruits' && !spot) kind = 'treasure';
+  const info = RUINS.kinds[kind];
+  const player = unit.owner;
+  const knownBy = seenBy(state, { by: player, at: [tile] });
+  const ev = { type: 'ruin', unitId: unit.id, player, q: tile.q, r: tile.r, kind, gold: 0, knownBy };
+  delete tile.ruin;
+  tile.ruinGone = state.fog ? knownBy : PLAYERS.map((_, p) => p);
+  ev.knownBy = tile.ruinGone;
+  let detail = '';
+  if (kind === 'treasure') {
+    ev.gold = info.gold;
+    state.gold[player] += info.gold;
+    detail = ` (+${info.gold} gold)`;
+  } else if (kind === 'map') {
+    const all = new Set(state.explored[player]);
+    const before = all.size;
+    for (const t of Object.values(state.tiles)) if (distance(t, tile) <= info.radius) all.add(key(t.q, t.r));
+    state.explored[player] = [...all].sort();
+    ev.revealed = all.size - before;
+    detail = ` (${ev.revealed} tiles mapped)`;
+  }
+  const who = PLAYERS[player].name;
+  addLog(state, `${who}: ${UNIT_TYPES[unit.type].name} explored ancient ruins – ${info.name}${detail}`, { seen: knownBy });
+  if (kind === 'training') {
+    gainXp(state, unit, info.xp);
+    ev.xp = unit.xp;
+    ev.hp = unit.hp;
+  }
+  emit(state, ev);
+  if (kind === 'recruits') spawnUnit(state, info.unit, player, spot.q, spot.r);
+  return ev;
 }
 
 // ---------- random events ----------

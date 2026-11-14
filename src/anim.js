@@ -108,6 +108,9 @@ export function createAnimator(redraw, isVisible = () => true, onShow = () => {}
       const u = getUnit(st, ev.unitId);
       if (u) addFloater(tileCenter(u.q, u.r), `⇧ ${UNIT_TYPES[ev.to].name}`, '#ffd34d');
       await tween(PAUSE_MS, () => {});
+    } else if (ev.type === 'ruin') {
+      addFloater(tileCenter(ev.q, ev.r), ruinFloat(ev), '#d9cbff');
+      await tween(PAUSE_MS * 2, () => {});
     } else if (ev.type === 'disband') {
       addFloater(tileCenter(ev.q, ev.r), ev.refund ? `✖ disbanded +${ev.refund}` : '✖ disbanded', '#e8e2d0');
       await tween(PAUSE_MS, () => {});
@@ -145,8 +148,16 @@ export function createAnimator(redraw, isVisible = () => true, onShow = () => {}
     if (ev.type === 'capture') return see(st.cities.find((c) => c.id === ev.cityId));
     if (ev.type === 'spawn') return see(ev.unit);
     if (ev.type === 'fortify' || ev.type === 'upgrade') return see(getUnit(st, ev.unitId));
-    if (ev.type === 'disband') return see(ev);
+    if (ev.type === 'disband' || ev.type === 'ruin') return see(ev);
     return true;
+  }
+
+  // Short text over a looted ruin.
+  function ruinFloat(ev) {
+    if (ev.kind === 'treasure') return `Ruins: +${ev.gold} gold`;
+    if (ev.kind === 'training') return 'Ruins: +XP';
+    if (ev.kind === 'map') return 'Ruins: old map';
+    return 'Ruins: recruits';
   }
 
   a.skip = () => { if (a.busy) a.skipping = true; };

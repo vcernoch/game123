@@ -145,6 +145,25 @@ export const RESOURCES = {
   horses: { name: 'Horses', discount: { horseman: 4 }, desc: 'horsemen recruited in the city 4 gold cheaper' },
 };
 
+// Ancient ruins: scattered over the map in pairs (one nearer each capital, about equally far, so neither
+// side is favoured). The first unit of any kind to end its move on a ruin explores it and gets one reward.
+// perPair: one pair per this many map tiles (small 1, medium 2, large 4 pairs).
+// treasure: gold; training: experience for the unit; map: reveals the land around (with fog only);
+// recruits: a free unit next to the explorer (treasure instead when there is no free tile).
+export const RUINS = {
+  perPair: 70,
+  minCapitalDist: 3,
+  minCityDist: 2,
+  minRuinDist: 3,
+  kinds: {
+    treasure: { name: 'Treasure', weight: 3, gold: 15 },
+    training: { name: 'Forgotten drill yard', weight: 2, xp: 3 },
+    map:      { name: 'Old map', weight: 2, radius: 4 },
+    recruits: { name: 'Wandering warriors', weight: 2, unit: 'warrior' },
+  },
+  desc: 'the first unit to stop here finds gold, experience, an old map or new recruits',
+};
+
 // Fog of war: city sight range and the hills bonus.
 export const VISION = { city: 2, hillsBonus: 1 };
 

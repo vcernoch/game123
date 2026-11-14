@@ -15,6 +15,7 @@ export function soundFor(ev, viewer = 0) {
     case 'upgrade': return 'promote';
     case 'disband': return 'disband';
     case 'spawn': return 'recruit';
+    case 'ruin': return 'discover';
     case 'happening': {
       const good = ev.kind === 'harvest' || ev.suppressed;
       return (ev.player === viewer) === good ? 'boon' : 'bane';
@@ -50,6 +51,9 @@ const SOUNDS = {
   bane:    [{ f: 196, d: 0.25, v: 0.22, w: 'sawtooth', slide: 150 }, { noise: true, d: 0.2, v: 0.12, f: 400, t: 0.05 }],
   // a soft falling sigh – the unit goes home
   disband: [{ f: 440, d: 0.25, v: 0.16, w: 'triangle', slide: 220 }],
+  // a bright rising arpeggio with a shimmer – something old was found
+  discover: [{ f: 587, d: 0.09, v: 0.16, w: 'sine' }, { f: 880, d: 0.09, v: 0.16, w: 'sine', t: 0.07 },
+             { f: 1175, d: 0.22, v: 0.16, w: 'sine', t: 0.14 }, { noise: true, d: 0.15, v: 0.05, f: 5000, t: 0.14 }],
   click:   [{ f: 520, d: 0.03, v: 0.12, w: 'square' }],
   victory: [523, 659, 784, 1047].map((f, i) => ({ f, d: 0.22, v: 0.25, w: 'triangle', t: i * 0.16 })),
   defeat:  [392, 349, 311, 262].map((f, i) => ({ f, d: 0.28, v: 0.25, w: 'triangle', t: i * 0.2 })),

@@ -10,7 +10,7 @@ import {
   exportGame, importGame, saveFileName, stateProblem, SAVE_FORMAT, threatTiles, parseSeed, restartOptions, MAX_SEED,
   upgradeOptions, upgradeUnit, upgradeCost, canDisband, disbandRefund, disbandUnit,
   turnReport, reportText, reportIsBad, updateSightings, lastSeen, lastSeenAt, lastSeenText,
-  armyOverview, unitStatus, unitWhere, ARMY_STATUS,
+  armyOverview, unitStatus, unitWhere, ARMY_STATUS, ruinBelieved, ruinKind, exploreRuin,
 } from '../src/game.js';
 import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
@@ -27,7 +27,7 @@ import { pathExists, generateMap, dirTo } from '../src/map.js';
 import { distance, key, neighbors } from '../src/hex.js';
 import {
   RESOURCES, FORTIFY, TERRITORY, ECONOMY, UNIT_TYPES, TERRAIN, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FLANK, HIGH_GROUND, CHARGE,
-  UPGRADES, UPGRADE, DISBAND,
+  UPGRADES, UPGRADE, DISBAND, RUINS,
   SIGHTINGS,
 } from '../src/rules.js';
 
@@ -1577,7 +1577,7 @@ test('scout: sees far, never enters a foreign city, the AI sends one exploring o
     .concat(army.map((type, i) => ({ id: 900 + i, type, owner: 1, q: spots[i][0], r: spots[i][1], hp: 1, movesLeft: 0, xp: 0 })));
   assert.equal(pickRecruit(big, 1, capital), 'scout');
   const scout = spawnUnit(big, 'scout', 1, capital.q, capital.r);
-  assert.ok(goalsFor(big, scout).every((g) => g.explore), 'scouts only explore');
+  assert.ok(goalsFor(big, scout).every((g) => g.explore || g.ruin), 'scouts only explore (or loot ruins)');
   assert.notEqual(pickRecruit(big, 1, capital), 'scout', 'one is enough');
   const hard = createGame({ seed: 5, size: 'large', difficulty: 'hard' });
   assert.equal(unexploredLand(hard, aiKnowledge(hard, 1)), 0);
@@ -2276,4 +2276,181 @@ test('army overview lists own units by status with a fog-safe location', () => {
   s.units = s.units.filter((u) => u.owner !== 0);
   assert.deepEqual(armyOverview(s, 0).rows, []);
   assert.deepEqual(JSON.parse(JSON.stringify(ov)), ov);
+});
+
+test('ancient ruins: placed fairly in pairs on every map size, deterministic', () => {
+  for (const size of Object.keys(MAP_SIZES)) {
+    for (const seed of [1, 2, 3, 4, 5, 6]) {
+      const s = createGame({ seed, size });
+      const ruins = Object.values(s.tiles).filter((t) => t.ruin);
+      const [home, away] = s.cities;
+      const pairs = Math.max(1, Math.round((s.cols * s.rows) / RUINS.perPair));
+      assert.ok(ruins.length >= 2 && ruins.length <= pairs * 2 && ruins.length % 2 === 0, `${size}/${seed}: ${ruins.length} ruins`);
+      const near = ruins.filter((t) => distance(t, home) < distance(t, away));
+      assert.equal(near.length * 2, ruins.length, `${size}/${seed}: half the ruins on each side`);
+      // fair: the distances to "their" capital match within 1 per pair
+      const own = (t) => Math.min(distance(t, home), distance(t, away));
+      const a = near.map(own).sort((x, y) => x - y);
+      const b = ruins.filter((t) => !near.includes(t)).map(own).sort((x, y) => x - y);
+      assert.ok(Math.abs(a.reduce((x, y) => x + y, 0) - b.reduce((x, y) => x + y, 0)) <= a.length, `${size}/${seed}: fair distances`);
+      for (const t of ruins) {
+        assert.ok(TERRAIN[t.terrain].passable && !t.resource, 'on passable land without a resource');
+        assert.ok(s.cities.every((c) => distance(c, t) >= RUINS.minCityDist), 'away from cities');
+        assert.ok(own(t) >= RUINS.minCapitalDist, 'away from capitals');
+        assert.ok(pathExists(s.tiles, home, t), 'reachable');
+        assert.ok(ruins.every((o) => o === t || distance(o, t) >= RUINS.minRuinDist), 'apart from each other');
+      }
+      const again = createGame({ seed, size });
+      assert.deepEqual(Object.values(again.tiles).filter((t) => t.ruin).map((t) => key(t.q, t.r)), ruins.map((t) => key(t.q, t.r)));
+    }
+  }
+});
+
+// A game with one ruin of the given kind at a free tile near the player's capital (rewards depend on the
+// tile, so we look for a tile of that kind) and a player unit on a neighbour ready to step onto it.
+function ruinSetup(kind, { fog = true, seed = 5 } = {}) {
+  const s = createGame({ seed, fog, happenings: false });
+  for (const t of Object.values(s.tiles)) delete t.ruin;
+  const capital = s.cities[0];
+  const tile = Object.values(s.tiles).find((t) => isPassable(s, t.q, t.r) && !unitAt(s, t.q, t.r)
+    && !s.cities.some((c) => distance(c, t) < 2) && distance(t, capital) <= 4 && ruinKind(s, t.q, t.r) === kind
+    && neighbors(t.q, t.r).filter((n) => isPassable(s, n.q, n.r) && !unitAt(s, n.q, n.r)).length >= 3);
+  assert.ok(tile, `no tile for ${kind}`);
+  tile.ruin = true;
+  const from = neighbors(tile.q, tile.r).find((n) => isPassable(s, n.q, n.r) && !unitAt(s, n.q, n.r)
+    && stepCost(s, n, tile) <= 2 && !s.cities.some((c) => distance(c, n) === 0));
+  const u = spawnUnit(s, 'warrior', 0, from.q, from.r);
+  u.movesLeft = 4; u.hasAttacked = false;
+  drainEvents(s);
+  return { s, tile, u };
+}
+
+test('ancient ruins: each reward, the event replays and the move cannot be undone', () => {
+  // treasure
+  let { s, tile, u } = ruinSetup('treasure');
+  const gold = s.gold[0];
+  let before = cloneState(s);
+  assert.ok(ruinBelieved(s, tile.q, tile.r, 0));
+  assert.ok(moveUnit(s, u.id, tile.q, tile.r));
+  let evs = drainEvents(s);
+  const ev = evs.find((e) => e.type === 'ruin');
+  assert.equal(ev.kind, 'treasure');
+  assert.equal(s.gold[0], gold + RUINS.kinds.treasure.gold);
+  assert.ok(!tile.ruin && tile.ruinGone.includes(0));
+  assert.ok(!ruinBelieved(s, tile.q, tile.r, 0));
+  assert.match(logFor(s, 0).at(-1).msg, /explored ancient ruins – Treasure \(\+15 gold\)/);
+  assert.equal(isUndoableMove(before, s, evs, 0), false, 'looting a ruin is not undoable');
+  for (const e of evs) applyEvent(before, e);
+  assert.deepEqual(snapshot(before), snapshot(s));
+  assert.equal(before.gold[0], s.gold[0]);
+  assert.ok(!tileAt(before, tile.q, tile.r).ruin);
+  // stepping on the same tile again gives nothing
+  const g2 = s.gold[0];
+  assert.equal(exploreRuin(s, getUnit(s, u.id)), null);
+  assert.equal(s.gold[0], g2);
+
+  // training: +3 xp → Veteran, with the promotion heal
+  ({ s, tile, u } = ruinSetup('training'));
+  u.hp = 5;
+  before = cloneState(s);
+  moveUnit(s, u.id, tile.q, tile.r);
+  assert.equal(u.xp, RUINS.kinds.training.xp);
+  assert.equal(rankOf(u), 1);
+  assert.equal(u.hp, 5 + XP.promotionHeal);
+  for (const e of drainEvents(s)) applyEvent(before, e);
+  assert.deepEqual(snapshot(before), snapshot(s));
+
+  // map: everything within the radius becomes explored
+  ({ s, tile, u } = ruinSetup('map'));
+  moveUnit(s, u.id, tile.q, tile.r);
+  const exp = exploredTiles(s, 0);
+  for (const t of Object.values(s.tiles)) {
+    if (distance(t, tile) <= RUINS.kinds.map.radius) assert.ok(exp.has(key(t.q, t.r)), 'mapped');
+  }
+  assert.ok(drainEvents(s).find((e) => e.type === 'ruin').revealed > 0);
+  // without fog an old map would be useless, so it's treasure instead
+  ({ s, tile, u } = ruinSetup('map', { fog: false }));
+  const g3 = s.gold[0];
+  moveUnit(s, u.id, tile.q, tile.r);
+  assert.equal(s.gold[0], g3 + RUINS.kinds.treasure.gold);
+
+  // recruits: a new warrior next to the explorer, replayed by the spawn event
+  ({ s, tile, u } = ruinSetup('recruits'));
+  const count = s.units.filter((x) => x.owner === 0).length;
+  before = cloneState(s);
+  moveUnit(s, u.id, tile.q, tile.r);
+  const mine = s.units.filter((x) => x.owner === 0);
+  assert.equal(mine.length, count + 1);
+  const recruit = mine.find((x) => x.id === s.nextUnitId - 1);
+  assert.equal(recruit.type, 'warrior');
+  assert.equal(distance(recruit, tile), 1);
+  assert.ok(!s.cities.some((c) => distance(c, recruit) === 0), 'not in a city');
+  for (const e of drainEvents(s)) applyEvent(before, e);
+  assert.deepEqual(snapshot(before), snapshot(s));
+  // with no free tile around, treasure instead
+  // (the unit is put straight onto the ruin, so the tile it came from doesn't count as free)
+  ({ s, tile, u } = ruinSetup('recruits'));
+  u.q = tile.q; u.r = tile.r;
+  for (const n of neighbors(tile.q, tile.r)) {
+    if (isPassable(s, n.q, n.r) && !unitAt(s, n.q, n.r)) spawnUnit(s, 'scout', 0, n.q, n.r);
+  }
+  const g4 = s.gold[0];
+  const n4 = s.units.length;
+  assert.equal(exploreRuin(s, u).kind, 'treasure');
+  assert.equal(s.gold[0], g4 + RUINS.kinds.treasure.gold);
+  assert.equal(s.units.length, n4);
+  assert.doesNotThrow(() => JSON.stringify(s));
+});
+
+test('ancient ruins: a ruin looted in the fog stays on the map until seen, the AI goes for known ruins', () => {
+  const { s, tile } = ruinSetup('treasure');
+  // send the player's units away so the ruin is out of sight, then let an AI unit loot it
+  s.units = s.units.filter((x) => x.owner !== 0);
+  const far = s.cities[1];
+  spawnUnit(s, 'warrior', 0, far.q, far.r); // the player needs a unit somewhere (sees only far away)
+  s.current = 1;
+  const n = neighbors(tile.q, tile.r).find((p) => isPassable(s, p.q, p.r) && !unitAt(s, p.q, p.r)
+    && !visibleTiles(s, 0).has(key(p.q, p.r)));
+  const ai = spawnUnit(s, 'scout', 1, n.q, n.r);
+  ai.movesLeft = 3; ai.hasAttacked = false;
+  updateExplored(s, 0);
+  assert.ok(!visibleTiles(s, 0).has(key(tile.q, tile.r)), 'the ruin is out of the player\'s sight');
+  assert.ok(goalsFor(s, ai).some((g) => g.ruin && g.q === tile.q && g.r === tile.r), 'the AI wants the ruin');
+  assert.ok(moveUnit(s, ai.id, tile.q, tile.r));
+  assert.deepEqual(tile.ruinGone, [1]);
+  assert.ok(ruinBelieved(s, tile.q, tile.r, 0), 'the player still believes in the ruin');
+  assert.ok(!ruinBelieved(s, tile.q, tile.r, 1));
+  assert.ok(!logFor(s, 0).some((e) => /ruins/.test(e.msg)), 'the chronicle hides it');
+  assert.ok(logFor(s, 1).some((e) => /ruins/.test(e.msg)));
+  assert.ok(!goalsFor(s, ai).some((g) => g.ruin), 'a looted ruin is no goal any more');
+  // when the player sees the tile again, they learn the ruin is gone
+  s.current = 0;
+  spawnUnit(s, 'warrior', 0, n.q, n.r); // the tile the AI scout came from is free again
+  updateExplored(s, 0);
+  assert.ok(!ruinBelieved(s, tile.q, tile.r, 0));
+  assert.deepEqual(tile.ruinGone, [0, 1]);
+
+  // migration from version 17: old maps have no ruins
+  const old = createGame({ seed: 2 });
+  old.version = 17;
+  for (const t of Object.values(old.tiles)) delete t.ruin;
+  const m = migrateState(old);
+  assert.equal(m.version, STATE_VERSION);
+  assert.ok(!Object.values(m.tiles).some((t) => t.ruin));
+});
+
+test('ancient ruins: AI armies loot ruins over a real game', () => {
+  let looted = 0;
+  for (const seed of [2, 6, 9]) {
+    const s = createGame({ seed, happenings: false });
+    const start = Object.values(s.tiles).filter((t) => t.ruin).length;
+    for (let i = 0; i < 40 && s.winner === null; i++) {
+      runAITurn(s);
+      drainEvents(s);
+      endTurn(s);
+    }
+    looted += start - Object.values(s.tiles).filter((t) => t.ruin).length;
+    for (const t of Object.values(s.tiles)) if (t.ruinGone) assert.ok(!t.ruin && t.ruinGone.length >= 1);
+  }
+  assert.ok(looted >= 3, `only ${looted} ruins looted`);
 });

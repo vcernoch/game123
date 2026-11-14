@@ -75,5 +75,8 @@ Check off `[x]` when done. Add new ideas to the end of the relevant phase or to 
 - [x] Last-seen markers: an enemy unit that disappears into the fog leaves a faded "?" marker where it was last seen (or the tile it walked off into), with a tooltip saying how long ago; forgotten after 3 turns or when the tile is seen again
 - [x] Army panel: a collapsible list of all own units (ready first, then marching, fortified, done) with HP, rank and where they stand; clicking a row selects the unit and scrolls the zoomed map to it
 
+## Phase 11 – exploration (own improvements)
+- [x] Ancient ruins: pairs of ruins placed fairly on the map; the first unit to stop on one finds treasure, experience, an old map or recruits; a ruin looted in the fog still shows until seen; the AI detours for known ruins
+
 ## Ideas (unordered)
 - Diplomacy with multiple AIs

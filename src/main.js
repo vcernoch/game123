@@ -5,7 +5,7 @@ import {
   cloneState, drainEvents, migrateState, logFor, turnReport, reportText, reportIsBad, isUndoableMove, canFortify, fortify, activeUnits, territoryOwner, cityResources, unitSummary, planRoute, setOrder, runOrders, cancelOrder, visibleTiles, exploredTiles, build, unitCost, hasBuilding,
   rankOf, rankMult, buildingCost, unitMove, factionOf, riverDefense, flankers, zocTiles, threatTiles, exportGame, importGame, saveFileName, parseSeed, restartOptions,
   upgradeOptions, upgradeUnit, canDisband, disbandRefund, disbandUnit, chargeReady,
-  updateSightings, lastSeen, lastSeenAt, lastSeenText, armyOverview, ARMY_STATUS,
+  updateSightings, lastSeen, lastSeenAt, lastSeenText, armyOverview, ARMY_STATUS, ruinBelieved,
 } from './game.js';
 import { createAnimator } from './anim.js';
 import { decideTap } from './input.js';
@@ -17,7 +17,7 @@ import { SHORTCUTS, keyAction, recruitKey } from './keys.js';
 import { render, canvasSize, pickHex, tileCenter } from './render.js';
 import { key } from './hex.js';
 import {
-  UNIT_TYPES, TERRAIN, PLAYERS, DIFFICULTY, BUILDINGS, RANKS, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FORTIFY, TERRITORY, ECONOMY, RESOURCES, HIGH_GROUND, CHARGE,
+  UNIT_TYPES, TERRAIN, PLAYERS, DIFFICULTY, BUILDINGS, RANKS, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FORTIFY, TERRITORY, ECONOMY, RESOURCES, HIGH_GROUND, CHARGE, RUINS,
 } from './rules.js';
 
 const SAVE_KEY = 'game123-save';
@@ -254,6 +254,7 @@ function updateHud() {
       html += '<p class="hint">Enemy zone of control – a unit that steps here must stop</p>';
     }
     if (tile.resource) html += `<p class="resource">${RESOURCES[tile.resource].name}: ${RESOURCES[tile.resource].desc}</p>`;
+    if (ruinBelieved(state, hover.q, hover.r, 0)) html += `<p class="resource ruin">Ancient ruins: ${RUINS.desc}</p>`;
     const realm = territoryOwner(state, hover.q, hover.r);
     if (realm !== undefined) {
       const whose = realm === null ? 'neutral territory' : realm === 0 ? 'your territory' : `${PLAYERS[realm].name} territory`;

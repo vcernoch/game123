@@ -1,7 +1,7 @@
 // Canvas rendering. No game logic, only drawing the state.
 import { hexToPixel, hexCorners, pixelToHex, key, neighbors, DIRS } from './hex.js';
 import { TERRAIN, UNIT_TYPES, PLAYERS, NEUTRAL_COLOR, RANKS } from './rules.js';
-import { territoryMap } from './game.js';
+import { territoryMap, ruinBelieved } from './game.js';
 
 export const HEX_SIZE = 32;
 const PAD = 8;
@@ -55,6 +55,7 @@ export function render(ctx, state, view = {}) {
       drawTerrainDetail(ctx, t.terrain, c.x, c.y);
       if (t.road) drawRoad(ctx, state, t, c);
       if (t.resource) drawResource(ctx, t.resource, c.x + 13, c.y - 12);
+      if ((t.ruin || t.ruinGone) && ruinBelieved(state, t.q, t.r, view.viewer ?? 0)) drawRuin(ctx, c.x - 13, c.y - 12);
       // terrain detail draws its own paths – the hex outline must be rebuilt
       hexPath(ctx, c.x, c.y, HEX_SIZE - 1);
       if (!seen(t.q, t.r)) {
@@ -133,6 +134,29 @@ export function render(ctx, state, view = {}) {
 }
 
 // Faded, dashed copy of an enemy unit where it was last seen, with a small "?" badge.
+// Ancient ruin: broken stone columns on a violet disc (violet so it can't be mistaken for a resource).
+function drawRuin(ctx, x, y) {
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(x, y, 11, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(58,44,96,0.92)';
+  ctx.fill();
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = '#c9b8f0';
+  ctx.stroke();
+  ctx.fillStyle = '#f3ecd9';
+  ctx.strokeStyle = '#3a2c60';
+  ctx.lineWidth = 0.8;
+  const block = (bx, by, bw, bh) => { ctx.fillRect(bx, by, bw, bh); ctx.strokeRect(bx, by, bw, bh); };
+  block(x - 7.5, y + 4.5, 15, 2.5); // base
+  block(x - 6.5, y - 4, 3, 8.5);    // left column, full height
+  block(x + 3.5, y - 4, 3, 8.5);    // right column, full height
+  block(x - 1.5, y + 0.5, 3, 4);    // middle column, broken off
+  block(x - 7.5, y - 6.5, 6, 2.5);  // what is left of the lintel
+  block(x + 2.5, y - 6.5, 5, 2.5);
+  ctx.restore();
+}
+
 function drawGhost(ctx, g, x, y) {
   const t = UNIT_TYPES[g.type];
   ctx.save();

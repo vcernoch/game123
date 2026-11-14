@@ -3,13 +3,13 @@ import { distance, key } from './hex.js';
 import {
   reachable, attackTargets, previewAttack, moveUnit, attack, buyUnit,
   unitAt, getUnit, tileAt, fortify, difficultyOf, visibleTiles, exploredTiles, build, hasBuilding, unitCost, buildingCost, factionOf,
-  threatTiles, cityAt, upgradeOptions, upgradeUnit,
+  threatTiles, cityAt, upgradeOptions, upgradeUnit, ruinBelieved,
 } from './game.js';
 import { UNIT_TYPES, TERRAIN } from './rules.js';
 
 // What the AI knows about the map. On hard it sees everything, otherwise only what it has explored and sees.
 export function aiKnowledge(state, me) {
-  if (difficultyOf(state, me).seesAll) return { sees: () => true, knows: () => true };
+  if (difficultyOf(state, me).seesAll) return { sees: () => true, knows: () => true, all: true };
   const vis = visibleTiles(state, me);
   const exp = exploredTiles(state, me);
   return { sees: (q, r) => vis.has(key(q, r)), knows: (q, r) => exp.has(key(q, r)) };
@@ -308,13 +308,22 @@ function tryBestAttack(state, unit, { safeOnly = false } = {}) {
 // Movement goals: known foreign cities and visible enemies. If there are none, the AI explores.
 // Scouts can't capture, so they only ever explore (and stay put once everything is known).
 export function goalsFor(state, unit, know = aiKnowledge(state, unit.owner)) {
-  const goals = [];
-  if (UNIT_TYPES[unit.type].noCapture) return exploreGoals(state, know);
+  const goals = ruinGoals(state, unit, know);
+  if (UNIT_TYPES[unit.type].noCapture) return [...goals, ...exploreGoals(state, know)];
   for (const c of state.cities) {
     if (c.owner !== unit.owner && know.knows(c.q, c.r)) goals.push({ q: c.q, r: c.r, w: c.owner === null ? 1 : 1.3 });
   }
   for (const u of state.units) if (u.owner !== unit.owner && know.sees(u.q, u.r)) goals.push({ q: u.q, r: u.r, w: 1.1, enemy: true });
-  return goals.length ? goals : exploreGoals(state, know);
+  return goals.some((g) => !g.ruin) ? goals : [...goals, ...exploreGoals(state, know)];
+}
+
+// Known unexplored ruins within a few turns' walk are worth a detour (scouts are made for this).
+export const RUIN_DETOUR = 6; // tiles
+function ruinGoals(state, unit, know) {
+  const believes = (t) => (know.all ? !!t.ruin : ruinBelieved(state, t.q, t.r, unit.owner));
+  return Object.values(state.tiles)
+    .filter((t) => (t.ruin || t.ruinGone) && know.knows(t.q, t.r) && believes(t) && distance(t, unit) <= RUIN_DETOUR)
+    .map((t) => ({ q: t.q, r: t.r, w: 0.9, ruin: true }));
 }
 
 function exploreGoals(state, know) {

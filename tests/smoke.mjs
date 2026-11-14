@@ -406,7 +406,9 @@ try {
   await page.screenshot({ path: 'artifacts/screenshot-mobile.png', fullPage: true });
 
   // "Same map again" on the game-over banner restarts the same map with the same settings
-  const endTiles = await page.evaluate(() => JSON.stringify(window.__game.getState().tiles));
+  // (looted ruins are the only change a game makes to its map – put them back before comparing)
+  const endTiles = await page.evaluate(() => JSON.stringify(Object.fromEntries(Object.entries(window.__game.getState().tiles)
+    .map(([k, t]) => { const { ruinGone, ...rest } = t; return [k, ruinGone ? { ...rest, ruin: true } : rest]; }))));
   await page.click('#banner-again');
   const again = await page.evaluate(() => {
     const s = window.__game.getState();
@@ -618,6 +620,45 @@ try {
   await page.click('#zoom');
   await page.keyboard.press('Escape'); // the next sections start without a selection
   await page.click('#army-panel summary');
+
+  // ancient ruins: drawn on the map, described in the panel, a unit stepping on one loots it
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const ruin = await page.evaluate(async () => {
+    const g = await import('./src/game.js');
+    const hx = await import('./src/hex.js');
+    const rnd = await import('./src/render.js');
+    window.__game.newGame(321, { fog: false, happenings: false });
+    const st = window.__game.getState();
+    const u = st.units.find((x) => x.owner === 0);
+    let target = null; let from = null;
+    for (const t of Object.values(st.tiles).filter((x) => x.ruin && x.q + x.r * 0.5 < st.cols / 2)) {
+      from = hx.neighbors(t.q, t.r).map((p) => g.tileAt(st, p.q, p.r))
+        .find((n) => n && g.isFree(st, n.q, n.r) && !g.cityAt(st, n.q, n.r) && g.stepCost(st, n, t) <= 2);
+      if (from) { target = t; break; }
+    }
+    if (!target) return { error: 'no ruin with a free neighbour' };
+    u.q = from.q; u.r = from.r; u.movesLeft = 2; u.hasAttacked = false; delete u.fortified;
+    window.__game.refresh();
+    const rect = document.getElementById('board').getBoundingClientRect();
+    const k = rect.width / rnd.canvasSize(st).w;
+    const pt = (p) => { const c = rnd.tileCenter(p.q, p.r); return { x: rect.left + c.x * k, y: rect.top + c.y * k }; };
+    return { q: target.q, r: target.r, at: pt(target), unit: pt(u), gold: st.gold[0] };
+  });
+  if (ruin.error) throw new Error(`ruins: ${ruin.error}`);
+  await page.mouse.move(ruin.at.x, ruin.at.y);
+  const ruinInfo = await page.textContent('#info');
+  if (!ruinInfo.includes('Ancient ruins')) throw new Error(`ruins: panel does not describe the ruin (${ruinInfo})`);
+  await page.screenshot({ path: 'artifacts/screenshot-ruins.png' });
+  await page.mouse.click(ruin.unit.x, ruin.unit.y);
+  await page.mouse.click(ruin.at.x, ruin.at.y);
+  await page.waitForFunction(() => !window.__game.isBusy(), null, { timeout: 5000 });
+  const looted = await page.evaluate(({ q, r }) => {
+    const st = window.__game.getState();
+    const t = Object.values(st.tiles).find((x) => x.q === q && x.r === r);
+    return { ruin: !!t.ruin, gone: t.ruinGone, log: document.getElementById('log').textContent, info: document.getElementById('info').textContent };
+  }, ruin);
+  if (looted.ruin || !looted.gone || !looted.log.includes('explored ancient ruins')) throw new Error(`ruins: not looted ${JSON.stringify(looted)}`);
+  await page.keyboard.press('Escape'); // the next sections start without a selection
 
   // rivers: large map without fog, hovering a river tile shows its description in the panel
   await page.setViewportSize({ width: 1280, height: 800 });

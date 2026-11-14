@@ -1,6 +1,6 @@
 import { key, neighbors, offsetToAxial, distance, DIRS } from './hex.js';
 import { createRng } from './rng.js';
-import { TERRAIN, CITY_NAMES, RIVER, TERRITORY } from './rules.js';
+import { TERRAIN, CITY_NAMES, RIVER, TERRITORY, RUINS } from './rules.js';
 
 // Generates a map: a cols × rows rectangle in "odd-r" offset.
 // Returns { tiles, cities, starts } – without units.
@@ -101,6 +101,7 @@ function tryGenerate(seed, cols, rows, neutralCount) {
   // rivers have their own RNG so they don't change the terrain and city layout for given seeds
   buildRivers(tiles, height, cols, rows, createRng(seed * 31 + 17));
   placeResources(tiles, cities, createRng(seed * 53 + 5));
+  placeRuins(tiles, cities, cols * rows, createRng(seed * 71 + 29));
   return { tiles, cities, starts };
 }
 
@@ -131,6 +132,33 @@ function placeResources(tiles, cities, rng) {
       put(city, 'horses', 2);
     } else if (rng.next() < 2 / 3) {
       put(city, rng.next() < 0.5 ? 'gold' : 'horses');
+    }
+  }
+}
+
+// Ancient ruins (own RNG, so everything else stays the same for given seeds). Placed in pairs: one tile
+// nearer the player's capital and one nearer the AI's, at about the same distance from "its" capital,
+// so neither side gets the better ones. Ruins avoid cities, resources and each other.
+function placeRuins(tiles, cities, area, rng) {
+  const [home, away] = cities;
+  const ok = (t) => TERRAIN[t.terrain].passable && !t.resource
+    && distance(t, home) >= RUINS.minCapitalDist && distance(t, away) >= RUINS.minCapitalDist
+    && cities.every((c) => distance(t, c) >= RUINS.minCityDist)
+    && Object.values(tiles).every((o) => !o.ruin || distance(o, t) >= RUINS.minRuinDist)
+    && pathExists(tiles, home, t);
+  const pairs = Math.max(1, Math.round(area / RUINS.perPair));
+  for (let i = 0; i < pairs; i++) {
+    const near = Object.values(tiles).filter((t) => distance(t, home) < distance(t, away) && ok(t));
+    let placed = false;
+    for (let tries = 0; tries < 20 && near.length && !placed; tries++) {
+      const a = rng.pick(near);
+      const want = distance(a, home);
+      const twins = Object.values(tiles).filter((t) => distance(t, away) < distance(t, home)
+        && Math.abs(distance(t, away) - want) <= 1 && distance(t, a) >= RUINS.minRuinDist && ok(t));
+      if (!twins.length) continue;
+      a.ruin = true;
+      rng.pick(twins).ruin = true;
+      placed = true;
     }
   }
 }
