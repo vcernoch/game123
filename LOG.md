@@ -2,6 +2,17 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-15 – Pillage (v0.25.0)
+- **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.9.0–v0.25.0) is far ahead of `main` (v0.8.0) – please merge it.
+- Phase 11 was done, so I opened phase 12 (economy war, own improvement). Resources were only ever a passive bonus; now they are something to raid and to guard, which gives fast units a job besides charging.
+- `PILLAGE` in `rules.js` (`gold` 6, `turns` 4). In `game.js`: `isPillaged`, `pillageTurnsLeft`, `canPillage`, `pillage`. A unit of the current player that is not a scout (`noCapture`), hasn't attacked and has a move left, standing on a working resource in another player's territory (not own, not neutral), plunders it: +6 gold, the unit's turn ends (fortify / move order / explore cleared), `tile.pillagedUntil` is set so the owner misses exactly 4 of its own turns (+1 round when the owner moves before the raider in a round). A pillaged gold mine gives no income, pillaged horses give no discount (`cityIncome`, `unitCost`). At the start of a round recovered tiles drop the field. New `pillage` event (replayable, floater "🔥 pillaged +6", synthesized crackle sound for the raider, the `bane` sound for the victim), chronicle entry seen by both sides. The enemy turn report counts pillaged resources ("A resource of yours was pillaged.", red ✕ on the tile).
+- AI: `pillageGoals` in `ai.js` – known working enemy resources within 4 tiles are movement goals (weight 0.95, not for scouts; like ruins they don't stop exploring); a unit with nothing to attack pillages where it stands, before or after moving. In 20 AI-vs-AI games on Medium: ~2.75 pillages per game.
+- UI: "🔥 Pillage (+6 gold)" button in the unit panel, key P (shortcut overlay), a burning ash marker over the resource on the map, "🔥 Pillaged – out of use, works again in N rounds" in the tile panel, "(🔥 pillaged, N more)" in the city's resource list. Help text updated.
+- State structure: `state.version` 20 (optional `tile.pillagedUntil`), trivial migration.
+- Test adjusted (not weakened): the smoke "Same map again" check now also strips `pillagedUntil` before comparing maps, because pillage is now a second thing a game changes on its map (the AI raided during the simulated game).
+- Tests: +2 logic (gold, lost income and discount, event replay, not undoable, exactly 4 missed incomes for both orders of play, recovery removes the field, turn report and text, who can't – scout, attacked, no moves, not own turn, own/neutral territory, no resource – orders cleared, migration; the AI pillages where it stands, gets goals only for working enemy resources within range, real AI-vs-AI games keep `pillagedUntil` in range). Smoke test: button pillages the AI's gold mine, P its horses, checks gold, chronicle and tile panel (`artifacts/screenshot-pillage.png`).
+- Status: `npm run check` green (85 logic tests + smoke).
+
 ## 2026-11-15 – Auto-explore (v0.24.0)
 - **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.9.0–v0.24.0) is far ahead of `main` (v0.8.0) – please merge it.
 - Phase 11 (exploration, own improvement), new task. Sending a scout around the fog took a click per turn; now it can be sent once.

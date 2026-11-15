@@ -145,6 +145,11 @@ export const RESOURCES = {
   horses: { name: 'Horses', discount: { horseman: 4 }, desc: 'horsemen recruited in the city 4 gold cheaper' },
 };
 
+// Pillage: a unit (not a scout) that hasn't attacked and still has moves left, standing on a resource tile in
+// enemy territory, can plunder it: its side gains `gold`, the unit's turn ends and the resource gives its owner
+// nothing (no income, no discount) during its owner's next `turns` turns, then it recovers by itself.
+export const PILLAGE = { gold: 6, turns: 4 };
+
 // Ancient ruins: scattered over the map in pairs (one nearer each capital, about equally far, so neither
 // side is favoured). The first unit of any kind to end its move on a ruin explores it and gets one reward.
 // perPair: one pair per this many map tiles (small 1, medium 2, large 4 pairs).

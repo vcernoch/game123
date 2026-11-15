@@ -1,7 +1,7 @@
 // Canvas rendering. No game logic, only drawing the state.
 import { hexToPixel, hexCorners, pixelToHex, key, neighbors, DIRS } from './hex.js';
 import { TERRAIN, UNIT_TYPES, PLAYERS, NEUTRAL_COLOR, RANKS } from './rules.js';
-import { territoryMap, ruinBelieved } from './game.js';
+import { territoryMap, ruinBelieved, isPillaged } from './game.js';
 
 export const HEX_SIZE = 32;
 const PAD = 8;
@@ -55,6 +55,7 @@ export function render(ctx, state, view = {}) {
       drawTerrainDetail(ctx, t.terrain, c.x, c.y);
       if (t.road) drawRoad(ctx, state, t, c);
       if (t.resource) drawResource(ctx, t.resource, c.x + 13, c.y - 12);
+      if (t.resource && isPillaged(state, t)) drawPillaged(ctx, c.x + 13, c.y - 12);
       if ((t.ruin || t.ruinGone) && ruinBelieved(state, t.q, t.r, view.viewer ?? 0)) drawRuin(ctx, c.x - 13, c.y - 12);
       // terrain detail draws its own paths – the hex outline must be rebuilt
       hexPath(ctx, c.x, c.y, HEX_SIZE - 1);
@@ -308,6 +309,32 @@ function drawPath(ctx, path, turns = null, faint = false) {
       ctx.stroke();
     }
   }
+  ctx.restore();
+}
+
+// Pillaged resource: the marker is dimmed with ash and a small flame burns over it.
+function drawPillaged(ctx, x, y) {
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(x, y, 9.5, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(40,36,34,0.62)';
+  ctx.fill();
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = '#e0662a';
+  ctx.setLineDash([3, 2]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  // flame: an outer orange drop with a yellow core
+  const flame = (h, w, color) => {
+    ctx.beginPath();
+    ctx.moveTo(x, y - h);
+    ctx.bezierCurveTo(x + w, y - h * 0.3, x + w, y + 4, x, y + 5);
+    ctx.bezierCurveTo(x - w, y + 4, x - w, y - h * 0.3, x, y - h);
+    ctx.fillStyle = color;
+    ctx.fill();
+  };
+  flame(8, 5.5, '#ff7a1f');
+  flame(3.5, 3, '#ffd34d');
   ctx.restore();
 }
 

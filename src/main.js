@@ -6,7 +6,7 @@ import {
   rankOf, rankMult, buildingCost, unitMove, factionOf, riverDefense, flankers, zocTiles, threatTiles, exportGame, importGame, saveFileName, parseSeed, restartOptions,
   upgradeOptions, upgradeUnit, canDisband, disbandRefund, disbandUnit, chargeReady,
   updateSightings, lastSeen, lastSeenAt, lastSeenText, armyOverview, ARMY_STATUS, ruinBelieved,
-  canExplore, setExplore,
+  canExplore, setExplore, canPillage, pillage, isPillaged, pillageTurnsLeft,
 } from './game.js';
 import { createAnimator } from './anim.js';
 import { decideTap } from './input.js';
@@ -18,7 +18,7 @@ import { SHORTCUTS, keyAction, recruitKey } from './keys.js';
 import { render, canvasSize, pickHex, tileCenter } from './render.js';
 import { key } from './hex.js';
 import {
-  UNIT_TYPES, TERRAIN, PLAYERS, DIFFICULTY, BUILDINGS, RANKS, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FORTIFY, TERRITORY, ECONOMY, RESOURCES, HIGH_GROUND, CHARGE, RUINS,
+  UNIT_TYPES, TERRAIN, PLAYERS, DIFFICULTY, BUILDINGS, RANKS, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FORTIFY, TERRITORY, ECONOMY, RESOURCES, HIGH_GROUND, CHARGE, RUINS, PILLAGE,
 } from './rules.js';
 
 const SAVE_KEY = 'game123-save';
@@ -196,6 +196,9 @@ function updateHud() {
     if (u.owner === 0 && !busy() && canExplore(state, u)) {
       html += '<button data-explore class="secondary wide-btn" title="Walk into the fog by itself each turn until nothing is left or an enemy shows up (X)">🧭 Explore</button>';
     }
+    if (u.owner === 0 && !busy() && canPillage(state, u)) {
+      html += `<button data-pillage class="secondary wide-btn" title="Plunder this enemy resource: +${PILLAGE.gold} gold, it gives its owner nothing for ${PILLAGE.turns} turns; ends the unit's turn (P)">🔥 Pillage (+${PILLAGE.gold} gold)</button>`;
+    }
     if (u.fortified) html += `<p class="fortified">⛨ Fortified: +${Math.round(FORTIFY.defBonus * 100)} % defense until it moves or attacks</p>`;
     if (u.owner === 0 && !busy() && canFortify(state, u)) {
       html += `<button data-fortify class="secondary wide-btn" title="Dig in: +${Math.round(FORTIFY.defBonus * 100)} % defense, ends the unit's turn (F)">⛨ Fortify</button>`;
@@ -223,7 +226,7 @@ function updateHud() {
     html += `<h3>${city.name}</h3><p>Owner: ${owner}${city.capital ? ' · capital' : ''}</p>
       <p>Income +${ci.income} gold/turn · Garrison defense +${ci.defensePct} % · Healing +${ci.heal}</p>`;
     const res = cityResources(state, city).filter((t) => exploredTiles(state, 0).has(key(t.q, t.r)));
-    if (res.length) html += `<p class="resource">Resources: ${res.map((t) => RESOURCES[t.resource].name).join(', ')}</p>`;
+    if (res.length) html += `<p class="resource">Resources: ${res.map((t) => RESOURCES[t.resource].name + (isPillaged(state, t) ? ` (🔥 pillaged, ${pillageTurnsLeft(state, t)} more)` : '')).join(', ')}</p>`;
     const built = (city.buildings || []).map((b) => `<span class="building">${BUILDINGS[b].symbol} ${BUILDINGS[b].name}</span>`);
     if (built.length) html += `<p>${built.join(' ')}</p>`;
     if (city.owner === 0 && state.current === 0 && !busy()) {
@@ -262,6 +265,10 @@ function updateHud() {
       html += '<p class="hint">Enemy zone of control – a unit that steps here must stop</p>';
     }
     if (tile.resource) html += `<p class="resource">${RESOURCES[tile.resource].name}: ${RESOURCES[tile.resource].desc}</p>`;
+    if (tile.resource && isPillaged(state, tile)) {
+      const n = pillageTurnsLeft(state, tile);
+      html += `<p class="pillaged">🔥 Pillaged – out of use, works again in ${n} round${n === 1 ? '' : 's'}</p>`;
+    }
     if (ruinBelieved(state, hover.q, hover.r, 0)) html += `<p class="resource ruin">Ancient ruins: ${RUINS.desc}</p>`;
     const realm = territoryOwner(state, hover.q, hover.r);
     if (realm !== undefined) {
@@ -796,6 +803,7 @@ $('info').addEventListener('click', (ev) => {
   if (ev.target.closest('button[data-undo]')) { undoMove(); return; }
   if (ev.target.closest('button[data-fortify]')) { fortifySelected(); return; }
   if (ev.target.closest('button[data-explore]')) { exploreSelected(); return; }
+  if (ev.target.closest('button[data-pillage]')) { pillageSelected(); return; }
   if (ev.target.closest('button[data-disband]')) { disbandSelected(); return; }
   const uBtn = ev.target.closest('button[data-upgrade]');
   if (uBtn) { upgradeSelected(uBtn.dataset.upgrade); return; }
@@ -827,6 +835,7 @@ window.addEventListener('keydown', (ev) => {
   else if (act.type === 'undo') undoMove();
   else if (act.type === 'fortify') fortifySelected();
   else if (act.type === 'explore') exploreSelected();
+  else if (act.type === 'pillage') pillageSelected();
   else if (act.type === 'disband') disbandSelected();
   else if (act.type === 'recruit') recruitSelected(act.unitType);
   else if (act.type === 'help') $('keys-dialog').showModal();
@@ -879,6 +888,17 @@ function fortifySelected() {
   afterAction(null); // no animation needed – the shield appears right away
   sound.play('fortify');
   selectNextUnit();
+}
+
+// Pillages the enemy resource under the selected unit (P / button in the panel), animated.
+function pillageSelected() {
+  if (busy() || state.winner !== null) return;
+  const u = selectedUnit();
+  if (!u || u.owner !== 0 || !canPillage(state, u)) return;
+  const before = cloneState(state);
+  pillage(state, u.id);
+  undoStack = [];
+  afterAction(before);
 }
 
 // Sends the selected unit exploring (X / button in the panel); it walks right away, animated.

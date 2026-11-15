@@ -11,12 +11,12 @@ import {
   upgradeOptions, upgradeUnit, upgradeCost, canDisband, disbandRefund, disbandUnit,
   turnReport, reportText, reportIsBad, updateSightings, lastSeen, lastSeenAt, lastSeenText,
   armyOverview, unitStatus, unitWhere, ARMY_STATUS, ruinBelieved, ruinKind, exploreRuin,
-  exploreTarget, canExplore, setExplore, followExplore,
+  exploreTarget, canExplore, setExplore, followExplore, canPillage, pillage, isPillaged, pillageTurnsLeft, cityAt,
 } from '../src/game.js';
 import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
   dangerMap, dangerPenalty, moveTowardsGoal, DANGER, unexploredLand, SCOUT_WHEN_UNKNOWN, aiKnowledge,
-  upgradeSomething, UPGRADE_HORSE_RADIUS, strikeLinedUp,
+  upgradeSomething, UPGRADE_HORSE_RADIUS, strikeLinedUp, pillageGoals, PILLAGE_DETOUR,
 } from '../src/ai.js';
 import { decideTap } from '../src/input.js';
 import { SHORTCUTS, keyAction, recruitKey } from '../src/keys.js';
@@ -28,7 +28,7 @@ import { pathExists, generateMap, dirTo } from '../src/map.js';
 import { distance, key, neighbors } from '../src/hex.js';
 import {
   RESOURCES, FORTIFY, TERRITORY, ECONOMY, UNIT_TYPES, TERRAIN, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FLANK, HIGH_GROUND, CHARGE,
-  UPGRADES, UPGRADE, DISBAND, RUINS, EXPLORE,
+  UPGRADES, UPGRADE, DISBAND, RUINS, EXPLORE, PILLAGE,
   SIGHTINGS,
 } from '../src/rules.js';
 
@@ -2554,4 +2554,153 @@ test('auto-explore: stops for enemies, cancelled by manual actions, ruins attrac
   const old = createGame({ seed: 2 });
   old.version = 18;
   assert.equal(migrateState(old).version, STATE_VERSION);
+});
+
+// A game where only the given unit stands on a resource of the enemy capital. raider = owner of the unit.
+function pillageSetup(raider, kind, { type = 'warrior', seed = 5, fog = false } = {}) {
+  const s = createGame({ seed, fog, happenings: false });
+  s.units = [];
+  const victimCap = s.cities.find((c) => c.capital && c.owner === 1 - raider);
+  const tile = cityResources(s, victimCap).find((t) => t.resource === kind);
+  assert.ok(tile, `no ${kind} at the capital`);
+  s.current = raider;
+  const u = spawnUnit(s, type, raider, tile.q, tile.r);
+  u.movesLeft = 1; u.hasAttacked = false;
+  drainEvents(s);
+  return { s, u, tile, victimCap };
+}
+
+test('pillage: who can, gold, lost income and discount, the event replays, recovery after the owner\'s 4 turns', () => {
+  // the player raids the AI's gold mine
+  let { s, u, tile, victimCap } = pillageSetup(0, 'gold');
+  const income = incomeOf(s, 1);
+  const gold = s.gold[0];
+  assert.ok(canPillage(s, u));
+  const before = cloneState(s);
+  const ev = pillage(s, u.id);
+  assert.equal(ev.type, 'pillage');
+  assert.equal(ev.victim, 1);
+  assert.equal(s.gold[0], gold + PILLAGE.gold);
+  assert.equal(u.movesLeft, 0);
+  assert.ok(u.hasAttacked, 'the unit\'s turn is over');
+  assert.ok(isPillaged(s, tile));
+  assert.equal(incomeOf(s, 1), income - RESOURCES.gold.income);
+  assert.equal(cityIncome(victimCap, s), cityIncome(victimCap, before) - RESOURCES.gold.income);
+  assert.ok(!canPillage(s, u), 'not twice');
+  assert.match(s.log.at(-1).msg, /pillaged gold mine near .* \(\+6 gold, out of use for 4 turns\)/);
+  // replaying the event gives the same state
+  const evs = drainEvents(s);
+  for (const e of evs) applyEvent(before, e);
+  assert.deepEqual(snapshot(before), snapshot(s));
+  assert.equal(tileAt(before, tile.q, tile.r).pillagedUntil, tile.pillagedUntil);
+  assert.equal(before.gold[0], s.gold[0]);
+  assert.equal(getUnit(before, u.id).movesLeft, 0);
+  assert.equal(isUndoableMove(cloneState(s), s, evs, 0), false);
+  assert.doesNotThrow(() => JSON.parse(JSON.stringify(s)));
+  // the AI misses exactly PILLAGE.turns of its incomes, then the mine works again and the field is gone
+  let missed = 0;
+  for (let i = 0; i < 2 * (PILLAGE.turns + 2); i++) {
+    const g = s.gold[1];
+    endTurn(s);
+    if (s.current !== 1) continue;
+    const got = s.gold[1] - g;
+    if (got === incomeOf(s, 1) && isPillaged(s, tile)) missed++;
+    else assert.equal(got, income);
+  }
+  assert.equal(missed, PILLAGE.turns);
+  assert.ok(!isPillaged(s, tile));
+  assert.equal(tile.pillagedUntil, undefined);
+
+  // the AI raids the player's horses: horsemen are no longer cheaper, the player misses its 4 turns too
+  ({ s, u, tile, victimCap } = pillageSetup(1, 'horses'));
+  const cheap = unitCost(s, victimCap, 'horseman');
+  assert.ok(pillage(s, u.id));
+  assert.equal(unitCost(s, victimCap, 'horseman'), cheap + RESOURCES.horses.discount.horseman);
+  let pillagedTurns = 0;
+  for (let i = 0; i < 2 * (PILLAGE.turns + 2); i++) {
+    endTurn(s);
+    if (s.current === 0 && isPillaged(s, tile)) {
+      pillagedTurns++;
+      assert.equal(pillageTurnsLeft(s, tile), PILLAGE.turns - pillagedTurns + 1);
+    }
+  }
+  assert.equal(pillagedTurns, PILLAGE.turns);
+  assert.equal(unitCost(s, victimCap, 'horseman'), cheap);
+  // the enemy turn report tells the player
+  ({ s, u, tile } = pillageSetup(1, 'gold'));
+  const b2 = cloneState(s);
+  pillage(s, u.id);
+  const rep = turnReport(b2, drainEvents(s), 0);
+  assert.equal(rep.pillaged, 1);
+  assert.deepEqual(rep.spots, [{ q: tile.q, r: tile.r, kind: 'pillage' }]);
+  assert.equal(reportText(rep), 'Enemy turn: A resource of yours was pillaged.');
+  assert.ok(reportIsBad(rep));
+  assert.equal(turnReport(b2, [], 0).pillaged, 0);
+
+  // who can't: a scout, a unit that attacked or has no moves, not on the owner's turn, own or neutral land
+  ({ s, u } = pillageSetup(0, 'gold', { type: 'scout' }));
+  assert.ok(!canPillage(s, u));
+  ({ s, u } = pillageSetup(0, 'gold'));
+  u.hasAttacked = true;
+  assert.ok(!canPillage(s, u));
+  u.hasAttacked = false; u.movesLeft = 0;
+  assert.ok(!canPillage(s, u));
+  u.movesLeft = 1; s.current = 1;
+  assert.equal(pillage(s, u.id), null);
+  ({ s, u, victimCap } = pillageSetup(0, 'gold'));
+  assert.ok(canPillage(s, u));
+  victimCap.owner = 0;
+  assert.ok(!canPillage(s, u), 'own territory');
+  victimCap.owner = null;
+  assert.ok(!canPillage(s, u), 'neutral territory');
+  // a unit on a tile without a resource
+  ({ s, u } = pillageSetup(0, 'gold'));
+  const plain = Object.values(s.tiles).find((t) => !t.resource && isPassable(s, t.q, t.r) && territoryOwner(s, t.q, t.r) === 1 && !cityAt(s, t.q, t.r));
+  u.q = plain.q; u.r = plain.r;
+  assert.ok(!canPillage(s, u));
+  // a fortified unit or one with an order loses it
+  ({ s, u } = pillageSetup(0, 'gold'));
+  u.fortified = true; u.goto = { q: 0, r: 0 };
+  pillage(s, u.id);
+  assert.ok(!u.fortified && !u.goto);
+
+  // migration from version 19
+  const old = createGame({ seed: 3 });
+  old.version = 19;
+  assert.equal(migrateState(old).version, STATE_VERSION);
+});
+
+test('pillage: the AI raids enemy resources it stands on or walks to, but not pillaged ones', () => {
+  // an AI horseman standing on the player's gold mine with nothing to attack pillages it
+  let { s, u, tile } = pillageSetup(1, 'gold');
+  u.movesLeft = 4;
+  runAITurn(s);
+  assert.ok(isPillaged(s, tile), 'pillaged');
+  assert.ok(drainEvents(s).some((e) => e.type === 'pillage' && e.unitId === u.id && e.gold === PILLAGE.gold));
+  assert.ok(s.log.some((e) => /AI: Warrior pillaged/.test(e.msg)));
+  // a horseman a few tiles away from a known enemy resource gets it as a goal, a pillaged one is not a goal
+  ({ s, u, tile } = pillageSetup(1, 'gold', { type: 'horseman' }));
+  const know = aiKnowledge(s, 1);
+  const away = Object.values(s.tiles).find((t) => isPassable(s, t.q, t.r) && distance(t, tile) === 2 && !cityAt(s, t.q, t.r));
+  u.q = away.q; u.r = away.r;
+  assert.ok(pillageGoals(s, u, know).some((g) => g.q === tile.q && g.r === tile.r));
+  assert.ok(goalsFor(s, u, know).some((g) => g.pillage));
+  tile.pillagedUntil = s.turn + 2;
+  assert.ok(!pillageGoals(s, u, know).some((g) => g.q === tile.q && g.r === tile.r));
+  // own resources and far ones are never goals
+  for (const g of pillageGoals(s, u, know)) {
+    assert.ok(distance(g, u) <= PILLAGE_DETOUR);
+    assert.equal(territoryOwner(s, g.q, g.r), 0);
+  }
+  // real games stay consistent: replays still match and pillaged tiles always recover
+  for (const seed of [2, 6]) {
+    const g = createGame({ seed, happenings: false });
+    for (let i = 0; i < 80 && g.winner === null; i++) {
+      runAITurn(g); // both sides played by the AI
+      endTurn(g);
+      for (const t of Object.values(g.tiles)) {
+        if (t.pillagedUntil !== undefined) assert.ok(t.pillagedUntil - g.turn <= PILLAGE.turns + 1);
+      }
+    }
+  }
 });

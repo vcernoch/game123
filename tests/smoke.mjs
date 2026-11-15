@@ -433,9 +433,9 @@ try {
   await page.screenshot({ path: 'artifacts/screenshot-mobile.png', fullPage: true });
 
   // "Same map again" on the game-over banner restarts the same map with the same settings
-  // (looted ruins are the only change a game makes to its map – put them back before comparing)
+  // (looted ruins and pillaged resources are the only changes a game makes to its map – undo them before comparing)
   const endTiles = await page.evaluate(() => JSON.stringify(Object.fromEntries(Object.entries(window.__game.getState().tiles)
-    .map(([k, t]) => { const { ruinGone, ...rest } = t; return [k, ruinGone ? { ...rest, ruin: true } : rest]; }))));
+    .map(([k, t]) => { const { ruinGone, pillagedUntil, ...rest } = t; return [k, ruinGone ? { ...rest, ruin: true } : rest]; }))));
   await page.click('#banner-again');
   const again = await page.evaluate(() => {
     const s = window.__game.getState();
@@ -686,6 +686,47 @@ try {
   }, ruin);
   if (looted.ruin || !looted.gone || !looted.log.includes('explored ancient ruins')) throw new Error(`ruins: not looted ${JSON.stringify(looted)}`);
   await page.keyboard.press('Escape'); // the next sections start without a selection
+
+  // pillage: a unit on the AI's gold mine plunders it with the panel button, another one on its horses with P
+  const raid = await page.evaluate(async () => {
+    const g = await import('./src/game.js');
+    const rnd = await import('./src/render.js');
+    window.__game.newGame(321, { fog: false, happenings: false });
+    const st = window.__game.getState();
+    const cap = st.cities.find((c) => c.capital && c.owner === 1);
+    const res = g.cityResources(st, cap);
+    const mine = res.find((t) => t.resource === 'gold');
+    const horses = res.find((t) => t.resource === 'horses');
+    if (!mine || !horses) return { error: 'AI capital lacks a resource' };
+    const mineUnits = st.units.filter((x) => x.owner === 0);
+    const [a, b] = mineUnits;
+    for (const [u, t] of [[a, mine], [b, horses]]) { u.q = t.q; u.r = t.r; u.movesLeft = 2; u.hasAttacked = false; delete u.fortified; }
+    window.__game.refresh();
+    const rect = document.getElementById('board').getBoundingClientRect();
+    const k = rect.width / rnd.canvasSize(st).w;
+    const pt = (p) => { const c = rnd.tileCenter(p.q, p.r); return { x: rect.left + c.x * k, y: rect.top + c.y * k }; };
+    return { a: a.id, b: b.id, mine: { q: mine.q, r: mine.r, ...pt(mine) }, horses: { q: horses.q, r: horses.r, ...pt(horses) }, gold: st.gold[0] };
+  });
+  if (raid.error) throw new Error(`pillage: ${raid.error}`);
+  await page.mouse.click(raid.mine.x, raid.mine.y);
+  if (!(await page.textContent('#info')).includes('Pillage (+6 gold)')) throw new Error('pillage: no button in the unit panel');
+  await page.click('#info button[data-pillage]');
+  await page.waitForFunction(() => !window.__game.isBusy(), null, { timeout: 5000 });
+  await page.mouse.click(raid.horses.x, raid.horses.y);
+  await page.keyboard.press('p');
+  await page.waitForFunction(() => !window.__game.isBusy(), null, { timeout: 5000 });
+  await page.keyboard.press('Escape');
+  await page.mouse.move(raid.mine.x, raid.mine.y);
+  const raided = await page.evaluate((r) => {
+    const st = window.__game.getState();
+    const t = (p) => st.tiles[`${p.q},${p.r}`];
+    return { mine: t(r.mine).pillagedUntil, horses: t(r.horses).pillagedUntil, gold: st.gold[0],
+      log: document.getElementById('log').textContent, info: document.getElementById('info').textContent };
+  }, raid);
+  if (!raided.mine || !raided.horses || raided.gold !== raid.gold + 12) throw new Error(`pillage: not pillaged ${JSON.stringify(raided)}`);
+  if (!raided.log.includes('pillaged gold mine') || !raided.info.includes('Pillaged – out of use')) throw new Error(`pillage: texts ${JSON.stringify(raided)}`);
+  await page.screenshot({ path: 'artifacts/screenshot-pillage.png' });
+  await page.keyboard.press('Escape');
 
   // rivers: large map without fog, hovering a river tile shows its description in the panel
   await page.setViewportSize({ width: 1280, height: 800 });

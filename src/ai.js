@@ -3,7 +3,7 @@ import { distance, key } from './hex.js';
 import {
   reachable, attackTargets, previewAttack, moveUnit, attack, buyUnit,
   unitAt, getUnit, tileAt, fortify, difficultyOf, visibleTiles, exploredTiles, build, hasBuilding, unitCost, buildingCost, factionOf,
-  threatTiles, cityAt, upgradeOptions, upgradeUnit, ruinBelieved,
+  threatTiles, cityAt, upgradeOptions, upgradeUnit, ruinBelieved, canPillage, pillage, isPillaged, territoryOwner,
 } from './game.js';
 import { UNIT_TYPES, TERRAIN } from './rules.js';
 
@@ -43,9 +43,10 @@ export function runAITurn(state) {
       if (plan && typeof plan === 'object') { lined.push(plan); continue; }
       if (plan) continue;
       if (tryBestAttack(state, unit)) continue;
+      if (pillage(state, unit.id)) continue; // already standing on an enemy resource
       moveTowardsGoal(state, unit, danger.get());
       const after = getUnit(state, id);
-      if (after) tryBestAttack(state, after);
+      if (after && !tryBestAttack(state, after)) pillage(state, after.id);
     }
   }
   strikeLinedUp(state, lined);
@@ -310,11 +311,12 @@ function tryBestAttack(state, unit, { safeOnly = false } = {}) {
 export function goalsFor(state, unit, know = aiKnowledge(state, unit.owner)) {
   const goals = ruinGoals(state, unit, know);
   if (UNIT_TYPES[unit.type].noCapture) return [...goals, ...exploreGoals(state, know)];
+  goals.push(...pillageGoals(state, unit, know));
   for (const c of state.cities) {
     if (c.owner !== unit.owner && know.knows(c.q, c.r)) goals.push({ q: c.q, r: c.r, w: c.owner === null ? 1 : 1.3 });
   }
   for (const u of state.units) if (u.owner !== unit.owner && know.sees(u.q, u.r)) goals.push({ q: u.q, r: u.r, w: 1.1, enemy: true });
-  return goals.some((g) => !g.ruin) ? goals : [...goals, ...exploreGoals(state, know)];
+  return goals.some((g) => !g.ruin && !g.pillage) ? goals : [...goals, ...exploreGoals(state, know)];
 }
 
 // Known unexplored ruins within a few turns' walk are worth a detour (scouts are made for this).
@@ -324,6 +326,16 @@ function ruinGoals(state, unit, know) {
   return Object.values(state.tiles)
     .filter((t) => (t.ruin || t.ruinGone) && know.knows(t.q, t.r) && believes(t) && distance(t, unit) <= RUIN_DETOUR)
     .map((t) => ({ q: t.q, r: t.r, w: 0.9, ruin: true }));
+}
+
+// Working enemy resources the AI knows of, close by, are worth plundering (gold for it, lost income for the enemy).
+export const PILLAGE_DETOUR = 4; // tiles
+export function pillageGoals(state, unit, know) {
+  return Object.values(state.tiles)
+    .filter((t) => t.resource && !isPillaged(state, t) && know.knows(t.q, t.r) && distance(t, unit) <= PILLAGE_DETOUR
+      && !cityAt(state, t.q, t.r))
+    .filter((t) => { const o = territoryOwner(state, t.q, t.r); return o !== undefined && o !== null && o !== unit.owner; })
+    .map((t) => ({ q: t.q, r: t.r, w: 0.95, pillage: true }));
 }
 
 function exploreGoals(state, know) {

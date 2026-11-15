@@ -135,6 +135,7 @@ fieldset .seed-row + small { margin-left: 0; }
 }
 .undo-btn, .wide-btn { width: 100%; margin-top: 10px; }
 .fortified { color: #cfe3ff; }
+.pillaged { color: #ffb36b; }
 #end-turn.armed { background: #e07a3a; color: #fff; }
 .disband { margin-bottom: 10px; }
 .disband.armed { background: #c0392b; color: #fff; }

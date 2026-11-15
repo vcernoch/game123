@@ -13,6 +13,8 @@ export const SHORTCUTS = [
     match: (k, shift) => k === 'Enter' && shift },
   { keys: 'F', text: 'fortify the selected unit', action: () => ({ type: 'fortify' }), match: (k) => k === 'f' || k === 'F' },
   { keys: 'X', text: 'send the selected unit exploring the fog on its own', action: () => ({ type: 'explore' }), match: (k) => k === 'x' || k === 'X' },
+  { keys: 'P', text: 'pillage the enemy resource under the selected unit (gold for you, no income for its owner)', action: () => ({ type: 'pillage' }),
+    match: (k) => k === 'p' || k === 'P' },
   { keys: 'D', text: 'disband the selected unit (press twice; in an own city it returns some gold)', action: () => ({ type: 'disband' }),
     match: (k) => k === 'd' || k === 'D' },
   { keys: 'T', text: 'show or hide the enemy threat overlay', action: () => ({ type: 'threats' }), match: (k) => k === 't' || k === 'T' },
