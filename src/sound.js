@@ -11,7 +11,12 @@ export function soundFor(ev, viewer = 0) {
     }
     case 'capture': return ev.owner === viewer ? 'capture' : 'lose';
     case 'build': return 'build';
+    case 'fortify': return 'fortify';
+    case 'upgrade': return 'promote';
+    case 'disband': return 'disband';
     case 'spawn': return 'recruit';
+    case 'ruin': return 'discover';
+    case 'pillage': return ev.player === viewer ? 'pillage' : 'bane';
     case 'happening': {
       const good = ev.kind === 'harvest' || ev.suppressed;
       return (ev.player === viewer) === good ? 'boon' : 'bane';
@@ -40,9 +45,19 @@ const SOUNDS = {
             { f: 659, d: 0.25, v: 0.25, w: 'triangle', t: 0.24 }],
   lose:    [{ f: 330, d: 0.18, v: 0.25, w: 'triangle' }, { f: 247, d: 0.3, v: 0.25, w: 'triangle', t: 0.18 }],
   build:   [{ noise: true, d: 0.04, v: 0.3, f: 2500 }, { noise: true, d: 0.04, v: 0.3, f: 2500, t: 0.12 }],
+  // a low wooden thud, twice – stakes driven into the ground
+  fortify: [{ f: 140, d: 0.08, v: 0.3, w: 'triangle', slide: 90 }, { f: 140, d: 0.08, v: 0.3, w: 'triangle', slide: 90, t: 0.1 }],
   recruit: [{ f: 220, d: 0.18, v: 0.2, w: 'sawtooth', slide: 330 }],
   boon:    [{ f: 784, d: 0.1, v: 0.18, w: 'triangle' }, { f: 1047, d: 0.2, v: 0.18, w: 'triangle', t: 0.1 }],
   bane:    [{ f: 196, d: 0.25, v: 0.22, w: 'sawtooth', slide: 150 }, { noise: true, d: 0.2, v: 0.12, f: 400, t: 0.05 }],
+  // a soft falling sigh – the unit goes home
+  disband: [{ f: 440, d: 0.25, v: 0.16, w: 'triangle', slide: 220 }],
+  // a bright rising arpeggio with a shimmer – something old was found
+  discover: [{ f: 587, d: 0.09, v: 0.16, w: 'sine' }, { f: 880, d: 0.09, v: 0.16, w: 'sine', t: 0.07 },
+             { f: 1175, d: 0.22, v: 0.16, w: 'sine', t: 0.14 }, { noise: true, d: 0.15, v: 0.05, f: 5000, t: 0.14 }],
+  // crackling fire and a falling groan – something is burned down
+  pillage: [{ noise: true, d: 0.3, v: 0.22, f: 700 }, { noise: true, d: 0.12, v: 0.15, f: 2200, t: 0.08 },
+            { f: 180, d: 0.3, v: 0.18, w: 'sawtooth', slide: 90, t: 0.05 }],
   click:   [{ f: 520, d: 0.03, v: 0.12, w: 'square' }],
   victory: [523, 659, 784, 1047].map((f, i) => ({ f, d: 0.22, v: 0.25, w: 'triangle', t: i * 0.16 })),
   defeat:  [392, 349, 311, 262].map((f, i) => ({ f, d: 0.28, v: 0.25, w: 'triangle', t: i * 0.2 })),

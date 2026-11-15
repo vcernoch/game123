@@ -1,6 +1,6 @@
 import { key, neighbors, offsetToAxial, distance, DIRS } from './hex.js';
 import { createRng } from './rng.js';
-import { TERRAIN, CITY_NAMES, RIVER } from './rules.js';
+import { TERRAIN, CITY_NAMES, RIVER, TERRITORY, RUINS } from './rules.js';
 
 // Generates a map: a cols × rows rectangle in "odd-r" offset.
 // Returns { tiles, cities, starts } – without units.
@@ -100,7 +100,67 @@ function tryGenerate(seed, cols, rows, neutralCount) {
   buildRoads(tiles, cities);
   // rivers have their own RNG so they don't change the terrain and city layout for given seeds
   buildRivers(tiles, height, cols, rows, createRng(seed * 31 + 17));
+  placeResources(tiles, cities, createRng(seed * 53 + 5));
+  placeRuins(tiles, cities, cols * rows, createRng(seed * 71 + 29));
   return { tiles, cities, starts };
+}
+
+// Resources (own RNG, so terrain, cities, roads and rivers stay the same for given seeds).
+// For fairness both capitals get one gold mine and one horse pasture 2 tiles away; each neutral city
+// gets one random resource with a 2 in 3 chance. Gold prefers hills, horses prefer plains.
+function placeResources(tiles, cities, rng) {
+  const taken = (t) => t.resource || cities.some((c) => c.q === t.q && c.r === t.r);
+  const spots = (city, kind) => {
+    const all = Object.values(tiles).filter((t) => {
+      const d = distance(t, city);
+      return d >= 1 && d <= TERRITORY.radius && TERRAIN[t.terrain].passable && !taken(t)
+        && cities.every((c) => c === city || distance(t, c) > d); // clearly inside this city's territory
+    });
+    const liked = all.filter((t) => t.terrain === (kind === 'gold' ? 'hills' : 'plains'));
+    return liked.length ? liked : all;
+  };
+  const put = (city, kind, preferDist = null) => {
+    let options = spots(city, kind);
+    if (preferDist !== null && options.some((t) => distance(t, city) === preferDist)) {
+      options = options.filter((t) => distance(t, city) === preferDist);
+    }
+    if (options.length) rng.pick(options).resource = kind;
+  };
+  for (const city of cities) {
+    if (city.capital) {
+      put(city, 'gold', 2);
+      put(city, 'horses', 2);
+    } else if (rng.next() < 2 / 3) {
+      put(city, rng.next() < 0.5 ? 'gold' : 'horses');
+    }
+  }
+}
+
+// Ancient ruins (own RNG, so everything else stays the same for given seeds). Placed in pairs: one tile
+// nearer the player's capital and one nearer the AI's, at about the same distance from "its" capital,
+// so neither side gets the better ones. Ruins avoid cities, resources and each other.
+function placeRuins(tiles, cities, area, rng) {
+  const [home, away] = cities;
+  const ok = (t) => TERRAIN[t.terrain].passable && !t.resource
+    && distance(t, home) >= RUINS.minCapitalDist && distance(t, away) >= RUINS.minCapitalDist
+    && cities.every((c) => distance(t, c) >= RUINS.minCityDist)
+    && Object.values(tiles).every((o) => !o.ruin || distance(o, t) >= RUINS.minRuinDist)
+    && pathExists(tiles, home, t);
+  const pairs = Math.max(1, Math.round(area / RUINS.perPair));
+  for (let i = 0; i < pairs; i++) {
+    const near = Object.values(tiles).filter((t) => distance(t, home) < distance(t, away) && ok(t));
+    let placed = false;
+    for (let tries = 0; tries < 20 && near.length && !placed; tries++) {
+      const a = rng.pick(near);
+      const want = distance(a, home);
+      const twins = Object.values(tiles).filter((t) => distance(t, away) < distance(t, home)
+        && Math.abs(distance(t, away) - want) <= 1 && distance(t, a) >= RUINS.minRuinDist && ok(t));
+      if (!twins.length) continue;
+      a.ruin = true;
+      rng.pick(twins).ruin = true;
+      placed = true;
+    }
+  }
 }
 
 // Roads: a minimum spanning tree between cities, each segment follows the cheapest path through terrain.

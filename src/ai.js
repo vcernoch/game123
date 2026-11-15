@@ -2,13 +2,14 @@
 import { distance, key } from './hex.js';
 import {
   reachable, attackTargets, previewAttack, moveUnit, attack, buyUnit,
-  unitAt, getUnit, tileAt, difficultyOf, visibleTiles, exploredTiles, build, hasBuilding, unitCost, buildingCost, factionOf,
+  unitAt, getUnit, tileAt, fortify, difficultyOf, visibleTiles, exploredTiles, build, hasBuilding, unitCost, buildingCost, factionOf,
+  threatTiles, cityAt, upgradeOptions, upgradeUnit, ruinBelieved, canPillage, pillage, isPillaged, territoryOwner,
 } from './game.js';
 import { UNIT_TYPES, TERRAIN } from './rules.js';
 
 // What the AI knows about the map. On hard it sees everything, otherwise only what it has explored and sees.
 export function aiKnowledge(state, me) {
-  if (difficultyOf(state, me).seesAll) return { sees: () => true, knows: () => true };
+  if (difficultyOf(state, me).seesAll) return { sees: () => true, knows: () => true, all: true };
   const vis = visibleTiles(state, me);
   const exp = exploredTiles(state, me);
   return { sees: (q, r) => vis.has(key(q, r)), knows: (q, r) => exp.has(key(q, r)) };
@@ -18,12 +19,16 @@ export function runAITurn(state) {
   const me = state.current;
   recruit(state, me);
   const know = aiKnowledge(state, me);
+  upgradeSomething(state, me, know);
   const garrisons = assignGarrisons(state, me, know);
+  const danger = dangerMap(state, me, know);
   // archers and catapults go first so melee units can finish weakened targets (focus fire)
   const ids = state.units
     .filter((u) => u.owner === me)
     .sort((a, b) => UNIT_TYPES[b.type].range - UNIT_TYPES[a.type].range || a.id - b.id)
     .map((u) => u.id);
+  // melee strikes are lined up first and struck afterwards, so every attacker gets the flank bonus of the others
+  const lined = [];
   for (const id of ids) {
     if (state.winner !== null) return;
     const unit = getUnit(state, id);
@@ -31,43 +36,87 @@ export function runAITurn(state) {
     if (garrisons.has(id)) {
       holdCity(state, unit, garrisons.get(id));
     } else if (isWounded(unit) && enemiesNear(state, unit, know, 3).length) {
-      retreat(state, unit, know);
+      retreat(state, unit, know, danger.get());
     } else {
-      if (planStrike(state, unit, know)) continue;
+      const melee = UNIT_TYPES[unit.type].range === 1;
+      const plan = planStrike(state, unit, know, danger.get(), melee ? { lineUp: lined } : {});
+      if (plan && typeof plan === 'object') { lined.push(plan); continue; }
+      if (plan) continue;
       if (tryBestAttack(state, unit)) continue;
-      moveTowardsGoal(state, unit);
+      if (pillage(state, unit.id)) continue; // already standing on an enemy resource
+      moveTowardsGoal(state, unit, danger.get());
       const after = getUnit(state, id);
-      if (after) tryBestAttack(state, after);
+      if (after && !tryBestAttack(state, after)) pillage(state, after.id);
     }
   }
+  strikeLinedUp(state, lined);
+  if (state.winner !== null) return;
   recruit(state, me);
   buildSomething(state, me);
 }
 
+// Carries out lined-up melee strikes in the order they were planned (later plans assume the earlier hits);
+// if the planned target has fallen or the attack no longer pays off, the unit takes the best other attack.
+export function strikeLinedUp(state, plans) {
+  for (const p of plans) {
+    if (state.winner !== null) return;
+    const u = getUnit(state, p.unitId);
+    if (!u || u.hasAttacked) continue;
+    const t = getUnit(state, p.targetId);
+    if (t && attackTargets(state, u).includes(t) && scoreAttack(state, u, t) > 0) attack(state, u.id, t.id);
+    else tryBestAttack(state, u);
+  }
+}
+
+// Damage the lined-up strikes are expected to deal, per target id.
+function pendingDamage(plans) {
+  const m = new Map();
+  for (const p of plans) m.set(p.targetId, (m.get(p.targetId) || 0) + p.damage);
+  return m;
+}
+
 // Finds the best "move to a tile and attack" combination. The attacker's position affects the counterattack
 // (terrain) and range, so the attack is tentatively evaluated from every reachable tile.
-export function planStrike(state, unit, know = aiKnowledge(state, unit.owner)) {
+// With lineUp (the list of strikes lined up so far) the unit only moves into position and returns its planned
+// strike { unitId, targetId, damage } – the attack is made later by strikeLinedUp, when the other attackers stand
+// next to the target too and add their flank bonus. Targets are judged by the HP left after the lined-up hits.
+// A strike that kills on its own is made right away. Without lineUp it attacks at once and returns true/false.
+export function planStrike(state, unit, know = aiKnowledge(state, unit.owner), danger = new Map(), { lineUp = null } = {}) {
   const range = UNIT_TYPES[unit.type].range;
-  const targets = state.units.filter((u) => u.owner !== unit.owner && know.sees(u.q, u.r));
+  const pending = pendingDamage(lineUp || []);
+  const targets = state.units.filter((u) => u.owner !== unit.owner && know.sees(u.q, u.r)
+    && (pending.get(u.id) || 0) < u.hp); // already doomed by the lined-up strikes
   if (!targets.length || unit.hasAttacked) return false;
   const spots = [[key(unit.q, unit.r), 0], ...reachable(state, unit)];
   const home = { q: unit.q, r: unit.r };
   let best = null;
-  for (const [k] of spots) {
+  const homeMoves = unit.movesLeft;
+  for (const [k, cost] of spots) {
     const [q, r] = k.split(',').map(Number);
     const near = targets.filter((t) => distance(t, { q, r }) <= range);
     if (!near.length) continue;
-    unit.q = q; unit.r = r; // tentatively – restored right away
+    // tentatively – restored right away; the spent moves count for a cavalry charge
+    unit.q = q; unit.r = r; unit.movesLeft = homeMoves - cost;
     for (const t of near) {
-      const s = scoreAttack(state, unit, t) + TERRAIN[tileAt(state, q, r).terrain].defBonus;
+      const hp = t.hp;
+      t.hp -= pending.get(t.id) || 0; // tentatively – restored right away
+      const s = scoreAttack(state, unit, t) + TERRAIN[tileAt(state, q, r).terrain].defBonus
+        - DANGER.strike * dangerPenalty(state, unit, q, r, danger.get(k) || 0);
+      t.hp = hp;
       if (s > 0 && (!best || s > best.s)) best = { s, q, r, t };
     }
-    unit.q = home.q; unit.r = home.r;
+    unit.q = home.q; unit.r = home.r; unit.movesLeft = homeMoves;
   }
   if (!best) return false;
   if (best.q !== unit.q || best.r !== unit.r) moveUnit(state, unit.id, best.q, best.r);
   const u = getUnit(state, unit.id);
-  return !!u && attack(state, u.id, best.t.id);
+  if (!u) return false;
+  // a strike that kills anyway needs no flank: done now, so the others plan around the fallen target
+  if (lineUp && u.q === best.q && u.r === best.r) {
+    const p = previewAttack(state, u, best.t);
+    if (!p.kills) return { unitId: u.id, targetId: best.t.id, damage: p.damage };
+  }
+  return attack(state, u.id, best.t.id);
 }
 
 const WOUNDED = 0.25; // below this HP fraction the unit retreats
@@ -114,11 +163,43 @@ export function assignGarrisons(state, me, know = aiKnowledge(state, me)) {
 function holdCity(state, unit, city) {
   if (unit.q !== city.q || unit.r !== city.r) moveUnit(state, unit.id, city.q, city.r);
   const u = getUnit(state, unit.id);
-  if (u) tryBestAttack(state, u);
+  if (u && !tryBestAttack(state, u)) fortify(state, u.id); // nothing to hit – dig in (only works if it hasn't moved)
 }
 
+// Danger: how many visible enemies could strike each tile next turn (threatTiles from the AI's point of view).
+// Computed lazily and recomputed only after an enemy unit falls, so a turn costs one or a few searches.
+export function dangerMap(state, me, know = aiKnowledge(state, me)) {
+  let cached = null;
+  let enemies = -1;
+  return {
+    get() {
+      const n = state.units.filter((u) => u.owner !== me).length;
+      if (!cached || n !== enemies) {
+        cached = threatTiles(state, me, { sees: know.sees, knows: () => true });
+        enemies = n;
+      }
+      return cached;
+    },
+  };
+}
+
+// How much the unit should fear ending its move on a tile that `attackers` enemies can reach.
+// Ranged units and siege engines are fragile up front, wounded units more so; an own city protects.
+export function dangerPenalty(state, unit, q, r, attackers) {
+  if (!attackers) return 0;
+  const type = UNIT_TYPES[unit.type];
+  const city = cityAt(state, q, r);
+  if (city && city.owner === unit.owner) return 0;
+  const fragile = type.range > 1 || type.noCapture ? DANGER.ranged : DANGER.melee;
+  const hurt = 1 + (1 - unit.hp / type.hp);
+  // one attacker is a fair fight for melee units; each extra one is a pile-on
+  const extra = type.range > 1 || type.noCapture ? attackers : attackers - 1;
+  return extra > 0 ? extra * fragile * hurt : 0;
+}
+export const DANGER = { ranged: 1.2, melee: 0.6, strike: 1 };
+
 // A wounded unit retreats to an own city, or as far from enemies as possible. It attacks only when it's safe.
-function retreat(state, unit, know) {
+function retreat(state, unit, know, danger = new Map()) {
   const here = state.cities.find((c) => c.q === unit.q && c.r === unit.r && c.owner === unit.owner);
   if (!here) {
     const options = reachable(state, unit);
@@ -132,6 +213,7 @@ function retreat(state, unit, know) {
       const minDist = Math.min(...enemies.map((e) => distance(e, { q, r })), 9);
       let s = minDist + TERRAIN[tileAt(state, q, r).terrain].defBonus * 2;
       if (city) s += 10; // an own city heals and protects
+      s -= (danger.get(k) || 0) * 1.5;
       if (s > bestScore) { bestScore = s; bestKey = k; }
     }
     if (bestKey) {
@@ -158,6 +240,38 @@ export function buildSomething(state, me) {
     for (const city of mine) {
       if (!hasBuilding(city, b) && state.gold[me] >= buildingCost(state, me, b) + RESERVE) build(state, city.id, b);
     }
+  }
+  // the later buildings only with plenty of gold to spare, where they make most sense
+  const rich = (b) => state.gold[me] >= buildingCost(state, me, b) + 2 * RESERVE;
+  const capital = mine.find((c) => c.capital);
+  if (capital && !hasBuilding(capital, 'academy') && rich('academy')) build(state, capital.id, 'academy');
+  for (const city of mine) {
+    if (!city.capital && !hasBuilding(city, 'temple') && rich('temple')) build(state, city.id, 'temple');
+  }
+  for (const city of mine) {
+    if (!hasBuilding(city, 'infirmary') && rich('infirmary')) build(state, city.id, 'infirmary');
+  }
+}
+
+// Upgrades from surplus gold, only where they clearly help (an upgrade ends the unit's turn):
+// a warrior in a city with enemy horsemen in sight nearby becomes a spearman,
+// and a scout that has nothing left to explore becomes a horseman.
+export const UPGRADE_HORSE_RADIUS = 4;
+export function upgradeSomething(state, me, know = aiKnowledge(state, me)) {
+  const explored = () => unexploredLand(state, know) <= SCOUT_WHEN_UNKNOWN;
+  for (const u of state.units.filter((x) => x.owner === me)) {
+    const opts = upgradeOptions(state, u);
+    if (!opts.length) continue;
+    let want = null;
+    if (u.type === 'warrior') {
+      const horse = state.units.some((e) => e.owner !== me && e.type === 'horseman' && know.sees(e.q, e.r)
+        && distance(e, u) <= UPGRADE_HORSE_RADIUS);
+      if (horse) want = 'spearman';
+    } else if (u.type === 'scout' && explored()) {
+      want = 'horseman';
+    }
+    const opt = opts.find((o) => o.type === want);
+    if (opt && state.gold[me] >= opt.cost + RESERVE) upgradeUnit(state, u.id, want);
   }
 }
 
@@ -193,21 +307,49 @@ function tryBestAttack(state, unit, { safeOnly = false } = {}) {
 }
 
 // Movement goals: known foreign cities and visible enemies. If there are none, the AI explores.
+// Scouts can't capture, so they only ever explore (and stay put once everything is known).
 export function goalsFor(state, unit, know = aiKnowledge(state, unit.owner)) {
-  const goals = [];
+  const goals = ruinGoals(state, unit, know);
+  if (UNIT_TYPES[unit.type].noCapture) return [...goals, ...exploreGoals(state, know)];
+  goals.push(...pillageGoals(state, unit, know));
   for (const c of state.cities) {
     if (c.owner !== unit.owner && know.knows(c.q, c.r)) goals.push({ q: c.q, r: c.r, w: c.owner === null ? 1 : 1.3 });
   }
   for (const u of state.units) if (u.owner !== unit.owner && know.sees(u.q, u.r)) goals.push({ q: u.q, r: u.r, w: 1.1, enemy: true });
-  if (!goals.length) {
-    for (const t of Object.values(state.tiles)) {
-      if (!know.knows(t.q, t.r) && TERRAIN[t.terrain].passable) goals.push({ q: t.q, r: t.r, w: 0.8, explore: true });
-    }
-  }
-  return goals;
+  return goals.some((g) => !g.ruin && !g.pillage) ? goals : [...goals, ...exploreGoals(state, know)];
 }
 
-function moveTowardsGoal(state, unit) {
+// Known unexplored ruins within a few turns' walk are worth a detour (scouts are made for this).
+export const RUIN_DETOUR = 6; // tiles
+function ruinGoals(state, unit, know) {
+  const believes = (t) => (know.all ? !!t.ruin : ruinBelieved(state, t.q, t.r, unit.owner));
+  return Object.values(state.tiles)
+    .filter((t) => (t.ruin || t.ruinGone) && know.knows(t.q, t.r) && believes(t) && distance(t, unit) <= RUIN_DETOUR)
+    .map((t) => ({ q: t.q, r: t.r, w: 0.9, ruin: true }));
+}
+
+// Working enemy resources the AI knows of, close by, are worth plundering (gold for it, lost income for the enemy).
+export const PILLAGE_DETOUR = 4; // tiles
+export function pillageGoals(state, unit, know) {
+  return Object.values(state.tiles)
+    .filter((t) => t.resource && !isPillaged(state, t) && know.knows(t.q, t.r) && distance(t, unit) <= PILLAGE_DETOUR
+      && !cityAt(state, t.q, t.r))
+    .filter((t) => { const o = territoryOwner(state, t.q, t.r); return o !== undefined && o !== null && o !== unit.owner; })
+    .map((t) => ({ q: t.q, r: t.r, w: 0.95, pillage: true }));
+}
+
+function exploreGoals(state, know) {
+  return Object.values(state.tiles)
+    .filter((t) => !know.knows(t.q, t.r) && TERRAIN[t.terrain].passable)
+    .map((t) => ({ q: t.q, r: t.r, w: 0.8, explore: true }));
+}
+
+// Number of passable tiles the AI hasn't explored yet (0 when it sees everything).
+export function unexploredLand(state, know) {
+  return Object.values(state.tiles).filter((t) => TERRAIN[t.terrain].passable && !know.knows(t.q, t.r)).length;
+}
+
+export function moveTowardsGoal(state, unit, danger = new Map()) {
   const options = reachable(state, unit);
   if (!options.size) return;
   const know = aiKnowledge(state, unit.owner);
@@ -215,10 +357,12 @@ function moveTowardsGoal(state, unit) {
   if (!goals.length) return;
   const range = UNIT_TYPES[unit.type].range;
   let bestKey = null;
-  let bestScore = evalPos(state, unit, unit.q, unit.r, goals, range, know);
+  const score = (q, r) => evalPos(state, unit, q, r, goals, range, know)
+    - dangerPenalty(state, unit, q, r, danger.get(key(q, r)) || 0);
+  let bestScore = score(unit.q, unit.r);
   for (const k of options.keys()) {
     const [q, r] = k.split(',').map(Number);
-    const s = evalPos(state, unit, q, r, goals, range, know);
+    const s = score(q, r);
     if (s > bestScore) {
       bestScore = s;
       bestKey = k;
@@ -249,12 +393,16 @@ function evalPos(state, unit, q, r, goals, range, know) {
   return score;
 }
 
+export const SCOUT_WHEN_UNKNOWN = 100; // unexplored passable tiles
+
 // Which unit the AI wants: tops up the army toward a target type ratio.
 // If it sees enemy horsemen it wants more spearmen; catapults only from turn 8.
 export function pickRecruit(state, me, city) {
   const know = aiKnowledge(state, me);
   const enemyHorse = state.units.filter((u) => u.owner !== me && u.type === 'horseman' && know.sees(u.q, u.r)).length;
-  const ratio = { warrior: 3, archer: 2, horseman: 2, spearman: 1 + 2 * enemyHorse, catapult: state.turn >= 8 ? 1 : 0 };
+  // one scout while a lot of land is still unknown – on big maps (never on Hard, which sees everything)
+  const scout = unexploredLand(state, know) > SCOUT_WHEN_UNKNOWN ? 1 : 0;
+  const ratio = { warrior: 3, archer: 2, horseman: 2, spearman: 1 + 2 * enemyHorse, catapult: state.turn >= 8 ? 1 : 0, scout };
   // own faction's strengths: wants more of the discounted units
   const favored = factionOf(state, me).unitDiscount || {};
   for (const type of Object.keys(favored)) ratio[type] += 2;
@@ -265,6 +413,7 @@ export function pickRecruit(state, me, city) {
   let bestWant = 0;
   for (const [type, want] of Object.entries(ratio)) {
     if (!want || state.gold[me] < unitCost(state, city, type)) continue;
+    if (type === 'scout' && count.scout) continue; // one is enough
     const need = (count[type] || 0) / want;
     // on a tie, the type we want more of wins
     if (need < bestNeed || (need === bestNeed && want > bestWant)) { bestNeed = need; best = type; bestWant = want; }

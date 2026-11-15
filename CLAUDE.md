@@ -12,6 +12,7 @@ Played against an AI on a hex map. Code, comments and in-game texts are in Engli
 - `src/game.js` – pure game logic without DOM, state is JSON
 - `src/ai.js` – AI opponent
 - `src/render.js` – drawing on the canvas
+- `src/keys.js` – keyboard shortcut table (key handling and the `?` overlay come from it)
 - `src/input.js` – what a click/tap on a tile means (pure function, touch with confirmation)
 - `src/sound.js` – sound effects synthesized via WebAudio (no recordings)
 - `src/stats.js` – strength chart and statistics summary as an SVG string (pure function)

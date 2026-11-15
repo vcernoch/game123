@@ -3,13 +3,14 @@
 // and only a second tap on the same tile performs the action.
 import { key } from './hex.js';
 import {
-  getUnit, unitAt, cityAt, reachable, attackTargets, visibleTiles, exploredTiles,
+  getUnit, unitAt, cityAt, reachable, attackTargets, visibleTiles, exploredTiles, planRoute,
 } from './game.js';
 
 // ctx = { selectedId, pending: {q,r}|null, viewer, confirm }
 // Returns one of these actions:
 //   { type: 'move', unitId, q, r } | { type: 'attack', unitId, targetId }
-//   { type: 'preview', kind: 'move'|'attack', q, r, targetId? }
+//   { type: 'goto', unitId, q, r } – a multi-turn move order to a known tile out of reach this turn
+//   { type: 'preview', kind: 'move'|'attack'|'goto', q, r, targetId? }
 //   { type: 'select', unitId|null, cityId|null } | { type: 'none' }
 export function decideTap(state, ctx, q, r) {
   if (!state.tiles[key(q, r)] || state.winner !== null) return { type: 'none' };
@@ -30,6 +31,10 @@ export function decideTap(state, ctx, q, r) {
     }
     if (!seen && reachable(state, sel).has(key(q, r))) {
       return confirmed ? { type: 'move', unitId: sel.id, q, r } : { type: 'preview', kind: 'move', q, r };
+    }
+    // clicking a far own city still selects it (recruiting); foreign cities can be marched to
+    if (!seen && !(city && city.owner === viewer) && planRoute(state, sel, q, r)) {
+      return confirmed ? { type: 'goto', unitId: sel.id, q, r } : { type: 'preview', kind: 'goto', q, r };
     }
   }
   return { type: 'select', unitId: seen ? seen.id : null, cityId: city ? city.id : null };

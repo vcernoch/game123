@@ -2,6 +2,247 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-15 – Pillage (v0.25.0)
+- **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.9.0–v0.25.0) is far ahead of `main` (v0.8.0) – please merge it.
+- Phase 11 was done, so I opened phase 12 (economy war, own improvement). Resources were only ever a passive bonus; now they are something to raid and to guard, which gives fast units a job besides charging.
+- `PILLAGE` in `rules.js` (`gold` 6, `turns` 4). In `game.js`: `isPillaged`, `pillageTurnsLeft`, `canPillage`, `pillage`. A unit of the current player that is not a scout (`noCapture`), hasn't attacked and has a move left, standing on a working resource in another player's territory (not own, not neutral), plunders it: +6 gold, the unit's turn ends (fortify / move order / explore cleared), `tile.pillagedUntil` is set so the owner misses exactly 4 of its own turns (+1 round when the owner moves before the raider in a round). A pillaged gold mine gives no income, pillaged horses give no discount (`cityIncome`, `unitCost`). At the start of a round recovered tiles drop the field. New `pillage` event (replayable, floater "🔥 pillaged +6", synthesized crackle sound for the raider, the `bane` sound for the victim), chronicle entry seen by both sides. The enemy turn report counts pillaged resources ("A resource of yours was pillaged.", red ✕ on the tile).
+- AI: `pillageGoals` in `ai.js` – known working enemy resources within 4 tiles are movement goals (weight 0.95, not for scouts; like ruins they don't stop exploring); a unit with nothing to attack pillages where it stands, before or after moving. In 20 AI-vs-AI games on Medium: ~2.75 pillages per game.
+- UI: "🔥 Pillage (+6 gold)" button in the unit panel, key P (shortcut overlay), a burning ash marker over the resource on the map, "🔥 Pillaged – out of use, works again in N rounds" in the tile panel, "(🔥 pillaged, N more)" in the city's resource list. Help text updated.
+- State structure: `state.version` 20 (optional `tile.pillagedUntil`), trivial migration.
+- Test adjusted (not weakened): the smoke "Same map again" check now also strips `pillagedUntil` before comparing maps, because pillage is now a second thing a game changes on its map (the AI raided during the simulated game).
+- Tests: +2 logic (gold, lost income and discount, event replay, not undoable, exactly 4 missed incomes for both orders of play, recovery removes the field, turn report and text, who can't – scout, attacked, no moves, not own turn, own/neutral territory, no resource – orders cleared, migration; the AI pillages where it stands, gets goals only for working enemy resources within range, real AI-vs-AI games keep `pillagedUntil` in range). Smoke test: button pillages the AI's gold mine, P its horses, checks gold, chronicle and tile panel (`artifacts/screenshot-pillage.png`).
+- Status: `npm run check` green (85 logic tests + smoke).
+
+## 2026-11-15 – Auto-explore (v0.24.0)
+- **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.9.0–v0.24.0) is far ahead of `main` (v0.8.0) – please merge it.
+- Phase 11 (exploration, own improvement), new task. Sending a scout around the fog took a click per turn; now it can be sent once.
+- `EXPLORE` in `rules.js`. In `game.js`: `exploreTarget` (Dijkstra over explored tiles only, avoiding foreign cities and visible enemies; score = unexplored tiles in sight from the tile, + 6 for a believed ruin, divided by 1 + cost in turns; deterministic), `canExplore`, `setExplore`, `followExplore` (up to 3 legs a turn, re-picking the target after each leg; if no tile of the route is reachable this turn – e.g. an own unit on the first step – it gets as close as it can). `runOrders` walks exploring units at the start of the turn like move orders; an enemy within 2 tiles ends the order ('interrupted'), so does "nothing left" ('done'). A manual move, fortify and cancel end it; `unitStatus` counts an exploring unit as marching.
+- Simulation (warrior / scout, 6 seeds × 3 sizes, no enemies): always ends with 99–100 % of the map explored (scout on Medium in 11–17 turns).
+- UI: "🧭 Explore" button in the unit panel (only with fog and something left to find), key X, "Exploring the fog" line with "✖ Stop exploring", small compass badge on the unit, "exploring" in the unit tooltip, banner when a unit stops or has nothing left. Help and shortcut overlay updated.
+- State structure: `state.version` 19 (optional `unit.explore`), trivial migration.
+- Test adjusted (not weakened): the shortcut test used `x` as an example of an unbound key; it now uses `q`, and `x` joined the "claimed by exactly one entry" check.
+- Tests: +2 logic (route over explored tiles only, walking turn by turn on 2 seeds until 'done' with no foreign city ever entered and explored land never shrinking; enemy interrupt, cancel by move/cancel/fortify, not on the AI's turn, a ruin attracts with the bonus and gets looted, nothing without fog, key X, migration). Smoke test: panel button sends the unit (moved, saw new land, panel text), X sends the next one (`artifacts/screenshot-explore.png`).
+- Status: `npm run check` green (83 logic tests + smoke).
+
+## 2026-11-14 – Ancient ruins (v0.23.0)
+- **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.9.0–v0.23.0) is far ahead of `main` (v0.8.0) – please merge it.
+- Phase 10 was done, so I opened phase 11 (exploration, own improvement). Exploring the fog had no reward of its own and scouts were only eyes; now there is something to find.
+- `RUINS` in `rules.js`. `placeRuins` in `map.js` (own RNG, so terrain, cities, roads, rivers and resources stay the same for all seeds): ruins come in pairs – one nearer each capital, at about the same distance from it – 1 pair on Small, 2 on Medium, 4 on Large; on passable land, not on resources, ≥ 3 from capitals, ≥ 2 from cities, ≥ 3 apart, reachable.
+- `exploreRuin` in `game.js`: the first unit (any type, scouts too) to end its move on a ruin explores it. The reward depends only on seed and tile (`ruinKind`): **Treasure** +15 gold (weight 3), **Forgotten drill yard** +3 XP (= Veteran, with the promotion heal; weight 2), **Old map** reveals the land within 4 tiles (weight 2; treasure instead without fog), **Wandering warriors** a free Warrior next to the explorer (weight 2; treasure if no free tile). New `ruin` event (replayable by `applyEvent`, own synthesized "discover" sound, floater "Ruins: +15 gold" etc.), chronicle entry seen only by those who saw it.
+- Fog: `tile.ruinGone` lists the players who know a ruin was looted; `ruinBelieved(state, q, r, viewer)` – a ruin looted in the fog keeps showing for the other side until they see that tile again, so nothing leaks. `updateExplored` teaches it.
+- AI: `ruinGoals` in `ai.js` – known (believed) ruins within 6 tiles become movement goals (weight 0.9) for all units incl. scouts; a ruin the AI knows is gone is not. Hard AI sees the truth.
+- UI: violet disc with broken columns on the tile (top left, resources are top right); the tile panel says "Ancient ruins: …"; help text updated. Looting is not undoable (it's an extra event).
+- State structure: `state.version` 18 (`tile.ruin`, `tile.ruinGone`), old maps get no ruins.
+- Tests adjusted (rules changed, not weakened): the scout test now allows ruin goals next to explore goals ("scouts only explore (or loot ruins)"); the smoke "Same map again" check now compares maps with looted ruins put back, since looting is the only change a game makes to its map.
+- Tests: +4 logic (fair placement on all sizes and seeds, deterministic; each reward incl. both fallbacks, event replay, not undoable, no second loot; looting in the fog: believed by the other side, hidden in the chronicle, learned on sight, AI goal appears/disappears, migration; AI armies loot ruins in real games). Smoke test hovers a ruin, checks the panel, moves a unit onto it, checks the chronicle (`artifacts/screenshot-ruins.png`).
+- Status: `npm run check` green (81 logic tests + smoke).
+
+## 2026-11-14 – Army panel (v0.22.0)
+- **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.9.0–v0.22.0) is far ahead of `main` (v0.8.0) – please merge it.
+- Phase 10 (clarity and feedback, own improvement), new task. With a bigger army it was hard to see who still needs orders and where everyone is; Tab only walks through ready units one by one.
+- `unitStatus`, `unitWhere`, `armyOverview` and `ARMY_STATUS` in `game.js` (pure): every own unit gets a status – ready (same rule as Tab / `activeUnits`), marching (move order, no moves left), fortified, done – and a place in words ("in Oakford", "2 tiles from Oakford"). Only cities the player has explored are named, so the list never gives away a city in the fog. Rows are sorted ready → marching → fortified → done, then by id.
+- UI: a collapsible "Army" panel at the top of the side panel. Its summary shows "5 units · 2 ready" even when closed; open, each row has the unit symbol, name with rank stars, place, HP (red when wounded) and a status badge (ready in gold, done faded). Clicking a row selects the unit (and the city under it); on a phone with the zoomed map the frame scrolls to the unit. Rows are disabled during animations, the list is redrawn only on change. Help text updated.
+- No state structure change (`state.version` stays 17).
+- Tests: +1 logic (statuses and their order, ready rows = `activeUnits`, enemy units not listed, place texts incl. "1 tile from", a fogged enemy city is never named, without fog it is, empty army, JSON). Smoke test opens the panel with a fortified unit and a wounded, finished veteran, checks rows, order, summary and HP text, clicks a row to select (`artifacts/screenshot-army.png`), then on a 390 px phone with the zoomed Large map checks that picking a unit scrolls it into the frame without horizontal page scroll (`artifacts/screenshot-army-mobile.png`).
+- Status: `npm run check` green (77 logic tests + smoke).
+
+## 2026-11-13 – Last-seen markers (v0.21.0)
+- **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.9.0–v0.21.0) is far ahead of `main` (v0.8.0) – please merge it.
+- Phase 10 (clarity and feedback, own improvement), new task. In the fog an enemy that steps out of sight simply vanished, so the player had to remember where it went. Now it leaves a marker.
+- `SIGHTINGS` in `rules.js` (`maxAge` 3). `updateSightings(state, viewer, events)` in `game.js` keeps `state.sightings[viewer]`: enemy units in sight are remembered with type, HP and turn; a unit seen walking out of sight (a `move` event whose path leaves the visible tiles) is put on the first fogged tile of its path – where it was last seen heading, never where it really ended; a marker is dropped when its tile is in sight again, when the unit itself is seen again (it moves to the real position), or after 3 turns. `lastSeen`, `lastSeenAt`, `lastSeenText` for drawing and texts. Without fog or after the game ends there are none. Only things the player saw are stored, so nothing leaks (a marker may sit on a still-unexplored tile the unit was seen walking into; the tile stays dark).
+- UI: the faded, dashed unit symbol in the owner's light colour with a small "?" badge; hovering it shows "AI: Horseman – last seen here 1 turn ago (HP 8/10)" in the tooltip and the side panel (so it works on touch too). Markers are hidden while the AI turn is animating. Updated after every player action, after the AI turn and after move orders walk on; undo restores them with the state. Help text updated.
+- State structure: `state.version` 17 (`sightings`), migration from 16 gives empty markers.
+- Tests: +2 logic (marker when our unit walks away, text, aging and forgetting at `maxAge`, walking out of sight puts the marker right after the last visible tile of the path, seeing the tile clears it, seeing the unit replaces it, no own units, no fog / game over gives none, JSON, migration; real AI turns on 3 seeds with the player moving: no marker ever on a tile in sight or older than 3 turns). Smoke test makes an AI horseman step from a visible tile into the fog, checks the single marker, the tooltip and the panel text, and saves `artifacts/screenshot-lastseen.png`.
+- Status: `npm run check` green (76 logic tests + smoke).
+
+## 2026-11-13 – Enemy turn report (v0.20.0)
+- **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.9.0–v0.20.0) is far ahead of `main` (v0.8.0) – please merge it.
+- Phase 9 was done, so I opened phase 10 (clarity and feedback, own improvement). The AI turn animates fast and a lot happens around the map; now it's clear afterwards what it cost you.
+- `turnReport(before, events, viewer)` in `game.js` (pure): replays the enemy turn's events on a copy of the state from before it and counts own units lost (by type), own units wounded (and still alive), attackers that fell to counterattacks and own cities lost, plus `spots` (tiles of the losses). Only things the player always knows about are counted, so nothing hidden in the fog leaks. `reportText()` makes one sentence ("Enemy turn: you lost Warrior ×2 and the city Oakford. 1 unit was wounded."), `reportIsBad()` decides the colour.
+- UI: the existing notice bar below the header shows the report after the AI turn (together with a random event or stopped move orders), red when something was lost, green when only attackers fell; nothing when the enemy didn't touch you. Tiles of the losses get a small red ✕ until the turn ends. `showNotice` was split (`happeningText`). Help text updated.
+- No state structure change (`state.version` stays 16); the report and marks live only in memory.
+- Tests: +2 logic (losses/wounded/fallen/spots from a staged turn, a wounded-then-destroyed unit counts only as lost, a captured city incl. "your capital", the enemy's own view is empty, texts; real AI turns on 3 seeds: reported losses = actual drop in own units and cities). Smoke test stages an AI horseman killing a unit, checks the red banner and the ✕ mark at 390 px without horizontal scroll, and that ending the turn clears it (`artifacts/screenshot-report.png`).
+- Status: `npm run check` green (74 logic tests + smoke).
+
+## 2026-11-12 – Cavalry charge (v0.19.0)
+- **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.9.0–v0.19.0) is far ahead of `main` (v0.8.0) – please merge it.
+- Phase 9 (battlefield tactics, own improvement), new task. `CHARGE` in `rules.js` (`types` ['horseman'], `minMoves` 2, `atkBonus` 0.25, `blockedBy` ['forest']). `movesSpent`, `chargeReady`, `chargeBonus` in `game.js`: a horseman that has spent at least 2 move points this turn before attacking gets +25 % attack; no charge against a defender in forest. Adds to flank and high ground (`1 + flank + high + charge`), never to the counterattack. `previewAttack` returns `charge`, so the real attack, the UI and the AI use the same number. Spearmen keep their double strength against horsemen, so a charge into spears is still a bad idea.
+- UI: the attack tooltip / touch confirmation appends "· charge +25 %"; the unit panel shows "charge ready (+25 %)" in orange; the tile panel for forest says "no cavalry charge". Help text updated.
+- AI: `planStrike` now sets the tentative `movesLeft` along with the tentative position when it evaluates strike tiles, so it sees the charge bonus of a longer approach (before, previews from other tiles silently assumed no movement spent).
+- Smoke test: the AI horsemen now hit harder, so on seed 12345 the passive player lost all units in the first 5 turns and the "Tab selects a unit" step had nothing to select. I changed the starting seed of that section to 54321 (player still has a unit at turn 6); the check itself is unchanged.
+- No state structure change (`state.version` stays 16).
+- Tests: +2 logic (no charge when fresh or after 1 move point, other types never, not into forest, a real 2-tile move then attack deals the previewed charged damage with no stronger counter, spent after attacking; the AI horseman rides up 2 tiles and strikes with the charge). Smoke test makes the flanking attacker a horseman with 2/4 moves, checks the tooltip and the panel, and saves `artifacts/screenshot-charge.png`.
+- Status: `npm run check` green (72 logic tests + smoke).
+
+## 2026-11-12 – High ground (v0.18.0)
+- **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.9.0–v0.18.0) is far ahead of `main` (v0.8.0) – please merge it.
+- Phase 9 (battlefield tactics, own improvement) got a new task. `HIGH_GROUND` in `rules.js` (`atkBonus` 0.2, `terrain` ['hills']). `highGroundBonus` in `game.js`: an attacker standing on hills that attacks a unit not on hills gets +20 % attack – melee and ranged alike. It adds to the flank bonus (`1 + flank + high`) and, like flanking, doesn't boost the counterattack. `previewAttack` returns `high`, so the real attack, the UI and the AI use the same number.
+- UI: the attack tooltip / touch confirmation appends "· high ground +20 %"; the tile panel for hills says "high ground (attack +20 % against units below)". Help text updated.
+- AI: no special code – `planStrike` evaluates attacks from every reachable tile via `previewAttack` and already liked hills for their defense, so it now picks hilltop strike positions a bit more often.
+- Small cleanup: the `RIVER` constant in `rules.js` was separated from its comment by `FLANK`; moved back.
+- No state structure change (`state.version` stays 16).
+- Tests: +1 logic (bonus only from hills against a unit below, not hills vs. hills, not on the counter, ranged attackers too, stacks with flanking, the real attack deals the previewed damage). Smoke test turns the flanking attacker's tile into hills, checks the tooltip and saves `artifacts/screenshot-highground.png`.
+- Status: `npm run check` green (70 logic tests + smoke).
+
+## 2026-11-11 – AI lines up flanking attacks (v0.17.0)
+- **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.9.0–v0.17.0) is far ahead of `main` (v0.8.0) – please merge it.
+- Follow-up to flanking (phase 9). Before, AI melee units moved and attacked one at a time, so the first attacker on a target never had a flank bonus. Now `planStrike(…, { lineUp })` only moves a melee unit into its strike position and returns the plan `{ unitId, targetId, damage }`; `strikeLinedUp` makes the attacks after all units have acted, in plan order, so every strike counts the others standing next to the target.
+- To keep focus fire: later plans judge targets by the HP left after the already lined-up hits (`pendingDamage`), skip targets those hits already destroy, and a strike that kills on its own is made at once. If the planned target is gone or the attack no longer pays off, the unit takes its best other attack. Archers, catapults, garrisons and retreating units behave as before.
+- A first version without the pending-damage estimate was clearly worse (small 52 : 63, medium 50 : 66) – it spread damage instead of finishing units. Final version, new vs. previous AI, both sides of each seed, Normal, fog: Small 99 : 99, Medium 102 : 96 (100 seeds each), Large 30 : 28 (30 seeds) – neutral to slightly better in AI-vs-AI. Instrumented: average flank per AI melee strike went up by ~3 percentage points; against a human the AI now visibly surrounds a unit before hitting it.
+- No state structure change (`state.version` stays 16), no UI change.
+- Tests: +2 logic (three AI warriors line up around a tough spearman without attacking, the first strike carries +20 %, then all strike; a lone kill is made right away and a target doomed by lined-up hits isn't picked again).
+- Status: `npm run check` green (69 logic tests + smoke).
+
+## 2026-11-11 – Flanking (v0.16.0)
+- **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.9.0–v0.16.0) is far ahead of `main` (v0.8.0) – please merge it.
+- Phase 8 was done, so I opened phase 9 (battlefield tactics, own improvement) in the roadmap.
+- `FLANK` in `rules.js` (`perUnit` 0.1, `max` 3). `flankers` / `flankBonus` in `game.js`: every other unit of the attacker's owner standing next to the defender adds +10 % attack, up to +30 %. Works for ranged attackers too (the flankers must be adjacent to the target, not to the archer). The counterattack is not boosted. `previewAttack` returns `flank`, so the real attack, the UI and the AI all use the same number.
+- UI: the attack tooltip / touch confirmation says "Flanking attack (+20 %)" (or "Flanking attack across a river …"), and while a target is hovered or awaiting confirmation the flanking units get a small yellow ⚔ badge. Help text updated.
+- AI: no special code – it evaluates attacks through `previewAttack`, so it profits from flanks it happens to have; it doesn't yet plan attack order to maximise them (possible follow-up).
+- No state structure change (`state.version` stays 16). No existing test needed changing.
+- Tests: +1 logic (no bonus alone, enemies and distant units don't count, +10 % per flanker capped at 3, damage never drops and counter never rises with more flankers, ranged attacker, the real attack deals the previewed damage). Smoke test sets up two flankers, checks the tooltip text and saves `artifacts/screenshot-flank.png`.
+- Status: `npm run check` green (67 logic tests + smoke).
+
+## 2026-11-10 – Disbanding units (v0.15.0)
+- **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.9.0–v0.15.0) is far ahead of `main` (v0.8.0) – please merge it.
+- Phase 8 had no open task, so I added one (own improvement): disbanding.
+- `DISBAND` in `rules.js` (`refundShare` 0.4). `disbandRefund`, `canDisband`, `disbandUnit` in `game.js`: the current player can dismiss an own unit at any time during their turn (also after it has acted). In an own city it returns 40 % of the type's base price, rounded down (warrior 4, horseman 6, catapult 8 …); elsewhere, or in a foreign city, nothing. It frees the city tile for recruiting right away. New `disband` event (replayable; gold is not replayed, as for recruiting and upgrades), a "✖ disbanded +N" floater, a soft falling sound, and a chronicle entry that follows the fog rules.
+- UI: "✖ Disband (+N gold)" button at the end of the unit panel; the first press turns it red ("Really disband?"), a second press within 4 s dismisses the unit. Key D does the same; added to the shortcut table / overlay and the help text.
+- The AI doesn't disband (it has no upkeep to save and already retrains idle scouts).
+- No state structure change (`state.version` stays 16).
+- Tests: +3 logic (refund per type and always below the recruit price, removal, log, second disband refused, recruit right after, event replay and sound; no refund outside / in a foreign city; refused on the other player's turn, for an enemy unit, after game over, unknown id; the enemy doesn't see it in the fog), key D in the shortcut test. Smoke test disbands the retrained horseman from the panel: first press asks, second removes it and adds 6 gold (`artifacts/screenshot-disband.png`).
+- Status: `npm run check` green (66 logic tests + smoke).
+
+## 2026-11-10 – Unit upgrades (v0.14.0)
+- **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.9.0–v0.14.0) is far ahead of `main` (v0.8.0) – please merge it.
+- Phase 7 was done, so I opened phase 8 (own improvements) in the roadmap.
+- `UPGRADES` / `UPGRADE` in `rules.js`: warrior → spearman or horseman, archer → catapult, scout → horseman. Price = recruit price of the new type in that city (barracks, faction and resource discounts apply) − base price of the old type + 2, at least 3.
+- `upgradeOptions`, `upgradeCost`, `upgradeUnit` in `game.js`: only a unit of the current player standing in an own city that hasn't moved or attacked this turn (so not a unit recruited this turn; a fortified one may, and loses the fortification). It keeps its XP/rank and its share of HP (rounded up), and its turn ends. New `upgrade` event (replayable, animated with a "⇧ Horseman" floater, promote sound) and a chronicle entry.
+- UI: an "Upgrade" block in the unit panel with price and the new type's stats; help text updated.
+- AI (`upgradeSomething` in `ai.js`, with gold to spare above its usual reserve): a warrior in a city with a visible enemy horseman within 4 tiles becomes a spearman; a scout in a city with nothing left to explore becomes a horseman. Measured (new vs. previous AI, both sides of each seed, Normal, fog): Small 57 : 62, Medium 60 : 56 (60 seeds each) – neutral within noise, so it adds variety without changing AI strength.
+- No state structure change (`state.version` stays 16).
+- Tests: +3 logic (price formula, HP share and XP kept, turn ends, replay; refused without gold, after moving, when freshly recruited, outside or in a foreign city, on the other player's turn, wrong path; faction discount; AI upgrades only when it makes sense and has gold; AI vs AI games stay consistent). Smoke test retrains a veteran scout into a horseman from the panel (`artifacts/screenshot-upgrade.png`).
+- Status: `npm run check` green (63 logic tests + smoke).
+
+## 2026-11-09 – Map number and "Same map again" → v0.13.0
+- **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` is now v0.13.0, several versions ahead of `main` (v0.8.0) – please merge it.
+- Every game already had a seed; now it is visible as the **map number**: the side panel says "Map 123456789 · Difficulty: …". The new game dialog has a "Map" box: an optional map number (empty = random; invalid input is caught by the browser's form check, `pattern` 1–9 digits) and a "This map: N" button that fills in the current one. The same number on the same size always gives the same map, so maps can be shared.
+- The game-over banner has **↻ Same map again**: restarts the identical starting game (map, size, factions, difficulty, fog, events).
+- `parseSeed(text)` and `restartOptions(state)` in `game.js` (pure). `startNewGame` now keeps a given seed. A save from before factions existed restarts with the current rules (factions picked as for a new game).
+- No state structure change. Help text updated.
+- Tests: +1 logic (parsing incl. bad inputs; a game played for 6 turns restarts as exactly the fresh game on all sizes; defaults; pre-faction save). Smoke test: "This map" fills the number, an invalid number keeps the dialog open, 4242 starts map 4242, and "Same map again" after the played-out game gives turn 1 of map 7 with the same tiles and the map number in the panel.
+- Status: `npm run check` green (60 logic tests + smoke).
+- Run summary: phase 7 (own improvements) done – danger-aware AI, scout, map number. Version 0.13.0.
+
+## 2026-11-09 – Scout
+- New unit **Scout** (`Sc`, 8 gold): HP 6, attack 1, defense 1, move 3, sight 4. It can't capture: `noCapture` in `UNIT_TYPES`, `cityForbidden()` in `game.js` keeps it out of every foreign (enemy or neutral) city – `searchMoves` doesn't step into or through one, `planRoute` neither, so reach, paths, move orders and the threat overlay all follow automatically. Its own cities are fine.
+- It is the 6th unit, so recruit keys 1–5 stay the same and key 6 recruits a scout (the shortcut table and the buttons are generated from `rules.js`). Help text updated.
+- AI: wants exactly one scout while more than `SCOUT_WHEN_UNKNOWN` (100) passable tiles are still unexplored – in practice on Large maps on Easy/Normal, never on Hard (it sees everything). A scout's goals are only unexplored tiles; the danger logic treats it as fragile like an archer. Measured (new vs. previous AI, both sides of every seed): Medium 97 : 97 (100 seeds), Large 41 : 37 (40 seeds). A version that also scouted on Medium (share-based threshold) was slightly worse there (93 : 103), so it was dropped.
+- No state structure change (a new unit type only).
+- Tests: +1 logic (move 3 and sight 4, no entry or passage through a neutral city while a warrior still captures, own city allowed, the AI wants one scout on a large unknown map and only explores with it, not a second one, Hard knows everything). Smoke test recruits a scout with key 6 and checks the button description (`artifacts/screenshot-scout.png`).
+- Status: `npm run check` green (59 logic tests + smoke).
+
+## 2026-11-09 – AI weighs danger
+- `dangerMap(state, me, know)` in `ai.js`: the threat map (`threatTiles`) seen from the AI's side – how many visible enemies could strike each tile next turn. Computed lazily once per AI turn and recomputed only after an enemy unit falls. `threatTiles` now takes an optional `know` ({ sees, knows }) so the AI can use its own knowledge (Hard sees everything, Normal/Easy respect the fog); the overlay still uses the player's view.
+- `dangerPenalty` (weights in `DANGER`): archers and catapults fear any attacker, melee units only a second and further one (a pile-on), wounded units more, and a unit in an own city fears nothing. Used when the AI advances (`moveTowardsGoal`), retreats and picks the tile it strikes from (`planStrike`).
+- Measured with a temporary AI-vs-AI script (new vs. previous AI, both sides of every seed, Normal, fog on): Medium 108 : 90 (100 seeds), Small 65 : 54 (60 seeds), Large 29 : 31 (30 seeds). A modest gain; more important for a human player: AI archers no longer walk up to be cut down.
+- No state structure change.
+- Tests: +1 logic (penalty values, danger map = threat map from the AI side, recomputed after a loss, an archer stays out of reach where the old logic walked in, a Normal AI fears no unseen enemy).
+- Status: `npm run check` green (58 logic tests + smoke).
+
+## 2026-11-09 – Threat overlay → v0.12.0
+- **Still open for Vladimír:** more AI opponents and scenarios with their own objectives wait for your "more AI yes" / "scenarios yes". `dev` is now several versions ahead of `main` (v0.9.0–v0.12.0) – please merge it.
+- `threatTiles(state, player)` in `game.js`: for every enemy unit the player can see, the tiles it could attack next turn (walk with full movement by the normal rules incl. terrain, rivers and our zone of control, then strike within range). Result = number of attackers per tile; only explored passable tiles, so nothing hidden is revealed.
+- UI: the ⚠ button next to ♪ in the header or the T key shades threatened tiles red (darker where several enemies reach). The setting is remembered in the preferences. T added to the shortcut table / overlay, help text updated.
+- No state structure change.
+- Tests: +1 logic (warrior reach = distance 3 also after it has moved, archer reach 4, overlapping counts, mountain wall stops it, hidden enemies and unexplored tiles are never marked). Smoke test toggles with T and with the button (`artifacts/screenshot-threats.png`).
+- Status: `npm run check` green (57 logic tests + smoke).
+- Run summary: phase 6 (own improvements) done – zone of control, save files, threat overlay. Version 0.12.0.
+
+## 2026-11-09 – Save to file / load from file
+- New "Save file" panel in the sidebar: **⬇ Save to file** downloads the game as `hex-realm-turn-N-YYYY-MM-DD.json`, **⬆ Load from file** opens it again (also available in the new game dialog, which doubles as the main menu). Everything stays in the browser – no server.
+- `exportGame` / `importGame` / `saveFileName` / `stateProblem` in `game.js`. A file is `{ format: 'hex-realm-save', gameVersion, saved, state }`; a bare state (as in localStorage) is accepted too. Import never throws: it reports invalid JSON, a foreign file, a save from a newer version, an unknown format or damaged contents (bad tiles, units off the map or on one tile, bad gold / current player…) and the current game stays. Older saves are migrated as usual. Pending animation events are not saved.
+- No state structure change.
+- Tests: +2 logic (export → import round trip incl. continuing the game, file name; broken / foreign / newer / damaged / old files). Smoke test clicks Save, checks the download, loads it back through the file input, tries a broken file and checks the panel at 390 px (`artifacts/screenshot-file.png`).
+- Status: `npm run check` green (56 logic tests + smoke).
+
+## 2026-11-09 – Zone of control
+- New rule: a unit that steps onto a tile next to an enemy unit **it can see** must stop there (it can still attack); moving away from a starting tile inside the zone is free. Hidden enemies in the fog have no zone, so a unit stopping never reveals anything. `zocTiles(state, player)` in `game.js`; `searchMoves` doesn't expand from zone tiles, so `reachable`, `pathTo`, `moveUnit`, move orders and the AI all follow the rule automatically. Multi-turn routes (`planRoute`) ignore it – orders stop anyway when an enemy comes into sight.
+- UI: reachable tiles in the zone get a small red stop sign; the mouse tooltip says "Enemy zone of control – the move ends here", the tile panel mentions it too. Help text updated.
+- State: `state.version` 16 (`zoc`); saved games from before continue without the zone so their rules don't change.
+- Tests: +2 logic (zone around a visible enemy, no walking past it, path never crosses the zone, leaving is free, moveUnit + attack after stopping; hidden enemy has no zone, migration). Smoke test selects a horseman near an enemy, hovers a stop tile and checks the tooltip (`artifacts/screenshot-zoc.png`).
+- Status: `npm run check` green (54 logic tests + smoke).
+
+## 2026-11-09 – Keyboard shortcuts → v0.11.0
+- New `src/keys.js`: one `SHORTCUTS` table drives both the key handling (`keyAction`) and the overlay, so they can't disagree. Added to the structure list in `CLAUDE.md`.
+- New: number keys 1–5 recruit the matching unit in the selected city (the numbers are shown on the recruit buttons, hidden on touch screens); `?` (or the "⌨ Keyboard shortcuts" button under "How to play") opens a list of all shortcuts, Esc or `?` closes it. Existing keys (Tab, Enter/E, Shift+Enter, F, Z, Esc) now go through the table; shortcuts with Ctrl/Cmd/Alt are left to the browser.
+- Tests: +1 logic (every key maps to the right action, recruit numbers match the unit order, no key claimed twice). Smoke test recruits an archer with key 2 and opens/closes the overlay (`artifacts/screenshot-keys.png`).
+- Status: `npm run check` green (52 logic tests + smoke).
+- Run summary: phase 5 (own improvements) done – map resources, unit tooltip, keyboard shortcuts. Version 0.11.0. Vladimír will merge `dev` later.
+
+## 2026-11-09 – Unit tooltip
+- `unitSummary(state, unit)` in `game.js`: name, owner, HP, effective attack (rank) and defense where the unit stands (rank, terrain, own city / walls, fortify), range, move, rank, fortified / marching, plus the reasons for the defense bonus.
+- Hovering any visible unit (own or enemy) shows it in the tooltip on two lines; a city under the unit adds a third line with the city summary. The attack preview still takes priority when the selected unit can attack the hovered one. On touch there is no hover – tapping a unit shows it in the panel as before.
+- Tests: +1 logic (values match `defenseValue`, rank and fortify raise them, reasons for terrain / city with walls / fortify). Smoke test hovers an own unit and checks the tooltip (`artifacts/screenshot-unit-tip.png`).
+- Status: `npm run check` green (51 logic tests + smoke).
+
+## 2026-11-09 – Map resources
+- `RESOURCES` in `rules.js`, `placeResources` in `map.js`, `cityResources()` in `game.js`. Two kinds on tiles near cities:
+  - **Gold mine** (gold nuggets): +2 gold per turn for the city whose territory it is in (`cityIncome`).
+  - **Horses** (horseshoe): horsemen recruited in that city are 4 gold cheaper (`unitCost`, stacks with barracks and the Horde bonus).
+- Placement has its own RNG, so terrain, cities, roads and rivers stay the same for all seeds. For fairness both capitals get exactly one gold mine and one pasture 2 tiles away; each neutral city gets one random resource with a 2 in 3 chance, always clearly inside its own territory. Gold prefers hills, horses plains. Resources follow the city, so capturing a city with a mine is worth more.
+- UI: marker in the upper right of the tile (only on explored tiles), hover text with the effect, the city panel lists the resources in its territory. Help text updated.
+- State: `state.version` 15 (tiles may have `resource`), old maps have none.
+- Tests: +1 logic (resources on passable non-city tiles inside some territory, capitals get one of each on all map sizes, determinism, income and horseman discount, migration).
+- Status: `npm run check` green (50 logic tests + smoke).
+
+## 2026-11-09 – More buildings (v0.10.0)
+- At Vladimír's request, four new city buildings (`BUILDINGS` / `BUILDING_EFFECTS` in `rules.js`):
+  - **Watchtower** (15 gold): the city sees 2 tiles farther (`citySight`).
+  - **Infirmary** (20 gold): units in the city heal +3 more per turn (`cityHeal`), and plague in that city is contained (no damage).
+  - **Temple** (25 gold): +1 gold per turn and the city never revolts, even without a garrison.
+  - **Academy** (35 gold): units recruited in the city start with 3 XP, i.e. as Veterans (`spawnUnit` takes the XP, so the spawn event replays exactly).
+- Contained plague / revolt events carry `reason` ('infirmary' / 'temple' / 'garrison'); the banner and chronicle say what stopped them.
+- Each building has a small marker on the city (tower, sun, red cross, blue star). Help text updated; build buttons are generated from `rules.js` as before.
+- AI: after market and barracks, with plenty of gold to spare (cost + 2× reserve) it builds an academy in the capital, temples in other cities and infirmaries. Measured with the temporary AI-vs-AI script (new vs. previous AI, 100 seeds × both sides): 99 of 198 decided games – neutral.
+- No state structure change (buildings were already a list per city).
+- Tests: +1 logic (sight, income, revolt and plague contained, extra healing, academy recruits are Veterans incl. event replay, cities without an academy recruit Recruits).
+- Status: `npm run check` green (49 logic tests + smoke).
+
+## 2026-11-09 – Multi-turn move orders → v0.9.0
+- **Question for Vladimír (still open):** more AI opponents / scenarios with their own objectives change the victory rules – say "scenarios yes" or "more AI yes" if you want them. Please also merge `dev` into `main` (v0.9.0).
+- `planRoute()` in `game.js`: cheapest route to any known tile using only what the player knows (explored tiles, blocked by enemies the player can see, own units can be walked through) plus the number of turns by the same rules as `reachable()`.
+- `setOrder()` stores `unit.goto` and walks right away; `runOrders()` at the start of the player's turn walks each ordered unit to the farthest tile of the route reachable this turn (`followOrder`). The order ends when the unit arrives; it is cancelled when the way is blocked, when an enemy comes within 2 tiles in sight (before or after the step – the player decides), and by any manual move, attack, fortify or "✖ Cancel order".
+- UI: hovering a known tile out of reach shows a dashed route with a "N turns" badge, a click (on touch: tap twice) gives the order. A far own city is still selected on click (recruiting); foreign cities can be marched to. The selected unit's current order is drawn faintly, the panel shows "➜ Marching to a target · N turns". Stopped orders are announced in the banner under the header. Help text updated.
+- State: `state.version` 14 (optional `unit.goto`).
+- Tests: +3 logic (route along neighbouring tiles, the turn estimate matches the real march over several turns, arrival clears the order; interruption by an enemy, cancelling by a manual move and `cancelOrder`, no route through unexplored tiles; tap → goto with touch confirmation, own vs. foreign city). Smoke test hovers a 3-turn target (`artifacts/screenshot-order.png`), gives the order by click and checks the unit walks on after the AI turn.
+- Status: `npm run check` green (48 logic tests + smoke).
+- Run summary: phase 4 (own improvements) is done – fortify, end-turn reminder, city borders, move orders. Version 0.9.0.
+
+## 2026-11-09 – City borders and territory
+- `territoryMap()` / `territoryOwner()` in `game.js`, `TERRITORY` in `rules.js`: every non-water tile up to 2 tiles from a city belongs to the nearest city (ties → lower city id). It only depends on city positions; the owner follows the city.
+- Gameplay: a unit resting (not moved) in its own territory outside a city heals +2 instead of +1 (`endTurn`). Small, symmetric, gives borders a purpose and makes falling back home worthwhile; the AI's retreat logic benefits automatically.
+- Drawing (`drawBorders` in `render.js`): a light tint of the owner's colour over the realm and a dashed border on edges towards another owner or no territory; neutral cities get a pale dashed border without tint. Dashes so borders can't be mistaken for rivers (solid double lines). Hovering a tile tells whose territory it is and the healing rule. Help text updated.
+- No state change (computed from city positions).
+- Tests: +1 logic (radius, no water, nearest city, coverage on all map sizes, owner follows the city, healing in vs. outside territory).
+- Status: `npm run check` green (45 logic tests + smoke).
+
+## 2026-11-09 – End-turn reminder
+- `activeUnits(state, player)` in `game.js` (units that can still move or attack, fortified ones excluded); `nextActiveUnit` now uses it, so Tab and the reminder always agree.
+- The "End turn" button shows how many units can still act ("End turn · 3"). With idle units the first press (or Enter) only arms it – the button turns orange and reads "Really end?" for 4 s; a second press ends the turn. Shift+Enter ends right away. Fortify a unit (F) to stop being reminded about it.
+- Test hook: `window.__game.endTurn()` still ends immediately, `pressEndTurn()` behaves like the button.
+- Tests: +1 logic (active units with moves / possible attack / exhausted / fortified, other player's units). Smoke test checks the counter, that the first click only arms the button, and that the second click ends the turn.
+- Status: `npm run check` green (44 logic tests + smoke).
+
+## 2026-11-09 – Fortify
+- `fortify()` / `canFortify()` in `game.js`, `FORTIFY` in `rules.js`: a unit of the current player that hasn't moved or attacked this turn can dig in. It ends its turn and gets +25 % defense (`defenseValue`) until it moves or attacks; the bonus lasts across turns. Attacking drops the fortification *before* the fight, so it never helps the attacker's counter defense.
+- Tab (`nextActiveUnit`) skips fortified units, like sleeping units in other strategy games; clicking still selects them.
+- AI: a garrison with nothing to attack fortifies (`holdCity`). Measured with a temporary script (not in the repo), AI with fortify vs. AI without, 100 seeds × both sides: 103 of 199 decided games – neutral, kept for its flavour and so the player sees the AI holding cities.
+- UI: "⛨ Fortify" button in the unit panel and key F (then the next unit is selected), small shield next to fortified units, panel line "Fortified …", floater "⛨ fortified" when an AI fortify is visible, synthesized sound `fortify`. Fortifying in the fog is not animated or heard. Help text updated.
+- State: `state.version` 13 (optional `unit.fortified`), old saves migrate without change.
+- Tests: +2 logic (bonus value, ends the turn, persists, broken by moving and attacking, Tab skips, only current player, event replay, migration; AI garrison digs in). The replay snapshot now includes `fortified`. Smoke test fortifies via the button and the F key (`artifacts/screenshot-fortify.png`).
+- Status: `npm run check` green (43 logic tests + smoke).
+
 ## 2026-11-09 – Project translated to English (v0.8.0)
 - At Vladimír's request the whole project is now in English: in-game texts (UI, help, chronicle, unit/terrain/faction/building names, city names), code comments, test names and messages, and all docs (`CLAUDE.md`, `RULES.md`, `ROADMAP.md`, `LOG.md` incl. history, `README.md`). From now on commits, log entries and reports are in English too.
 - Game renamed to **Hex Realm**. Unit symbols on the map are now English initials (W/A/H/S/C). Numbers are formatted with `en-US` (decimal dot).
