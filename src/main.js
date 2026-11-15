@@ -6,6 +6,7 @@ import {
   rankOf, rankMult, buildingCost, unitMove, factionOf, riverDefense, flankers, zocTiles, threatTiles, exportGame, importGame, saveFileName, parseSeed, restartOptions,
   upgradeOptions, upgradeUnit, canDisband, disbandRefund, disbandUnit, chargeReady,
   updateSightings, lastSeen, lastSeenAt, lastSeenText, armyOverview, ARMY_STATUS, ruinBelieved,
+  canExplore, setExplore,
 } from './game.js';
 import { createAnimator } from './anim.js';
 import { decideTap } from './input.js';
@@ -187,6 +188,13 @@ function updateHud() {
       const r = planRoute(state, u, u.goto.q, u.goto.r);
       html += `<p class="order">➜ Marching to a target${r ? ` · ${r.turns} turn${r.turns === 1 ? '' : 's'}` : ''}</p>`;
       if (!busy()) html += '<button data-cancel-order class="secondary wide-btn">✖ Cancel order</button>';
+    }
+    if (u.explore && u.owner === 0) {
+      html += '<p class="order">🧭 Exploring the fog – walks on by itself each turn</p>';
+      if (!busy()) html += '<button data-cancel-order class="secondary wide-btn">✖ Stop exploring</button>';
+    }
+    if (u.owner === 0 && !busy() && canExplore(state, u)) {
+      html += '<button data-explore class="secondary wide-btn" title="Walk into the fog by itself each turn until nothing is left or an enemy shows up (X)">🧭 Explore</button>';
     }
     if (u.fortified) html += `<p class="fortified">⛨ Fortified: +${Math.round(FORTIFY.defBonus * 100)} % defense until it moves or attacks</p>`;
     if (u.owner === 0 && !busy() && canFortify(state, u)) {
@@ -491,7 +499,7 @@ function showTooltip(ev, hex) {
 
 function unitTipText(u) {
   const s = unitSummary(state, u);
-  const tags = [s.rank !== RANKS[0].name ? s.rank : '', s.fortified ? 'fortified' : '', s.marching ? 'marching' : ''].filter(Boolean);
+  const tags = [s.rank !== RANKS[0].name ? s.rank : '', s.fortified ? 'fortified' : '', s.marching ? 'marching' : '', s.exploring ? 'exploring' : ''].filter(Boolean);
   return `${PLAYERS[s.owner].name}: ${s.name}${tags.length ? ` (${tags.join(', ')})` : ''} · HP ${s.hp}/${s.maxHp}\n`
     + `Attack ${fmt(s.attack)} · Defense ${fmt(s.defense)}${s.notes.length ? ` (${s.notes.join(', ')})` : ''} · Range ${s.range} · Move ${s.move}`;
 }
@@ -578,7 +586,7 @@ function doEndTurn(force = false) {
     save();
     if (walked.length) await anim.play(beforeOrders, walked);
     aiRunning = false;
-    const stopped = orders.filter((o) => o.result === 'interrupted' || o.result === 'blocked')
+    const stopped = orders.filter((o) => o.result === 'interrupted' || o.result === 'blocked' || o.result === 'done')
       .map((o) => orderText(getUnit(state, o.unitId), o.result));
     showNotice(happened, stopped, report);
     draw();
@@ -588,6 +596,7 @@ function doEndTurn(force = false) {
 // Why a move order stopped, for the banner.
 function orderText(unit, result) {
   const name = unit ? UNIT_TYPES[unit.type].name : 'A unit';
+  if (result === 'done') return `${name} has explored all the land it can reach.`;
   return result === 'interrupted' ? `${name} stopped its march: enemy in sight.` : `${name} can't get through – order cancelled.`;
 }
 
@@ -786,6 +795,7 @@ $('army').addEventListener('click', (ev) => {
 $('info').addEventListener('click', (ev) => {
   if (ev.target.closest('button[data-undo]')) { undoMove(); return; }
   if (ev.target.closest('button[data-fortify]')) { fortifySelected(); return; }
+  if (ev.target.closest('button[data-explore]')) { exploreSelected(); return; }
   if (ev.target.closest('button[data-disband]')) { disbandSelected(); return; }
   const uBtn = ev.target.closest('button[data-upgrade]');
   if (uBtn) { upgradeSelected(uBtn.dataset.upgrade); return; }
@@ -816,6 +826,7 @@ window.addEventListener('keydown', (ev) => {
   else if (act.type === 'nextUnit') selectNextUnit();
   else if (act.type === 'undo') undoMove();
   else if (act.type === 'fortify') fortifySelected();
+  else if (act.type === 'explore') exploreSelected();
   else if (act.type === 'disband') disbandSelected();
   else if (act.type === 'recruit') recruitSelected(act.unitType);
   else if (act.type === 'help') $('keys-dialog').showModal();
@@ -868,6 +879,18 @@ function fortifySelected() {
   afterAction(null); // no animation needed – the shield appears right away
   sound.play('fortify');
   selectNextUnit();
+}
+
+// Sends the selected unit exploring (X / button in the panel); it walks right away, animated.
+function exploreSelected() {
+  if (busy() || state.winner !== null) return;
+  const u = selectedUnit();
+  if (!u || u.owner !== 0 || !canExplore(state, u)) return;
+  const before = cloneState(state);
+  const result = setExplore(state, u.id);
+  undoStack = [];
+  if (result === 'interrupted' || result === 'done') showNotice([], [orderText(getUnit(state, u.id), result)]);
+  afterAction(before);
 }
 
 // Retrains the selected unit into another type (button in the panel); it stays selected.

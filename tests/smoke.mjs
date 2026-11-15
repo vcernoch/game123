@@ -229,6 +229,33 @@ try {
   const walked = await page.evaluate((id) => { const u = window.__game.getState().units.find((x) => x.id === id); return u && { q: u.q, r: u.r, goto: u.goto }; }, order.id);
   if (walked && walked.q === afterOrder.q && walked.r === afterOrder.r && walked.goto) throw new Error('the unit did not walk on at the start of the turn');
 
+  // auto-explore: the panel button (with fog) sends the selected unit into the fog, X sends the next one
+  await page.evaluate(() => window.__game.newGame(31, { happenings: false }));
+  await page.evaluate(() => window.__game.nextUnit());
+  const exp0 = await page.evaluate(() => {
+    const st = window.__game.getState();
+    const u = st.units.find((x) => x.id === window.__game.selectedId());
+    return { id: u.id, q: u.q, r: u.r, known: st.explored[0].length };
+  });
+  await page.click('#info button[data-explore]');
+  await page.waitForFunction(() => !window.__game.isBusy(), null, { timeout: 5000 });
+  const exp1 = await page.evaluate((id) => {
+    const st = window.__game.getState();
+    const u = st.units.find((x) => x.id === id);
+    return { explore: !!u.explore, q: u.q, r: u.r, known: st.explored[0].length, panel: document.getElementById('info').textContent };
+  }, exp0.id);
+  if (!exp1.explore || (exp1.q === exp0.q && exp1.r === exp0.r) || exp1.known <= exp0.known) throw new Error(`explore did not send the unit: ${JSON.stringify(exp1)}`);
+  if (!exp1.panel.includes('Exploring the fog') || !exp1.panel.includes('Stop exploring')) throw new Error('the panel does not show the explore order');
+  await page.screenshot({ path: 'artifacts/screenshot-explore.png' });
+  await page.evaluate(() => window.__game.nextUnit());
+  const exp2id = await page.evaluate(() => window.__game.selectedId());
+  if (exp2id !== null && exp2id !== exp0.id) {
+    await page.keyboard.press('x');
+    await page.waitForFunction(() => !window.__game.isBusy(), null, { timeout: 5000 });
+    const ok = await page.evaluate((id) => !!window.__game.getState().units.find((u) => u.id === id).explore, exp2id);
+    if (!ok) throw new Error('the X key did not send the unit exploring');
+  }
+
   // end-turn reminder: with idle units the first press only asks, the second ends the turn
   await page.evaluate(() => window.__game.newGame(4242));
   const label0 = await page.textContent('#end-turn');

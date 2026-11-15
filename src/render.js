@@ -694,6 +694,25 @@ function drawShield(ctx, x, y) {
   ctx.stroke();
 }
 
+// Small compass (explore order): a light disc with a red/white needle.
+function drawCompass(ctx, x, y) {
+  ctx.beginPath();
+  ctx.arc(x, y, 5.5, 0, Math.PI * 2);
+  ctx.fillStyle = '#f3ecd2';
+  ctx.fill();
+  ctx.lineWidth = 1.2;
+  ctx.strokeStyle = 'rgba(0,0,0,0.75)';
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(x, y - 4.5); ctx.lineTo(x + 2, y); ctx.lineTo(x - 2, y); ctx.closePath();
+  ctx.fillStyle = '#d23c3c';
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(x, y + 4.5); ctx.lineTo(x + 2, y); ctx.lineTo(x - 2, y); ctx.closePath();
+  ctx.fillStyle = '#555';
+  ctx.fill();
+}
+
 function drawUnit(ctx, u, x, y, selected, active) {
   const t = UNIT_TYPES[u.type];
   const p = PLAYERS[u.owner];
@@ -723,6 +742,8 @@ function drawUnit(ctx, u, x, y, selected, active) {
   }
   // fortified: a small shield at the bottom right
   if (u.fortified) drawShield(ctx, x + 11, y + 10);
+  // exploring: a small compass at the bottom left
+  if (u.explore) drawCompass(ctx, x - 11, y + 10);
   // HP bar
   const frac = u.hp / t.hp;
   ctx.fillStyle = 'rgba(0,0,0,0.6)';

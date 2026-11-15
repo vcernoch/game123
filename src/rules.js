@@ -171,6 +171,11 @@ export const VISION = { city: 2, hillsBonus: 1 };
 // last seen; the marker is forgotten after `maxAge` turns or when the tile is seen again.
 export const SIGHTINGS = { maxAge: 3 };
 
+// Auto-explore: a unit walks on its own each turn towards the known tile from which it would see the
+// most unexplored land (score = new tiles / (1 + cost in turns)). A ruin the player believes in counts
+// as `ruinBonus` extra tiles. The order stops when an enemy comes within `enemyRadius` or nothing is left.
+export const EXPLORE = { ruinBonus: 6, enemyRadius: 2, legsPerTurn: 3 };
+
 export const NEUTRAL_COLOR = '#e8e2d0';
 
 export const ECONOMY = {

@@ -4,7 +4,7 @@ import { generateMap, hasRiverEdge } from './map.js';
 import {
   TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY, VISION, DIFFICULTY, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, ROAD_COST, RIVER, FLANK, HIGH_GROUND, CHARGE,
   FACTIONS, NO_FACTION, MAP_SIZES, HAPPENINGS, FORTIFY, TERRITORY, RESOURCES,
-  UPGRADES, UPGRADE, DISBAND, SIGHTINGS, RUINS,
+  UPGRADES, UPGRADE, DISBAND, SIGHTINGS, RUINS, EXPLORE,
 } from './rules.js';
 import { createRng } from './rng.js';
 
@@ -128,7 +128,7 @@ function countStat(state, name, player) {
   state.stats[name][player]++;
 }
 
-export const STATE_VERSION = 18;
+export const STATE_VERSION = 19;
 
 // Converts a saved state of an older version to the current one; returns null for an unknown format.
 export function migrateState(s) {
@@ -204,6 +204,10 @@ export function migrateState(s) {
   if (s.version === 17) {
     // ancient ruins arrived in version 18 – old maps simply have none
     s.version = 18;
+  }
+  if (s.version === 18) {
+    // auto-explore arrived in version 19 – a missing `explore` means no explore order
+    s.version = 19;
   }
   return s.version === STATE_VERSION ? s : null;
 }
@@ -754,11 +758,11 @@ export function setOrder(state, unitId, q, r) {
 
 export function cancelOrder(state, unitId) {
   const unit = getUnit(state, unitId);
-  if (unit) delete unit.goto;
+  if (unit) { delete unit.goto; delete unit.explore; }
 }
 
 // Visible enemy units within `radius` of the unit (used to interrupt move orders).
-function enemyInSight(state, unit, radius = 2) {
+function enemyInSight(state, unit, radius = EXPLORE.enemyRadius) {
   const visible = visibleTiles(state, unit.owner);
   return state.units.some((u) => u.owner !== unit.owner && distance(u, unit) <= radius && visible.has(key(u.q, u.r)));
 }
@@ -792,16 +796,143 @@ export function followOrder(state, unit) {
 // before moving. Returns [{ unitId, result }].
 export function runOrders(state, player) {
   const out = [];
-  for (const unit of state.units.filter((u) => u.owner === player && u.goto)) {
+  for (const unit of state.units.filter((u) => u.owner === player && (u.goto || u.explore))) {
     if (state.winner !== null) break;
     if (enemyInSight(state, unit)) {
       delete unit.goto;
+      delete unit.explore;
       out.push({ unitId: unit.id, result: 'interrupted' });
       continue;
     }
-    out.push({ unitId: unit.id, result: followOrder(state, unit) });
+    out.push({ unitId: unit.id, result: unit.explore ? followExplore(state, unit) : followOrder(state, unit) });
   }
   return out;
+}
+
+// ---------- auto-explore ----------
+// unit.explore = true: at the start of each turn (and right when given) the unit walks towards the best
+// tile to look from. Only what the player knows is used (explored tiles, visible enemies), foreign
+// cities are never entered, so exploring can't capture anything or bump into a known enemy.
+
+// Unexplored tiles the unit would see standing on (q, r).
+function unexploredInSight(state, unit, q, r, explored) {
+  const tile = tileAt(state, q, r);
+  const radius = UNIT_TYPES[unit.type].sight + (tile.terrain === 'hills' ? VISION.hillsBonus : 0);
+  let n = 0;
+  for (let dq = -radius; dq <= radius; dq++) {
+    for (let dr = Math.max(-radius, -dq - radius); dr <= Math.min(radius, -dq + radius); dr++) {
+      const k = key(q + dq, r + dr);
+      if (state.tiles[k] && !explored.has(k)) n++;
+    }
+  }
+  return n;
+}
+
+// The best tile to explore from: { q, r, gain, cost, path } or null when there is nothing left the unit
+// can reach. gain = unexplored tiles in sight from there (+ EXPLORE.ruinBonus for a believed ruin),
+// cost = movement points; the score gain / (1 + cost / move) prefers near and rich tiles. Deterministic.
+export function exploreTarget(state, unit) {
+  if (!state.fog || state.winner !== null) return null;
+  const explored = exploredTiles(state, unit.owner);
+  const visible = visibleTiles(state, unit.owner);
+  const move = Math.max(1, unitMove(state, unit));
+  const start = key(unit.q, unit.r);
+  const best = new Map([[start, 0]]);
+  const parent = new Map();
+  const frontier = [{ q: unit.q, r: unit.r, cost: 0 }];
+  const done = new Set();
+  let pick = null;
+  while (frontier.length) {
+    frontier.sort((a, b) => a.cost - b.cost);
+    const cur = frontier.shift();
+    const ck = key(cur.q, cur.r);
+    if (done.has(ck)) continue;
+    done.add(ck);
+    const occupied = unitAt(state, cur.q, cur.r);
+    if (ck !== start && !occupied) {
+      let gain = unexploredInSight(state, unit, cur.q, cur.r, explored);
+      if (ruinBelieved(state, cur.q, cur.r, unit.owner)) gain += EXPLORE.ruinBonus;
+      if (gain > 0) {
+        const score = gain / (1 + cur.cost / move);
+        if (!pick || score > pick.score + 1e-9) pick = { q: cur.q, r: cur.r, gain, cost: cur.cost, score };
+      }
+    }
+    for (const n of neighbors(cur.q, cur.r)) {
+      const k = key(n.q, n.r);
+      if (!explored.has(k) || !isPassable(state, n.q, n.r)) continue;
+      const city = cityAt(state, n.q, n.r);
+      if (city && city.owner !== unit.owner) continue;
+      const other = unitAt(state, n.q, n.r);
+      if (other && other.owner !== unit.owner && visible.has(k)) continue;
+      const cost = cur.cost + stepCost(state, cur, n, unit);
+      if (best.has(k) && best.get(k) <= cost) continue;
+      best.set(k, cost);
+      parent.set(k, ck);
+      frontier.push({ q: n.q, r: n.r, cost });
+    }
+  }
+  if (!pick) return null;
+  const path = [];
+  for (let k = key(pick.q, pick.r); k !== undefined; k = parent.get(k)) {
+    const [pq, pr] = k.split(',').map(Number);
+    path.unshift({ q: pq, r: pr });
+  }
+  return { q: pick.q, r: pick.r, gain: pick.gain, cost: pick.cost, path };
+}
+
+// Can the unit be sent exploring now? Own unit of the current player, with moves, and something to find.
+export function canExplore(state, unit) {
+  return !!unit && unit.owner === state.current && state.winner === null && state.fog
+    && !unit.explore && unit.movesLeft > 0 && !!exploreTarget(state, unit);
+}
+
+// Sends the unit exploring and starts walking right away. Returns the result of followExplore or null.
+export function setExplore(state, unitId) {
+  const unit = getUnit(state, unitId);
+  if (!canExplore(state, unit)) return null;
+  delete unit.fortified;
+  delete unit.goto;
+  unit.explore = true;
+  return followExplore(state, unit);
+}
+
+// One turn of exploring: up to EXPLORE.legsPerTurn legs, each walking as far as it can towards the
+// current best tile (re-picked after every leg, because the view changes).
+// Result: 'moved' | 'done' (nothing left to explore – order ends) | 'interrupted' (enemy in sight –
+// order ends) | 'idle' (no moves left).
+export function followExplore(state, unit) {
+  if (!unit.explore) return 'idle';
+  if (unit.movesLeft <= 0) return 'idle';
+  let moved = false;
+  for (let leg = 0; leg < EXPLORE.legsPerTurn && unit.movesLeft > 0; leg++) {
+    const target = exploreTarget(state, unit);
+    if (!target) { delete unit.explore; return 'done'; }
+    const reach = reachable(state, unit);
+    let stop = null;
+    for (let i = target.path.length - 1; i > 0; i--) {
+      const p = target.path[i];
+      if (reach.has(key(p.q, p.r))) { stop = p; break; }
+    }
+    if (!stop) {
+      // no tile of the route can be reached this turn (e.g. an own unit stands on the first step and
+      // the next one is too expensive): get as close to the target as possible instead
+      let bestD = distance(unit, target);
+      for (const [k, cost] of reach) {
+        const [q, r] = k.split(',').map(Number);
+        const city = cityAt(state, q, r);
+        if (city && city.owner !== unit.owner) continue;
+        const d = distance({ q, r }, target);
+        if (d < bestD || (stop && d === bestD && cost < stop.cost)) { bestD = d; stop = { q, r, cost }; }
+      }
+    }
+    if (!stop) break; // the way is blocked this turn – try again next turn
+    moveUnit(state, unit.id, stop.q, stop.r);
+    unit.explore = true; // moveUnit cancels orders
+    moved = true;
+    if (enemyInSight(state, unit)) { delete unit.explore; return 'interrupted'; }
+  }
+  if (!exploreTarget(state, unit)) { delete unit.explore; return 'done'; }
+  return moved ? 'moved' : 'idle';
 }
 
 // Own units that can still move or attack, sorted by id. Fortified units are left alone (like sleeping
@@ -833,7 +964,7 @@ export const ARMY_STATUS = {
 export function unitStatus(state, unit) {
   if (unit.fortified) return 'fortified';
   if (unit.movesLeft > 0 || attackTargets(state, unit).length > 0) return 'ready'; // same rule as activeUnits / Tab
-  return unit.goto ? 'marching' : 'done';
+  return unit.goto || unit.explore ? 'marching' : 'done';
 }
 
 // Where a unit stands, in words for the army list: "in Oakford" or "2 tiles from Oakford". Only cities
@@ -899,6 +1030,7 @@ export function fortify(state, unitId) {
   if (!canFortify(state, unit)) return false;
   unit.fortified = true;
   delete unit.goto;
+  delete unit.explore;
   unit.movesLeft = 0;
   unit.hasAttacked = true;
   emit(state, { type: 'fortify', unitId: unit.id });
@@ -966,6 +1098,7 @@ export function unitSummary(state, unit) {
     xp: unit.xp || 0,
     fortified: !!unit.fortified,
     marching: !!unit.goto,
+    exploring: !!unit.explore,
     notes,
   };
 }
@@ -1048,6 +1181,7 @@ export function moveUnit(state, unitId, q, r) {
   unit.moved = true;
   delete unit.fortified;
   delete unit.goto; // a manual move cancels a move order (followOrder puts it back)
+  delete unit.explore; // … and an explore order (followExplore puts it back)
   const city = cityAt(state, q, r);
   if (city && city.owner !== unit.owner) {
     const prev = city.owner;

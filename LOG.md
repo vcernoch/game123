@@ -2,6 +2,17 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-15 – Auto-explore (v0.24.0)
+- **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.9.0–v0.24.0) is far ahead of `main` (v0.8.0) – please merge it.
+- Phase 11 (exploration, own improvement), new task. Sending a scout around the fog took a click per turn; now it can be sent once.
+- `EXPLORE` in `rules.js`. In `game.js`: `exploreTarget` (Dijkstra over explored tiles only, avoiding foreign cities and visible enemies; score = unexplored tiles in sight from the tile, + 6 for a believed ruin, divided by 1 + cost in turns; deterministic), `canExplore`, `setExplore`, `followExplore` (up to 3 legs a turn, re-picking the target after each leg; if no tile of the route is reachable this turn – e.g. an own unit on the first step – it gets as close as it can). `runOrders` walks exploring units at the start of the turn like move orders; an enemy within 2 tiles ends the order ('interrupted'), so does "nothing left" ('done'). A manual move, fortify and cancel end it; `unitStatus` counts an exploring unit as marching.
+- Simulation (warrior / scout, 6 seeds × 3 sizes, no enemies): always ends with 99–100 % of the map explored (scout on Medium in 11–17 turns).
+- UI: "🧭 Explore" button in the unit panel (only with fog and something left to find), key X, "Exploring the fog" line with "✖ Stop exploring", small compass badge on the unit, "exploring" in the unit tooltip, banner when a unit stops or has nothing left. Help and shortcut overlay updated.
+- State structure: `state.version` 19 (optional `unit.explore`), trivial migration.
+- Test adjusted (not weakened): the shortcut test used `x` as an example of an unbound key; it now uses `q`, and `x` joined the "claimed by exactly one entry" check.
+- Tests: +2 logic (route over explored tiles only, walking turn by turn on 2 seeds until 'done' with no foreign city ever entered and explored land never shrinking; enemy interrupt, cancel by move/cancel/fortify, not on the AI's turn, a ruin attracts with the bonus and gets looted, nothing without fog, key X, migration). Smoke test: panel button sends the unit (moved, saw new land, panel text), X sends the next one (`artifacts/screenshot-explore.png`).
+- Status: `npm run check` green (83 logic tests + smoke).
+
 ## 2026-11-14 – Ancient ruins (v0.23.0)
 - **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.9.0–v0.23.0) is far ahead of `main` (v0.8.0) – please merge it.
 - Phase 10 was done, so I opened phase 11 (exploration, own improvement). Exploring the fog had no reward of its own and scouts were only eyes; now there is something to find.

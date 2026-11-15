@@ -11,6 +11,7 @@ import {
   upgradeOptions, upgradeUnit, upgradeCost, canDisband, disbandRefund, disbandUnit,
   turnReport, reportText, reportIsBad, updateSightings, lastSeen, lastSeenAt, lastSeenText,
   armyOverview, unitStatus, unitWhere, ARMY_STATUS, ruinBelieved, ruinKind, exploreRuin,
+  exploreTarget, canExplore, setExplore, followExplore,
 } from '../src/game.js';
 import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
@@ -27,7 +28,7 @@ import { pathExists, generateMap, dirTo } from '../src/map.js';
 import { distance, key, neighbors } from '../src/hex.js';
 import {
   RESOURCES, FORTIFY, TERRITORY, ECONOMY, UNIT_TYPES, TERRAIN, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FLANK, HIGH_GROUND, CHARGE,
-  UPGRADES, UPGRADE, DISBAND, RUINS,
+  UPGRADES, UPGRADE, DISBAND, RUINS, EXPLORE,
   SIGHTINGS,
 } from '../src/rules.js';
 
@@ -1332,10 +1333,10 @@ test('keyboard shortcuts: one table for keys and the overlay', () => {
     assert.equal(recruitKey(t), String(i + 1));
   });
   assert.equal(keyAction(String(types.length + 1)), null);
-  assert.equal(keyAction('x'), null);
+  assert.equal(keyAction('q'), null);
   // every entry has overlay text, and no key is claimed by two entries
   for (const sc of SHORTCUTS) assert.ok(sc.keys && sc.text);
-  for (const [k, shift] of [['Tab', false], ['Enter', false], ['Enter', true], ['f', false], ['1', false], ['?', true]]) {
+  for (const [k, shift] of [['Tab', false], ['Enter', false], ['Enter', true], ['f', false], ['x', false], ['1', false], ['?', true]]) {
     assert.equal(SHORTCUTS.filter((sc) => sc.match(k, shift)).length, 1, `${k}${shift ? '+shift' : ''}`);
   }
 });
@@ -2453,4 +2454,104 @@ test('ancient ruins: AI armies loot ruins over a real game', () => {
     for (const t of Object.values(s.tiles)) if (t.ruinGone) assert.ok(!t.ruin && t.ruinGone.length >= 1);
   }
   assert.ok(looted >= 3, `only ${looted} ruins looted`);
+});
+
+test('auto-explore: a unit walks into the fog turn by turn until nothing reachable is left', () => {
+  for (const seed of [31, 7]) {
+    const s = createGame({ seed, size: 'medium', happenings: false });
+    s.units = s.units.filter((u) => u.owner === 0);
+    const u = s.units.find((x) => x.type === 'warrior');
+    const t = exploreTarget(s, u);
+    assert.ok(t && t.gain > 0, 'something to explore at the start');
+    const known = exploredTiles(s, 0);
+    for (let i = 1; i < t.path.length; i++) assert.equal(distance(t.path[i - 1], t.path[i]), 1);
+    assert.ok(t.path.every((p) => known.has(key(p.q, p.r))), 'the route uses only explored tiles');
+    assert.ok(canExplore(s, u));
+    const foreign = new Set(s.cities.filter((c) => c.owner !== 0).map((c) => key(c.q, c.r)));
+    let size = known.size;
+    const from = { q: u.q, r: u.r };
+    assert.equal(setExplore(s, u.id), 'moved');
+    assert.ok(u.explore && (u.q !== from.q || u.r !== from.r), 'it walked right away');
+    assert.equal(unitStatus(s, u), u.movesLeft > 0 ? 'ready' : 'marching');
+    assert.ok(unitSummary(s, u).exploring);
+    assert.ok(!canExplore(s, u), 'already exploring');
+    let result = 'moved';
+    let turns = 1;
+    while (result !== 'done' && turns < 80) {
+      endTurn(s); endTurn(s); // the AI has no units
+      const out = runOrders(s, 0);
+      assert.equal(out.length, 1);
+      result = out[0].result;
+      assert.notEqual(result, 'interrupted');
+      assert.ok(!foreign.has(key(u.q, u.r)), 'never enters a foreign city');
+      const now = exploredTiles(s, 0).size;
+      assert.ok(now >= size);
+      size = now;
+      turns++;
+    }
+    assert.equal(result, 'done', `seed ${seed}: exploring ended`);
+    assert.ok(!u.explore && exploreTarget(s, u) === null && !canExplore(s, u));
+    assert.ok(exploredTiles(s, 0).size > Object.keys(s.tiles).length * 0.5, 'most of the map got explored');
+    assert.ok(JSON.parse(JSON.stringify(s)));
+  }
+});
+
+test('auto-explore: stops for enemies, cancelled by manual actions, ruins attract, no fog = nothing to do', () => {
+  const base = createGame({ seed: 31, happenings: false });
+  base.units = base.units.filter((x) => x.owner === 0);
+  // an enemy in sight at the start of the turn stops the order without moving
+  let s = cloneState(base);
+  let u = s.units.find((x) => x.type === 'warrior');
+  setExplore(s, u.id);
+  assert.ok(u.explore);
+  endTurn(s); endTurn(s);
+  const spot = neighbors(u.q, u.r).find((n) => isPassable(s, n.q, n.r) && !unitAt(s, n.q, n.r));
+  s.units.push({ id: 700, type: 'warrior', owner: 1, q: spot.q, r: spot.r, hp: 10, movesLeft: 0, hasAttacked: true, xp: 0 });
+  const at = { q: u.q, r: u.r };
+  assert.deepEqual(runOrders(s, 0), [{ unitId: u.id, result: 'interrupted' }]);
+  assert.ok(!u.explore && u.q === at.q && u.r === at.r);
+  // a manual move, fortify and cancelOrder end it
+  s = cloneState(base);
+  u = s.units.find((x) => x.type === 'warrior');
+  setExplore(s, u.id);
+  endTurn(s); endTurn(s);
+  const [k] = reachable(s, u).keys();
+  const [mq, mr] = k.split(',').map(Number);
+  moveUnit(s, u.id, mq, mr);
+  assert.ok(!u.explore);
+  endTurn(s); endTurn(s);
+  setExplore(s, u.id);
+  cancelOrder(s, u.id);
+  assert.ok(!u.explore);
+  const w = s.units.find((x) => x.id !== u.id && canFortify(s, x));
+  if (w) { w.explore = true; fortify(s, w.id); assert.ok(!w.explore); }
+  // only the AI's turn: no explore for a unit of the other player
+  s = cloneState(base);
+  u = s.units.find((x) => x.type === 'warrior');
+  endTurn(s);
+  assert.ok(!canExplore(s, u) && setExplore(s, u.id) === null);
+  // a believed ruin counts as RUINS bonus even when all land is known
+  s = cloneState(base);
+  u = s.units.find((x) => x.type === 'warrior');
+  for (const t of Object.values(s.tiles)) delete t.ruin;
+  s.explored[0] = Object.keys(s.tiles).sort();
+  assert.equal(exploreTarget(s, u), null, 'nothing left without ruins');
+  const ruinAt = [...reachable(s, u).keys()].map((x) => x.split(',').map(Number))
+    .find(([q, r]) => !s.cities.some((c) => c.q === q && c.r === r));
+  s.tiles[key(ruinAt[0], ruinAt[1])].ruin = true;
+  const rt = exploreTarget(s, u);
+  assert.ok(rt && rt.q === ruinAt[0] && rt.r === ruinAt[1] && rt.gain === EXPLORE.ruinBonus);
+  assert.equal(setExplore(s, u.id), 'done', 'it loots the ruin and has nothing left');
+  assert.ok(!s.tiles[key(ruinAt[0], ruinAt[1])].ruin);
+  // without fog there is nothing to explore
+  const nf = createGame({ seed: 31, fog: false });
+  const nu = nf.units.find((x) => x.owner === 0);
+  assert.equal(exploreTarget(nf, nu), null);
+  assert.ok(!canExplore(nf, nu));
+  // key X, migration
+  assert.equal(keyAction('x').type, 'explore');
+  assert.equal(keyAction('X').type, 'explore');
+  const old = createGame({ seed: 2 });
+  old.version = 18;
+  assert.equal(migrateState(old).version, STATE_VERSION);
 });

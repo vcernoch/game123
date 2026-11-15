@@ -77,6 +77,7 @@ Check off `[x]` when done. Add new ideas to the end of the relevant phase or to 
 
 ## Phase 11 – exploration (own improvements)
 - [x] Ancient ruins: pairs of ruins placed fairly on the map; the first unit to stop on one finds treasure, experience, an old map or recruits; a ruin looted in the fog still shows until seen; the AI detours for known ruins
+- [x] Auto-explore (🧭 / X): a unit walks into the fog on its own each turn towards where it would see the most unexplored land (and known ruins), never enters foreign cities, stops when an enemy shows up or nothing is left
 
 ## Ideas (unordered)
 - Diplomacy with multiple AIs
