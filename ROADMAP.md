@@ -83,5 +83,8 @@ Check off `[x]` when done. Add new ideas to the end of the relevant phase or to 
 - [x] Pillage (🔥 / P): a unit standing on an enemy resource plunders it for gold; the resource gives its owner nothing for their next 4 turns; the AI raids nearby player resources too
 - [x] Repair (🔧 / R): an own unit standing on a pillaged resource in own territory rebuilds it for 3 gold (ends its turn), the resource works again at once; the AI walks back to repair its own
 
+## Phase 13 – logistics (own improvements)
+- [x] Rally points (🚩 / G): an own city can have a flag on a known tile; every unit recruited there gets a move order to it (or the nearest free tile next to it) and sets off at the start of the next turn; a captured city loses its flag
+
 ## Ideas (unordered)
 - Diplomacy with multiple AIs

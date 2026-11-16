@@ -128,7 +128,7 @@ function countStat(state, name, player) {
   state.stats[name][player]++;
 }
 
-export const STATE_VERSION = 20;
+export const STATE_VERSION = 21;
 
 // Converts a saved state of an older version to the current one; returns null for an unknown format.
 export function migrateState(s) {
@@ -212,6 +212,10 @@ export function migrateState(s) {
   if (s.version === 19) {
     // pillage arrived in version 20 – a missing `tile.pillagedUntil` means the resource works
     s.version = 20;
+  }
+  if (s.version === 20) {
+    // rally points arrived in version 21 – a missing `city.rally` means none
+    s.version = 21;
   }
   return s.version === STATE_VERSION ? s : null;
 }
@@ -390,7 +394,7 @@ export function applyEvent(state, ev) {
     state.units.push({ ...ev.unit });
   } else if (ev.type === 'capture') {
     const c = state.cities.find((x) => x.id === ev.cityId);
-    if (c) c.owner = ev.owner;
+    if (c) { c.owner = ev.owner; delete c.rally; }
   } else if (ev.type === 'happening') {
     if (ev.gold) state.gold[ev.player] += ev.gold;
     for (const h of ev.hits || []) {
@@ -1165,9 +1169,11 @@ function hpFactor(unit) {
 
 // ---------- actions (return true/false on success) ----------
 
-export function spawnUnit(state, type, owner, q, r, xp = 0) {
+// `extra` is merged into the new unit before the spawn event (e.g. a move order from a rally point).
+export function spawnUnit(state, type, owner, q, r, xp = 0, extra = {}) {
   const t = UNIT_TYPES[type];
   const unit = {
+    ...extra,
     id: state.nextUnitId++,
     type,
     owner,
@@ -1202,6 +1208,7 @@ export function moveUnit(state, unitId, q, r) {
   if (city && city.owner !== unit.owner) {
     const prev = city.owner;
     city.owner = unit.owner;
+    delete city.rally; // the old owner's rally point means nothing to the new one
     emit(state, { type: 'capture', cityId: city.id, owner: unit.owner });
     countStat(state, 'captures', unit.owner);
     const loot = factionOf(state, unit.owner).captureGold || 0;
@@ -1273,8 +1280,99 @@ export function buyUnit(state, cityId, type) {
   if (state.gold[state.current] < cost || unitAt(state, city.q, city.r)) return false;
   state.gold[state.current] -= cost;
   const xp = hasBuilding(city, 'academy') ? BUILDING_EFFECTS.academyXp : 0; // academy: starts as a Veteran
-  spawnUnit(state, type, state.current, city.q, city.r, xp);
+  // rally point: the recruit gets a move order there and sets off at the start of the next turn
+  const goal = rallyTarget(state, city);
+  const extra = goal ? { goto: goal } : {};
+  spawnUnit(state, type, state.current, city.q, city.r, xp, extra);
   addLog(state, `${PLAYERS[state.current].name}: recruited ${t.name} (${city.name})`, { by: state.current, at: [city] });
+  return true;
+}
+
+// ---------- rally points ----------
+// city.rally = { q, r }: units recruited in the city get a move order to that tile (see buyUnit),
+// so a stream of recruits walks to the front without a click each. Player-only comfort – the AI moves
+// its own recruits. A captured city loses its rally point.
+
+// Cheapest path from the city to (q, r) over tiles its owner has explored and that are passable;
+// units are ignored (they move). Returns [{q,r}…] including both ends, or null.
+export function rallyPath(state, city, q, r) {
+  if (!city || city.owner === null) return null;
+  const explored = exploredTiles(state, city.owner);
+  const target = key(q, r);
+  if (!explored.has(target) || !isPassable(state, q, r) || (city.q === q && city.r === r)) return null;
+  const best = new Map([[key(city.q, city.r), 0]]);
+  const parent = new Map();
+  const frontier = [{ q: city.q, r: city.r, cost: 0 }];
+  while (frontier.length) {
+    frontier.sort((a, b) => a.cost - b.cost);
+    const cur = frontier.shift();
+    if (key(cur.q, cur.r) === target) break;
+    for (const n of neighbors(cur.q, cur.r)) {
+      const k = key(n.q, n.r);
+      if (!explored.has(k) || !isPassable(state, n.q, n.r)) continue;
+      const cost = cur.cost + stepCost(state, cur, n);
+      if (best.has(k) && best.get(k) <= cost) continue;
+      best.set(k, cost);
+      parent.set(k, key(cur.q, cur.r));
+      frontier.push({ q: n.q, r: n.r, cost });
+    }
+  }
+  if (!best.has(target)) return null;
+  const path = [];
+  for (let k = target; k !== undefined; k = parent.get(k)) {
+    const [pq, pr] = k.split(',').map(Number);
+    path.unshift({ q: pq, r: pr });
+  }
+  return path;
+}
+
+// Can the current player set the rally point of this city to (q, r)? An own city, an explored
+// passable tile other than the city itself, reachable over known land.
+export function canRally(state, city, q, r) {
+  return !!city && city.owner === state.current && state.winner === null && !!rallyPath(state, city, q, r);
+}
+
+// Where a recruit of the city should march: the rally point, or – when an own unit already stands
+// there – the nearest tile around it that is free of own units and reachable (rings 1 and 2, in a
+// fixed order). null = no rally point or no room.
+export function rallyTarget(state, city) {
+  if (!city || !city.rally) return null;
+  const { q, r } = city.rally;
+  const free = (t) => {
+    const o = unitAt(state, t.q, t.r);
+    return !(o && o.owner === city.owner) && !!rallyPath(state, city, t.q, t.r);
+  };
+  if (free({ q, r })) return { q, r };
+  const seen = new Set([key(q, r)]);
+  let ring = [{ q, r }];
+  for (let d = 1; d <= 2; d++) {
+    const next = [];
+    for (const t of ring) {
+      for (const n of neighbors(t.q, t.r)) {
+        const k = key(n.q, n.r);
+        if (seen.has(k) || !tileAt(state, n.q, n.r)) continue;
+        seen.add(k);
+        next.push(n);
+      }
+    }
+    const spot = next.find(free);
+    if (spot) return { q: spot.q, r: spot.r };
+    ring = next;
+  }
+  return null;
+}
+
+export function setRally(state, cityId, q, r) {
+  const city = state.cities.find((c) => c.id === cityId);
+  if (!canRally(state, city, q, r)) return false;
+  city.rally = { q, r };
+  return true;
+}
+
+export function clearRally(state, cityId) {
+  const city = state.cities.find((c) => c.id === cityId);
+  if (!city || city.owner !== state.current || !city.rally) return false;
+  delete city.rally;
   return true;
 }
 
@@ -1795,6 +1893,7 @@ export function stateProblem(s) {
   const validOwner = (o) => o === null || (isInt(o) && o >= 0 && o < PLAYERS.length);
   for (const c of s.cities) {
     if (!c || !s.tiles[key(c.q, c.r)] || !validOwner(c.owner)) return `bad city ${c && c.name}`;
+    if (c.rally !== undefined && !(c.rally && s.tiles[key(c.rally.q, c.rally.r)])) return `bad rally point of ${c.name}`;
   }
   const taken = new Set();
   for (const u of s.units) {

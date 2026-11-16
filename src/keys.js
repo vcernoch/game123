@@ -17,6 +17,8 @@ export const SHORTCUTS = [
     match: (k) => k === 'p' || k === 'P' },
   { keys: 'R', text: 'repair a pillaged resource of yours under the selected unit (costs a little gold)', action: () => ({ type: 'repair' }),
     match: (k) => k === 'r' || k === 'R' },
+  { keys: 'G', text: 'set the rally point of the selected city: units recruited there march to it', action: () => ({ type: 'rally' }),
+    match: (k) => k === 'g' || k === 'G' },
   { keys: 'D', text: 'disband the selected unit (press twice; in an own city it returns some gold)', action: () => ({ type: 'disband' }),
     match: (k) => k === 'd' || k === 'D' },
   { keys: 'T', text: 'show or hide the enemy threat overlay', action: () => ({ type: 'threats' }), match: (k) => k === 't' || k === 'T' },

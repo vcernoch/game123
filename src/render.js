@@ -96,6 +96,18 @@ export function render(ctx, state, view = {}) {
 
   if (view.path && view.path.length > 1) drawPath(ctx, view.path, view.pathTurns, view.pathFaint);
 
+  // rally points of own cities: a dashed line to the selected city's flag (or the tile being picked)
+  if (view.rallyLine && view.rallyLine.length > 1) drawRallyLine(ctx, view.rallyLine);
+  for (const f of view.rallies || []) {
+    const c = tileCenter(f.q, f.r);
+    drawRallyFlag(ctx, c.x - HEX_SIZE * 0.05, c.y + HEX_SIZE * 0.05, f.selected || !view.rallyPicking ? 1 : 0.5);
+  }
+  if (view.rallyPicking && view.rallyLine && view.rallyLine.length > 1) {
+    const end = view.rallyLine[view.rallyLine.length - 1];
+    const c = tileCenter(end.q, end.r);
+    drawRallyFlag(ctx, c.x - HEX_SIZE * 0.05, c.y + HEX_SIZE * 0.05, 0.8);
+  }
+
   // last-seen markers of enemy units that went into the fog
   for (const g of view.ghosts || []) {
     const c = tileCenter(g.q, g.r);
@@ -309,6 +321,56 @@ function drawPath(ctx, path, turns = null, faint = false) {
       ctx.stroke();
     }
   }
+  ctx.restore();
+}
+
+// Rally route: a thin dashed white line from the city to its flag.
+function drawRallyLine(ctx, path) {
+  const pts = path.map((p) => tileCenter(p.q, p.r));
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.setLineDash([3, 6]);
+  for (const [color, width] of [['rgba(0,0,0,0.4)', 5], ['rgba(255,255,255,0.85)', 2.5]]) {
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// Rally flag: a pole with a red pennant, its foot at (x, y).
+function drawRallyFlag(ctx, x, y, alpha = 1) {
+  const h = HEX_SIZE * 0.75;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.ellipse(x, y, HEX_SIZE * 0.16, HEX_SIZE * 0.06, 0, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.lineTo(x, y - h);
+  ctx.strokeStyle = '#3b2a1a';
+  ctx.lineWidth = 3;
+  ctx.stroke();
+  ctx.strokeStyle = '#e8d9b5';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(x + 1, y - h);
+  ctx.quadraticCurveTo(x + h * 0.35, y - h * 0.92, x + h * 0.6, y - h * 0.78);
+  ctx.quadraticCurveTo(x + h * 0.35, y - h * 0.66, x + 1, y - h * 0.5);
+  ctx.closePath();
+  ctx.fillStyle = '#e04a3a';
+  ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+  ctx.lineWidth = 1.2;
+  ctx.fill();
+  ctx.stroke();
   ctx.restore();
 }
 

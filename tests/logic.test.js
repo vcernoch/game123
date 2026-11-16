@@ -12,6 +12,7 @@ import {
   turnReport, reportText, reportIsBad, updateSightings, lastSeen, lastSeenAt, lastSeenText,
   armyOverview, unitStatus, unitWhere, ARMY_STATUS, ruinBelieved, ruinKind, exploreRuin,
   exploreTarget, canExplore, setExplore, followExplore, canPillage, pillage, isPillaged, pillageTurnsLeft, cityAt, canRepair, repair,
+  rallyPath, rallyTarget, canRally, setRally, clearRally,
 } from '../src/game.js';
 import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
@@ -1336,7 +1337,7 @@ test('keyboard shortcuts: one table for keys and the overlay', () => {
   assert.equal(keyAction('q'), null);
   // every entry has overlay text, and no key is claimed by two entries
   for (const sc of SHORTCUTS) assert.ok(sc.keys && sc.text);
-  for (const [k, shift] of [['Tab', false], ['Enter', false], ['Enter', true], ['f', false], ['x', false], ['1', false], ['?', true]]) {
+  for (const [k, shift] of [['Tab', false], ['Enter', false], ['Enter', true], ['f', false], ['x', false], ['g', false], ['1', false], ['?', true]]) {
     assert.equal(SHORTCUTS.filter((sc) => sc.match(k, shift)).length, 1, `${k}${shift ? '+shift' : ''}`);
   }
 });
@@ -2826,4 +2827,120 @@ test('repair: the AI walks back to its pillaged resources and repairs them', () 
     }
   }
   assert.ok(repairs >= 1, 'the AI repairs in real games');
+});
+
+// A game without units, happenings or fog, with the player's capital and a free tile 3 steps away.
+function rallySetup() {
+  const s = createGame({ seed: 3, fog: false, happenings: false });
+  s.units = [];
+  const cap = s.cities.find((c) => c.owner === 0 && c.capital);
+  const spot = Object.values(s.tiles).find((t) => distance(t, cap) === 3 && !cityAt(s, t.q, t.r)
+    && rallyPath(s, cap, t.q, t.r) && neighbors(t.q, t.r).every((n) => !tileAt(s, n.q, n.r) || !cityAt(s, n.q, n.r)));
+  s.gold[0] = 200;
+  return { s, cap, spot };
+}
+
+// Ends the player's turn, lets the AI pass, and walks the player's orders. Returns the runOrders result.
+function passRound(s) {
+  endTurn(s);
+  endTurn(s);
+  return runOrders(s, 0);
+}
+
+test('rally points: recruits get a move order to the flag, walk there, a taken flag sends them next to it', () => {
+  const { s, cap, spot } = rallySetup();
+  assert.ok(spot, 'a test tile exists');
+  // where a flag may stand
+  assert.ok(!canRally(s, cap, cap.q, cap.r), 'not on the city itself');
+  const rock = Object.values(s.tiles).find((t) => !isPassable(s, t.q, t.r));
+  assert.ok(!canRally(s, cap, rock.q, rock.r), 'not on impassable terrain');
+  const enemyCap = s.cities.find((c) => c.owner === 1);
+  assert.ok(!canRally(s, enemyCap, spot.q, spot.r), 'not for a foreign city');
+  assert.equal(rallyTarget(s, cap), null, 'no flag yet');
+  assert.ok(setRally(s, cap.id, spot.q, spot.r));
+  assert.deepEqual(cap.rally, { q: spot.q, r: spot.r });
+  const path = rallyPath(s, cap, spot.q, spot.r);
+  assert.deepEqual(path[0], { q: cap.q, r: cap.r });
+  assert.deepEqual(path.at(-1), { q: spot.q, r: spot.r });
+  for (let i = 1; i < path.length; i++) assert.equal(distance(path[i - 1], path[i]), 1);
+
+  // a recruit gets the order; the spawn event carries it
+  const before = cloneState(s);
+  assert.ok(buyUnit(s, cap.id, 'warrior'));
+  const u = unitAt(s, cap.q, cap.r);
+  assert.deepEqual(u.goto, { q: spot.q, r: spot.r });
+  assert.equal(unitStatus(s, u), 'marching');
+  for (const e of drainEvents(s)) applyEvent(before, e);
+  assert.deepEqual(getUnit(before, u.id).goto, u.goto);
+  // it walks off at the start of the next turns and arrives
+  let arrived = false;
+  for (let i = 0; i < 6 && !arrived; i++) {
+    const res = passRound(s);
+    arrived = res.some((o) => o.unitId === u.id && o.result === 'arrived');
+  }
+  assert.ok(arrived, 'the recruit reached the flag');
+  assert.deepEqual({ q: u.q, r: u.r }, { q: spot.q, r: spot.r });
+  assert.equal(u.goto, undefined);
+  // the flag is taken: the next recruit heads for a free tile next to it
+  assert.ok(buyUnit(s, cap.id, 'archer'));
+  const v = unitAt(s, cap.q, cap.r);
+  assert.ok(v.goto);
+  assert.equal(distance(v.goto, spot), 1);
+  assert.ok(!unitAt(s, v.goto.q, v.goto.r));
+  assert.deepEqual(rallyTarget(s, cap), v.goto, 'deterministic');
+  // saving keeps the flag; a broken flag is rejected on import
+  const loaded = migrateState(JSON.parse(JSON.stringify(s)));
+  assert.deepEqual(loaded.cities.find((c) => c.id === cap.id).rally, cap.rally);
+  assert.equal(stateProblem(loaded), null);
+  loaded.cities.find((c) => c.id === cap.id).rally = { q: 999, r: 999 };
+  assert.match(stateProblem(loaded), /rally/);
+  // removing the flag: recruits stay put
+  passRound(s);
+  assert.ok(clearRally(s, cap.id));
+  assert.equal(cap.rally, undefined);
+  assert.ok(!clearRally(s, cap.id), 'nothing to remove');
+  assert.ok(buyUnit(s, cap.id, 'warrior'));
+  assert.equal(unitAt(s, cap.q, cap.r).goto, undefined);
+  // only the current player may set or clear flags
+  s.current = 1;
+  assert.ok(!setRally(s, cap.id, spot.q, spot.r));
+  s.current = 0;
+  // an old save (version 20) migrates without flags
+  const old = JSON.parse(JSON.stringify(createGame({ seed: 5 })));
+  old.version = 20;
+  assert.equal(migrateState(old).version, STATE_VERSION);
+  assert.ok(migrateState(JSON.parse(JSON.stringify({ ...old, version: 20 }))).cities.every((c) => c.rally === undefined));
+});
+
+test('rally points: a captured city loses its flag (also when replayed), unexplored land can\'t be picked, key G', () => {
+  const { s, cap, spot } = rallySetup();
+  assert.ok(setRally(s, cap.id, spot.q, spot.r));
+  const n = neighbors(cap.q, cap.r).find((t) => isPassable(s, t.q, t.r));
+  s.current = 1;
+  const raider = spawnUnit(s, 'warrior', 1, n.q, n.r);
+  raider.movesLeft = 2; raider.hasAttacked = false;
+  drainEvents(s);
+  const before = cloneState(s);
+  assert.ok(moveUnit(s, raider.id, cap.q, cap.r));
+  assert.equal(cap.owner, 1);
+  assert.equal(cap.rally, undefined, 'the flag is gone');
+  for (const e of drainEvents(s)) applyEvent(before, e);
+  assert.equal(before.cities.find((c) => c.id === cap.id).rally, undefined, 'replay removes it too');
+
+  // with fog: the flag only goes on explored land; picking on the map
+  const f = createGame({ seed: 3 });
+  const fcap = f.cities.find((c) => c.owner === 0 && c.capital);
+  const explored = exploredTiles(f, 0);
+  const dark = Object.values(f.tiles).find((t) => !explored.has(key(t.q, t.r)) && isPassable(f, t.q, t.r));
+  assert.ok(!canRally(f, fcap, dark.q, dark.r), 'not in the unexplored fog');
+  const near = [...explored].map((k) => tileAt(f, ...k.split(',').map(Number)))
+    .find((t) => isPassable(f, t.q, t.r) && distance(t, fcap) === 2 && !cityAt(f, t.q, t.r));
+  assert.deepEqual(decideTap(f, { selectedId: null, pending: null, rallyCityId: fcap.id }, near.q, near.r),
+    { type: 'rally', cityId: fcap.id, q: near.q, r: near.r });
+  assert.deepEqual(decideTap(f, { selectedId: null, pending: null, rallyCityId: fcap.id }, dark.q, dark.r), { type: 'rallyCancel' });
+  assert.deepEqual(decideTap(f, { selectedId: null, pending: null, rallyCityId: fcap.id }, fcap.q, fcap.r), { type: 'rallyCancel' });
+  // without picking, a tap selects as before
+  assert.equal(decideTap(f, { selectedId: null, pending: null }, fcap.q, fcap.r).type, 'select');
+  assert.equal(keyAction('g').type, 'rally');
+  assert.equal(keyAction('G').type, 'rally');
 });

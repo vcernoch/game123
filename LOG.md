@@ -2,6 +2,15 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-16 – Rally points (v0.27.0)
+- **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.26.0–v0.27.0) is ahead of `main` (v0.25.0) – please merge it.
+- Phase 12 was done, so I opened phase 13 (logistics, own improvement). Sending every new recruit to the front took a selection and a click each turn; now a city can stream its recruits to a flag.
+- In `game.js`: `rallyPath` (cheapest path over explored passable tiles, units ignored), `canRally`, `setRally`, `clearRally`, `rallyTarget` (the flag, or – when an own unit already stands there – the nearest free reachable tile in rings 1–2, in a fixed order). `buyUnit` gives the recruit `goto` to that target; `spawnUnit` got an optional `extra` merged into the unit before the spawn event, so the replayed event carries the order. The recruit has no moves on the turn it is bought, so it walks off via the existing `runOrders` at the start of the next turn (and stops like any order when an enemy is in sight). Capturing a city deletes `city.rally` (also in `applyEvent`). `stateProblem` rejects a flag off the map. The AI doesn't use flags (it moves its own recruits).
+- UI: "Rally point" section in the own city panel – "🚩 Set rally point", then a click on a known tile sets it (hovering previews a dashed white route; any other click or Esc cancels); with a flag: "🚩 New units march to the flag N tiles away by themselves", "Move flag" / "✖ Remove". Key G. Red pennant flags drawn on the map for all own rally points, the route for the selected city. Help text and shortcut overlay updated.
+- State structure: `state.version` 21 (optional `city.rally`), trivial migration.
+- Tests: +2 logic (valid/invalid flag tiles, path shape, recruit gets the order incl. event replay, walks there over turns and arrives, taken flag → neighbour tile, save/import incl. a broken flag, clear, not on the other player's turn, migration; capture removes the flag also on replay, fog: no flag in unexplored land, `decideTap` picking actions, key G). The shortcut test also checks G is claimed once. Smoke test: selects the capital, sets the flag with the panel button and a map click, checks panel text, recruits with key 1, checks the order (`artifacts/screenshot-rally.png`), ends the turn and checks the recruit left the city.
+- Status: `npm run check` green (89 logic tests + smoke).
+
 ## 2026-11-16 – Repair pillaged resources (v0.26.0)
 - **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". Thanks for merging v0.25.0 into `main`; `dev` now only adds v0.26.0 on top.
 - Phase 12 (economy war, own improvement), new task. After pillage the victim could only wait 4 turns; now guarding and recovering resources is an active choice: spend a unit's turn and a little gold to get the income back right away.

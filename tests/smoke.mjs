@@ -759,6 +759,59 @@ try {
   if (fixed.until !== undefined || fixed.gold !== fix.gold - 3 || !fixed.log.includes('repaired')) throw new Error(`repair: not repaired ${JSON.stringify(fixed)}`);
   await page.keyboard.press('Escape');
 
+  // rally point: select the capital, set a flag with the panel button and a click on the map,
+  // recruit with key 1 – the recruit has a move order and leaves the city at the start of the next turn
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const rally = await page.evaluate(async () => {
+    const g = await import('./src/game.js');
+    const rnd = await import('./src/render.js');
+    window.__game.newGame(31, { fog: false, happenings: false });
+    const st = window.__game.getState();
+    const cap = st.cities.find((c) => c.capital && c.owner === 0);
+    st.units = st.units.filter((u) => u.owner !== 0 || (u.q !== cap.q || u.r !== cap.r));
+    st.gold[0] = 100;
+    const hexDist = (a, b) => Math.max(Math.abs(a.q - b.q), Math.abs(a.r - b.r), Math.abs(a.q + a.r - b.q - b.r));
+    const spot = Object.values(st.tiles).find((t) => hexDist(t, cap) === 3 && g.isFree(st, t.q, t.r)
+      && !g.cityAt(st, t.q, t.r) && g.canRally(st, cap, t.q, t.r));
+    if (!spot) return { error: 'no tile for the flag' };
+    window.__game.refresh();
+    const rect = document.getElementById('board').getBoundingClientRect();
+    const k = rect.width / rnd.canvasSize(st).w;
+    const at = (p) => { const c = rnd.tileCenter(p.q, p.r); return { x: rect.left + c.x * k, y: rect.top + c.y * k }; };
+    return { cap: { q: cap.q, r: cap.r, ...at(cap) }, spot: { q: spot.q, r: spot.r, ...at(spot) } };
+  });
+  if (rally.error) throw new Error(`rally: ${rally.error}`);
+  await page.mouse.click(rally.cap.x, rally.cap.y);
+  if (!(await page.textContent('#info')).includes('Set rally point')) throw new Error('rally: no button in the city panel');
+  await page.click('#info button[data-rally]');
+  if ((await page.evaluate(() => window.__game.rallyPicking())) === null) throw new Error('rally: picking did not start');
+  await page.mouse.move(rally.spot.x, rally.spot.y);
+  await page.mouse.click(rally.spot.x, rally.spot.y);
+  const flagged = await page.evaluate((r) => {
+    const st = window.__game.getState();
+    const cap = st.cities.find((c) => c.q === r.cap.q && c.r === r.cap.r);
+    return { rally: cap.rally, picking: window.__game.rallyPicking(), info: document.getElementById('info').textContent };
+  }, rally);
+  if (!flagged.rally || flagged.rally.q !== rally.spot.q || flagged.rally.r !== rally.spot.r || flagged.picking !== null) {
+    throw new Error(`rally: flag not set ${JSON.stringify(flagged)}`);
+  }
+  if (!flagged.info.includes('New units march to the flag 3 tiles away')) throw new Error(`rally: panel text ${flagged.info}`);
+  await page.keyboard.press('1');
+  const recruit = await page.evaluate((r) => {
+    const st = window.__game.getState();
+    const u = st.units.find((x) => x.owner === 0 && x.q === r.cap.q && x.r === r.cap.r);
+    return u ? { id: u.id, goto: u.goto } : null;
+  }, rally);
+  if (!recruit || !recruit.goto || recruit.goto.q !== rally.spot.q) throw new Error(`rally: recruit has no order ${JSON.stringify(recruit)}`);
+  await page.screenshot({ path: 'artifacts/screenshot-rally.png' });
+  await page.evaluate(() => window.__game.endTurn());
+  await page.waitForFunction(() => !window.__game.isBusy() && window.__game.getState().current === 0, null, { timeout: 20000 });
+  const recruitAt = await page.evaluate((id) => {
+    const u = window.__game.getState().units.find((x) => x.id === id);
+    return u && { q: u.q, r: u.r };
+  }, recruit.id);
+  if (!recruitAt || (recruitAt.q === rally.cap.q && recruitAt.r === rally.cap.r)) throw new Error(`rally: recruit did not set off ${JSON.stringify(recruitAt)}`);
+
   // rivers: large map without fog, hovering a river tile shows its description in the panel
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.evaluate(() => { window.__game.newGame(4242, { size: 'large', fog: false }); });

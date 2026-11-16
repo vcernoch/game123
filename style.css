@@ -134,6 +134,8 @@ fieldset .seed-row + small { margin-left: 0; }
   .board-wrap.zoomed canvas { width: var(--zoom-w, 820px); max-width: none; }
 }
 .undo-btn, .wide-btn { width: 100%; margin-top: 10px; }
+.row-btns { display: flex; gap: 8px; margin-top: 10px; }
+.row-btns button { flex: 1; }
 .fortified { color: #cfe3ff; }
 .pillaged { color: #ffb36b; }
 #end-turn.armed { background: #e07a3a; color: #fff; }

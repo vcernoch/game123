@@ -3,10 +3,12 @@
 // and only a second tap on the same tile performs the action.
 import { key } from './hex.js';
 import {
-  getUnit, unitAt, cityAt, reachable, attackTargets, visibleTiles, exploredTiles, planRoute,
+  getUnit, unitAt, cityAt, reachable, attackTargets, visibleTiles, exploredTiles, planRoute, canRally,
 } from './game.js';
 
-// ctx = { selectedId, pending: {q,r}|null, viewer, confirm }
+// ctx = { selectedId, pending: {q,r}|null, viewer, confirm, rallyCityId }
+// rallyCityId: the player is picking a rally point for that city – a valid tile sets it
+// ({ type: 'rally', cityId, q, r }), any other tap leaves the picking ({ type: 'rallyCancel' }).
 // Returns one of these actions:
 //   { type: 'move', unitId, q, r } | { type: 'attack', unitId, targetId }
 //   { type: 'goto', unitId, q, r } – a multi-turn move order to a known tile out of reach this turn
@@ -14,7 +16,11 @@ import {
 //   { type: 'select', unitId|null, cityId|null } | { type: 'none' }
 export function decideTap(state, ctx, q, r) {
   if (!state.tiles[key(q, r)] || state.winner !== null) return { type: 'none' };
-  const { selectedId, pending, viewer = 0, confirm = false } = ctx;
+  const { selectedId, pending, viewer = 0, confirm = false, rallyCityId = null } = ctx;
+  if (rallyCityId !== null) {
+    const rc = state.cities.find((c) => c.id === rallyCityId);
+    return canRally(state, rc, q, r) ? { type: 'rally', cityId: rallyCityId, q, r } : { type: 'rallyCancel' };
+  }
   const visible = visibleTiles(state, viewer);
   const explored = exploredTiles(state, viewer);
   const other = unitAt(state, q, r);

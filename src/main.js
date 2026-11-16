@@ -7,6 +7,7 @@ import {
   upgradeOptions, upgradeUnit, canDisband, disbandRefund, disbandUnit, chargeReady,
   updateSightings, lastSeen, lastSeenAt, lastSeenText, armyOverview, ARMY_STATUS, ruinBelieved,
   canExplore, setExplore, canPillage, pillage, isPillaged, pillageTurnsLeft, canRepair, repair,
+  rallyPath, setRally, clearRally,
 } from './game.js';
 import { createAnimator } from './anim.js';
 import { decideTap } from './input.js';
@@ -34,6 +35,7 @@ let selectedCityId = null;
 let hover = null;
 let aiRunning = false;
 let pending = null;        // touch: target awaiting confirmation by a second tap
+let rallyPick = null;      // id of the city whose rally point the player is picking on the map
 let lastPointer = 'mouse'; // type of the last pointer (mouse / touch / pen)
 let endArmed = false;      // end-turn reminder: the first press only asks for confirmation
 let endArmTimer = null;
@@ -144,6 +146,19 @@ function flankView(u) {
   return new Set(flankers(state, u, target).map((f) => f.id));
 }
 
+// Rally flags of own cities; the selected city's route to its flag, or – while picking – to the hovered tile.
+function rallyView() {
+  if (busy()) return {};
+  const rallies = state.cities.filter((c) => c.owner === 0 && c.rally).map((c) => ({ ...c.rally, selected: c.id === selectedCityId }));
+  const city = state.cities.find((c) => c.id === (rallyPick ?? selectedCityId));
+  let rallyLine = null;
+  if (city && city.owner === 0) {
+    const to = rallyPick !== null ? hover : city.rally;
+    rallyLine = to ? rallyPath(state, city, to.q, to.r) : null;
+  }
+  return { rallies, rallyLine, rallyPicking: rallyPick !== null };
+}
+
 function drawBoard() {
   const u = selectedUnit();
   const mine = u && u.owner === state.current && !busy();
@@ -163,6 +178,7 @@ function drawBoard() {
     lossMarks: busy() ? null : lossMarks,
     ghosts: busy() ? null : lastSeen(state, 0),
     ...pathView(u, mine),
+    ...rallyView(),
   });
 }
 
@@ -243,6 +259,7 @@ function updateHud() {
       }
       html += '</div>';
       if (blocked) html += '<p class="hint">The city is occupied – move the unit out first.</p>';
+      html += rallyPanel(city);
       const todo = Object.entries(BUILDINGS).filter(([b]) => !hasBuilding(city, b));
       if (todo.length) {
         html += '<h4>Build</h4><div class="buy">';
@@ -334,6 +351,34 @@ function updateHud() {
   updateArmy();
 }
 
+// Rally point part of the own city panel.
+function rallyPanel(city) {
+  let html = '<h4>Rally point</h4>';
+  if (rallyPick === city.id) {
+    html += '<p class="confirm">🚩 Click the tile where new units from this city should march. Click elsewhere or press Esc to cancel.</p>';
+    return `${html}<button data-rally-cancel class="secondary wide-btn">✖ Cancel</button>`;
+  }
+  if (city.rally) {
+    const path = rallyPath(state, city, city.rally.q, city.rally.r);
+    const n = path ? path.length - 1 : 0;
+    html += `<p class="order">🚩 New units march to the flag ${n} tile${n === 1 ? '' : 's'} away by themselves</p>`;
+    return `${html}<div class="row-btns"><button data-rally class="secondary" title="Pick another tile (G)">🚩 Move flag</button><button data-rally-clear class="secondary">✖ Remove</button></div>`;
+  }
+  html += '<p class="hint">Set a flag and every unit recruited here walks there on its own.</p>';
+  return `${html}<button data-rally class="secondary wide-btn" title="Pick a tile on the map (G)">🚩 Set rally point</button>`;
+}
+
+// Starts picking the rally point of the selected own city (G / panel button); pressing again cancels.
+function startRallyPick() {
+  if (busy() || state.winner !== null || state.current !== 0) return;
+  const city = state.cities.find((c) => c.id === selectedCityId);
+  if (!city || city.owner !== 0) return;
+  rallyPick = rallyPick === city.id ? null : city.id;
+  pending = null;
+  sound.play('click');
+  draw();
+}
+
 let armyKey = '';
 
 // Army panel: every own unit with its status and place; a click selects it. The summary line shows the
@@ -364,6 +409,7 @@ function selectFromArmy(id) {
   const u = getUnit(state, id);
   if (busy() || !u || u.owner !== 0) return;
   pending = null;
+  rallyPick = null;
   selectedId = u.id;
   const city = cityAt(state, u.q, u.r);
   selectedCityId = city ? city.id : null;
@@ -411,9 +457,16 @@ function onClick(ev) {
   const p = canvasPoint(ev);
   const hex = pickHex(p.x, p.y);
   const touch = lastPointer === 'touch' || lastPointer === 'pen';
-  const act = decideTap(state, { selectedId, pending, viewer: 0, confirm: touch }, hex.q, hex.r);
+  const act = decideTap(state, { selectedId, pending, viewer: 0, confirm: touch, rallyCityId: rallyPick }, hex.q, hex.r);
   pending = null;
   if (act.type === 'none') return;
+  if (act.type === 'rally' || act.type === 'rallyCancel') {
+    if (act.type === 'rally' && setRally(state, act.cityId, act.q, act.r)) { sound.play('fortify'); save(); }
+    rallyPick = null;
+    if (touch) hover = null;
+    draw();
+    return;
+  }
   if (act.type === 'preview') {
     // touch: show the path / attack estimate and wait for a second tap
     pending = { q: act.q, r: act.r };
@@ -570,6 +623,7 @@ function doEndTurn(force = false) {
   disarmEndTurn();
   selectedId = null;
   selectedCityId = null;
+  rallyPick = null;
   $('tooltip').hidden = true;
   pending = null;
   showNotice([]);
@@ -805,6 +859,13 @@ $('army').addEventListener('click', (ev) => {
 });
 $('info').addEventListener('click', (ev) => {
   if (ev.target.closest('button[data-undo]')) { undoMove(); return; }
+  if (ev.target.closest('button[data-rally]')) { startRallyPick(); return; }
+  if (ev.target.closest('button[data-rally-cancel]')) { rallyPick = null; draw(); return; }
+  if (ev.target.closest('button[data-rally-clear]')) {
+    if (!busy() && clearRally(state, selectedCityId)) { sound.play('click'); save(); }
+    draw();
+    return;
+  }
   if (ev.target.closest('button[data-fortify]')) { fortifySelected(); return; }
   if (ev.target.closest('button[data-explore]')) { exploreSelected(); return; }
   if (ev.target.closest('button[data-pillage]')) { pillageSelected(); return; }
@@ -846,8 +907,10 @@ window.addEventListener('keydown', (ev) => {
   else if (act.type === 'recruit') recruitSelected(act.unitType);
   else if (act.type === 'help') $('keys-dialog').showModal();
   else if (act.type === 'threats') toggleThreats();
+  else if (act.type === 'rally') startRallyPick();
   else if (act.type === 'escape') {
     if (busy()) { anim.skip(); return; }
+    if (rallyPick !== null) { rallyPick = null; draw(); return; }
     selectedId = null; selectedCityId = null; pending = null; draw();
   }
 });
@@ -877,6 +940,7 @@ function recruitSelected(type) {
 function selectNextUnit() {
   if (busy() || state.winner !== null) return;
   pending = null;
+  rallyPick = null;
   const cur = selectedUnit();
   const next = nextActiveUnit(state, 0, cur && cur.owner === 0 ? cur.id : null);
   selectedId = next ? next.id : null;
@@ -988,6 +1052,7 @@ window.__game = {
   canUndo: () => undoStack.length > 0,
   nextUnit: selectNextUnit,
   selectedId: () => selectedId,
+  rallyPicking: () => rallyPick,
   isBusy: busy,
   version: GAME_VERSION,
   setAnimSpeed: (x) => { anim.speed = x; },
