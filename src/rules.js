@@ -44,7 +44,7 @@ export const PLAYERS = [
 
 // City buildings. Each can be built once per city; they remain when the city is captured.
 export const BUILDINGS = {
-  walls:    { name: 'Walls',   cost: 20, symbol: '▣', desc: 'garrison +50 % defense' },
+  walls:    { name: 'Walls',   cost: 20, symbol: '▣', desc: 'garrison +50 % defense, shoots a besieger for 2 HP each turn' },
   market:   { name: 'Market',  cost: 25, symbol: '¤', desc: '+2 gold per turn' },
   barracks: { name: 'Barracks', cost: 20, symbol: '⚑', desc: 'recruiting 3 gold cheaper' },
   watchtower: { name: 'Watchtower', cost: 15, symbol: '♜', desc: 'the city sees 2 tiles farther' },
@@ -189,6 +189,11 @@ export const SIGHTINGS = { maxAge: 3 };
 // most unexplored land (score = new tiles / (1 + cost in turns)). A ruin the player believes in counts
 // as `ruinBonus` extra tiles. The order stops when an enemy comes within `enemyRadius` or nothing is left.
 export const EXPLORE = { ruinBonus: 6, enemyRadius: 2, legsPerTurn: 3 };
+
+// Wall volley: at the end of its owner's turn a city with walls shoots the weakest enemy unit within
+// `range` for `damage` HP (no counterattack). It never takes a unit below `minHp` – walls harass
+// besiegers, they don't finish them off.
+export const VOLLEY = { damage: 2, range: 1, minHp: 1 };
 
 // Sentry: a unit on watch is skipped by Tab and the end-turn reminder until, at the start of its owner's
 // turn, a visible enemy is within `radius` (it wakes up) – or, when it was put on watch wounded, until it

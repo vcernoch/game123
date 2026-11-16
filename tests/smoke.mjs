@@ -291,6 +291,41 @@ try {
   }), sen0.id);
   if (sen2.sentry || !sen2.notice.includes('is fully healed and ready')) throw new Error(`the rested unit did not wake: ${JSON.stringify(sen2)}`);
 
+  // wall volley: the capital gets walls and an AI warrior next to it; ending the turn the walls shoot it
+  // (a stone flies, slowed down for the screenshot), the chronicle says so and the threat overlay marks the AI's walls
+  await page.evaluate(() => window.__game.newGame(31, { happenings: false, fog: false }));
+  const vol = await page.evaluate(async () => {
+    const g = await import('./src/game.js');
+    const { neighbors } = await import('./src/hex.js');
+    const st = window.__game.getState();
+    const cap = st.cities.find((c) => c.owner === 0 && c.capital);
+    cap.buildings = ['walls'];
+    const n = neighbors(cap.q, cap.r).find((p) => g.isPassable(st, p.q, p.r) && !g.unitAt(st, p.q, p.r) && !g.cityAt(st, p.q, p.r));
+    const foe = g.spawnUnit(st, 'warrior', 1, n.q, n.r);
+    g.drainEvents(st);
+    window.__game.refresh();
+    return { id: foe.id, city: cap.name };
+  });
+  await page.evaluate(() => window.__game.setAnimSpeed(3));
+  await page.evaluate(() => window.__game.endTurn());
+  await page.waitForTimeout(700);
+  await page.screenshot({ path: 'artifacts/screenshot-volley.png' });
+  await page.evaluate(() => window.__game.setAnimSpeed(1));
+  await page.waitForFunction(() => !window.__game.isBusy() && window.__game.getState().current === 0, null, { timeout: 15000 });
+  const volLog = await page.textContent('#log');
+  if (!volLog.includes(`the walls of ${vol.city} hit Warrior (−2)`)) throw new Error(`wall volley missing in the chronicle: ${volLog.slice(0, 300)}`);
+  const volThreat = await page.evaluate(async () => {
+    const g = await import('./src/game.js');
+    const { neighbors } = await import('./src/hex.js');
+    const st = window.__game.getState();
+    const c = st.cities.find((x) => x.owner === 1);
+    c.buildings = ['walls'];
+    const t = g.threatTiles(st, 0);
+    return neighbors(c.q, c.r).filter((p) => g.isPassable(st, p.q, p.r)).every((p) => t.get(`${p.q},${p.r}`) >= 1);
+  });
+  if (!volThreat) throw new Error('the threat overlay ignores enemy walls');
+
+  // end-turn reminder: with idle units the first press only asks, the second ends the turn
   await page.evaluate(() => window.__game.newGame(4242));
   const label0 = await page.textContent('#end-turn');
   if (!/End turn · \d+/.test(label0)) throw new Error(`end-turn button does not count idle units: ${label0}`);

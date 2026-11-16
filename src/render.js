@@ -145,6 +145,17 @@ export function render(ctx, state, view = {}) {
     drawLossMark(ctx, c.x + HEX_SIZE * 0.42, c.y - HEX_SIZE * 0.5);
   }
 
+  // wall volley in flight: a stone on an arc
+  if (view.shot) {
+    ctx.beginPath();
+    ctx.arc(view.shot.x, view.shot.y - view.shot.lift, 4.5, 0, Math.PI * 2);
+    ctx.fillStyle = '#d8d2c4';
+    ctx.fill();
+    ctx.lineWidth = 1.2;
+    ctx.strokeStyle = 'rgba(0,0,0,0.8)';
+    ctx.stroke();
+  }
+
   for (const f of view.floaters || []) drawFloater(ctx, f);
 }
 

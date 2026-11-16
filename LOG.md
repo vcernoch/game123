@@ -2,6 +2,16 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-16 – Wall volley (v0.29.0, same run as sentry)
+- Phase 14, second task of this run (the version was bumped once for the run). Walls only helped a garrison that was attacked, so a besieger could sit next to a city for free – in AI-vs-AI games two of 20 matches ended in a 150-turn stalemate this way. Now walls fight back a little.
+- `VOLLEY` in `rules.js` (`damage` 2, `range` 1, `minHp` 1). In `game.js`: `volleyTarget` (owned city with walls; enemy units within range above `minHp`; weakest first, then lowest id) and `cityVolleys`, called at the start of `endTurn` for the player ending the turn – one shot per walled city, no counterattack, never below 1 HP (walls harass, they don't kill, so no XP/kill bookkeeping is needed). New replayable `volley` event (`applyEvent` sets the HP), chronicle entry seen by both sides, `turnReport` counts the victim's unit as wounded. `threatTiles` adds +1 on tiles next to a known enemy walled city, so both the T overlay and the AI's danger map (archers and catapults keep out) know about it. Walls' description updated.
+- Balance (20 AI-vs-AI games, Medium): 86 volleys; both former 150-turn stalemates now end (average game 20 turns instead of 34), wins 9 : 11.
+- UI: the player's own volleys play right after "End turn" (a stone flies on an arc from the city, then a "−2 ▣" floater, `hit` sound); the AI's volleys are appended to the AI-turn animation and report. Help text updated.
+- No state structure change (`state.version` stays 23).
+- Tests: +2 logic (weakest target, damage, one shot per city, exact event, sound, chronicle, replay, turn report for victim and shooter, silent on the other player's turn, minHp – 2 HP takes 1, 1 HP is skipped for the next target; own units / out of range / no walls / neutral / other player's turn don't shoot, threat overlay +1 only for known enemy walls and not on the city tile, 3 real AI-vs-AI games: volleys only from walled cities of the player ending the turn and never kill). Smoke test: walls + an AI warrior next to the capital, end turn, mid-flight screenshot (`artifacts/screenshot-volley.png`), chronicle line, threat overlay around the AI's walled capital.
+- Small fix: the smoke test's "end-turn reminder" comment was lost in the previous commit; restored.
+- Status: `npm run check` green (97 logic tests + smoke).
+
 ## 2026-11-16 – Sentry (v0.29.0)
 - **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.26.0–v0.29.0) is ahead of `main` (v0.25.0) – please merge it.
 - Phase 13 was done, so I opened phase 14 (command comfort, own improvement). A unit guarding a pass or healing behind the lines had to be skipped by hand every turn (Tab kept returning to it, the end-turn button kept counting it); fortify was the only way to silence it, and it can't be used after moving and never wakes up.

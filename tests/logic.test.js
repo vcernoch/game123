@@ -13,7 +13,7 @@ import {
   armyOverview, unitStatus, unitWhere, ARMY_STATUS, ruinBelieved, ruinKind, exploreRuin,
   exploreTarget, canExplore, setExplore, followExplore, canPillage, pillage, isPillaged, pillageTurnsLeft, cityAt, canRepair, repair,
   rallyPath, rallyTarget, canRally, setRally, clearRally, canSwap, swapPartners, swapUnits,
-  canBuildRoad, buildRoad, roadLinks, canSentry, sentry, checkSentries, SENTRY_TEXT,
+  canBuildRoad, buildRoad, roadLinks, canSentry, sentry, checkSentries, SENTRY_TEXT, volleyTarget, cityVolleys,
 } from '../src/game.js';
 import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
@@ -32,7 +32,7 @@ import { distance, key, neighbors } from '../src/hex.js';
 import {
   RESOURCES, FORTIFY, TERRITORY, ECONOMY, UNIT_TYPES, TERRAIN, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FLANK, HIGH_GROUND, CHARGE, REPAIR,
   UPGRADES, UPGRADE, DISBAND, RUINS, EXPLORE, PILLAGE,
-  SIGHTINGS, ROADWORK, SENTRY,
+  SIGHTINGS, ROADWORK, SENTRY, VOLLEY,
 } from '../src/rules.js';
 
 test('map is deterministic and starting cities are connected', () => {
@@ -3269,4 +3269,103 @@ test('sentry: a wounded unit rests until healed; any order or action wakes it; r
   const old = createGame({ seed: 2 });
   old.version = 22;
   assert.equal(migrateState(old).version, STATE_VERSION);
+});
+
+// Player 0's capital with walls and two free neighbour tiles for enemy units (no other units on the map).
+function wallSetup(seed = 4, fog = false) {
+  const s = createGame({ seed, fog });
+  s.units = [];
+  const city = s.cities.find((c) => c.owner === 0 && c.capital);
+  city.buildings = ['walls'];
+  const [n1, n2] = neighbors(city.q, city.r).filter((p) => isPassable(s, p.q, p.r) && !cityAt(s, p.q, p.r));
+  return { s, city, n1, n2 };
+}
+
+test('wall volley: a walled city shoots the weakest adjacent enemy at the end of its owner\'s turn', () => {
+  const { s, city, n1, n2 } = wallSetup();
+  const strong = spawnUnit(s, 'warrior', 1, n1.q, n1.r);
+  const weak = spawnUnit(s, 'horseman', 1, n2.q, n2.r);
+  weak.hp = 5;
+  drainEvents(s);
+  assert.equal(volleyTarget(s, city).id, weak.id, 'the weakest first');
+  const before = cloneState(s);
+  endTurn(s);
+  assert.equal(weak.hp, 5 - VOLLEY.damage);
+  assert.equal(strong.hp, UNIT_TYPES.warrior.hp, 'one shot per city');
+  const evs = drainEvents(s).filter((e) => e.type === 'volley');
+  assert.equal(evs.length, 1);
+  assert.deepEqual({ ...evs[0] }, { type: 'volley', cityId: city.id, player: 0, unitId: weak.id, victim: 1, damage: VOLLEY.damage, hp: 3, q: n2.q, r: n2.r });
+  assert.equal(soundFor(evs[0], 0), 'hit');
+  assert.match(s.log.at(-1).msg, /walls of .* hit Horseman \(−2\)/);
+  // replay gives the same HP, the victim's turn report counts it as wounded
+  for (const e of evs) applyEvent(before, e);
+  assert.equal(getUnit(before, weak.id).hp, weak.hp);
+  const rep = turnReport(cloneState(s), evs, 1);
+  assert.equal(rep.wounded, 1);
+  assert.equal(turnReport(cloneState(s), evs, 0).wounded, 0, 'the shooter is not wounded');
+  // the AI ending its turn: player 0's walls stay silent
+  assert.equal(s.current, 1);
+  endTurn(s);
+  assert.ok(weak.hp >= 3, 'not shot (resting may heal it)');
+  assert.deepEqual(drainEvents(s).filter((e) => e.type === 'volley'), []);
+  // never below minHp: 2 HP takes 1, a unit at minHp is skipped for the next one
+  weak.hp = 2;
+  cityVolleys(s, 0);
+  assert.equal(weak.hp, VOLLEY.minHp);
+  cityVolleys(s, 0);
+  assert.equal(weak.hp, VOLLEY.minHp, 'walls never finish a unit');
+  assert.equal(strong.hp, UNIT_TYPES.warrior.hp - VOLLEY.damage, 'the next target');
+  assert.equal(s.units.length, 2);
+});
+
+test('wall volley: who shoots and who is hit; threat overlay; AI games', () => {
+  const t = wallSetup();
+  // no walls, out of range, own units: nothing
+  const own = spawnUnit(t.s, 'warrior', 0, t.n1.q, t.n1.r);
+  assert.equal(volleyTarget(t.s, t.city), null, 'own units are never hit');
+  const far = Object.values(t.s.tiles).find((x) => isPassable(t.s, x.q, x.r) && distance(x, t.city) === VOLLEY.range + 1 && !cityAt(t.s, x.q, x.r));
+  spawnUnit(t.s, 'warrior', 1, far.q, far.r);
+  assert.equal(volleyTarget(t.s, t.city), null, 'out of range');
+  const foe = spawnUnit(t.s, 'warrior', 1, t.n2.q, t.n2.r);
+  assert.equal(volleyTarget(t.s, t.city).id, foe.id);
+  t.city.buildings = [];
+  assert.equal(volleyTarget(t.s, t.city), null, 'no walls, no volley');
+  t.city.buildings = ['walls'];
+  t.city.owner = null;
+  assert.equal(volleyTarget(t.s, t.city), null, 'neutral cities don\'t shoot');
+  t.city.owner = 0;
+  cityVolleys(t.s, 1);
+  assert.equal(foe.hp, UNIT_TYPES.warrior.hp, 'only the owner\'s walls shoot');
+  assert.ok(own);
+  // threat overlay: tiles next to a known enemy walled city count one more threat; unknown city – none
+  const w = wallSetup(4, true);
+  const enemyCity = w.s.cities.find((c) => c.owner === 1);
+  enemyCity.buildings = ['walls'];
+  const nb = neighbors(enemyCity.q, enemyCity.r).find((p) => isPassable(w.s, p.q, p.r));
+  assert.ok(!threatTiles(w.s, 0).has(key(nb.q, nb.r)), 'the city is in the fog');
+  w.s.fog = false;
+  assert.equal(threatTiles(w.s, 0).get(key(nb.q, nb.r)), 1);
+  assert.ok(!threatTiles(w.s, 0).has(key(enemyCity.q, enemyCity.r)), 'not the city tile itself');
+  assert.ok(!threatTiles(w.s, 1).has(key(nb.q, nb.r)), 'own walls are no threat');
+  // real AI-vs-AI games: volleys only from walled cities of the player ending the turn, never kill
+  let shots = 0;
+  for (const seed of [1, 7, 13]) {
+    const s = createGame({ seed });
+    for (let i = 0; i < 120 && s.winner === null; i++) {
+      runAITurn(s);
+      drainEvents(s);
+      const ending = s.current;
+      const n = s.units.length;
+      endTurn(s);
+      for (const e of drainEvents(s).filter((x) => x.type === 'volley')) {
+        shots++;
+        const c = s.cities.find((x) => x.id === e.cityId);
+        assert.equal(e.player, ending);
+        assert.ok(c.owner === ending && c.buildings.includes('walls'));
+        assert.ok(e.hp >= VOLLEY.minHp && e.damage > 0 && e.damage <= VOLLEY.damage);
+      }
+      assert.equal(s.units.length, n, 'a volley never kills');
+    }
+  }
+  assert.ok(shots > 0, 'walls shoot in real games');
 });

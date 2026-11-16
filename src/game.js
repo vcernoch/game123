@@ -4,7 +4,7 @@ import { generateMap, hasRiverEdge } from './map.js';
 import {
   TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY, VISION, DIFFICULTY, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, ROAD_COST, RIVER, FLANK, HIGH_GROUND, CHARGE,
   FACTIONS, NO_FACTION, MAP_SIZES, HAPPENINGS, FORTIFY, TERRITORY, RESOURCES,
-  UPGRADES, UPGRADE, DISBAND, SIGHTINGS, RUINS, EXPLORE, PILLAGE, REPAIR, ROADWORK, SENTRY,
+  UPGRADES, UPGRADE, DISBAND, SIGHTINGS, RUINS, EXPLORE, PILLAGE, REPAIR, ROADWORK, SENTRY, VOLLEY,
 } from './rules.js';
 import { createRng } from './rng.js';
 
@@ -440,6 +440,9 @@ export function applyEvent(state, ev) {
     const u = getUnit(state, ev.unitId);
     if (u) { u.movesLeft = 0; u.hasAttacked = true; delete u.fortified; delete u.sentry; }
     if (ev.gold) state.gold[ev.player] -= ev.gold;
+  } else if (ev.type === 'volley') {
+    const u = getUnit(state, ev.unitId);
+    if (u) u.hp = ev.hp;
   } else if (ev.type === 'disband') {
     removeUnit(state, ev.unitId); // gold is not replayed, as for recruiting and upgrades
   }
@@ -673,7 +676,8 @@ export function zocTiles(state, player) {
 }
 
 // Enemy threat for the threat overlay: Map key -> number of enemy units (visible to the player) that
-// could attack the tile next turn – walking with full movement, then shooting/striking within range.
+// could attack the tile next turn – walking with full movement, then shooting/striking within range –
+// plus one for each known enemy city with walls next to it (wall volley).
 // Only explored passable tiles are returned, so the overlay doesn't reveal unknown land.
 // `know` ({ sees(q, r), knows(q, r) }) replaces the player's fog view – the AI passes its own knowledge.
 export function threatTiles(state, player, know = null) {
@@ -698,6 +702,14 @@ export function threatTiles(state, player, know = null) {
       }
     }
     for (const t of hit) out.set(t, (out.get(t) || 0) + 1);
+  }
+  // known enemy cities with walls shoot the tiles around them at the end of their owner's turn
+  for (const c of state.cities) {
+    if (c.owner === null || c.owner === player || !hasBuilding(c, 'walls') || !know.knows(c.q, c.r)) continue;
+    for (const t of Object.values(state.tiles)) {
+      if (distance(t, c) > VOLLEY.range || (t.q === c.q && t.r === c.r)) continue;
+      if (know.knows(t.q, t.r) && isPassable(state, t.q, t.r)) out.set(key(t.q, t.r), (out.get(key(t.q, t.r)) || 0) + 1);
+    }
   }
   return out;
 }
@@ -1580,6 +1592,7 @@ export function build(state, cityId, building) {
 
 export function endTurn(state) {
   if (state.winner !== null) return false;
+  cityVolleys(state, state.current);
   // heal units of the player ending the turn
   for (const u of state.units.filter((x) => x.owner === state.current)) {
     const city = cityAt(state, u.q, u.r);
@@ -1601,6 +1614,31 @@ export function endTurn(state) {
   }
   if (state.happenings) rollHappening(state, state.current);
   return true;
+}
+
+// ---------- wall volley ----------
+
+// The enemy unit a city's walls would shoot now, or null: an owned city with walls, an enemy unit within
+// VOLLEY.range that still has more than VOLLEY.minHp; the weakest first, then the lowest id.
+export function volleyTarget(state, city) {
+  if (city.owner === null || !hasBuilding(city, 'walls')) return null;
+  const targets = state.units.filter((u) => u.owner !== city.owner && distance(u, city) <= VOLLEY.range && u.hp > VOLLEY.minHp);
+  targets.sort((a, b) => a.hp - b.hp || a.id - b.id);
+  return targets[0] || null;
+}
+
+// End of the player's turn: each of their walled cities shoots once. Emits 'volley' events.
+export function cityVolleys(state, player) {
+  for (const city of state.cities.filter((c) => c.owner === player)) {
+    const u = volleyTarget(state, city);
+    if (!u) continue;
+    const damage = Math.min(VOLLEY.damage, u.hp - VOLLEY.minHp);
+    u.hp -= damage;
+    emit(state, { type: 'volley', cityId: city.id, player, unitId: u.id, victim: u.owner, damage, hp: u.hp, q: u.q, r: u.r });
+    addLog(state, `${PLAYERS[player].name}: the walls of ${city.name} hit ${UNIT_TYPES[u.type].name} (−${damage})`, {
+      by: player, also: [u.owner], at: [city],
+    });
+  }
 }
 
 // ---------- road building ----------
@@ -1966,6 +2004,8 @@ export function turnReport(before, events, viewer) {
         rep.citiesLost.push(c.name === 'Your Capital' ? 'your capital' : `the city ${c.name}`);
         rep.spots.push({ q: c.q, r: c.r, kind: 'city' });
       }
+    } else if (ev.type === 'volley' && ev.victim === viewer && ev.player !== viewer) {
+      wounded.add(ev.unitId);
     } else if (ev.type === 'disband') {
       wounded.delete(ev.unitId);
     } else if (ev.type === 'pillage' && ev.victim === viewer && ev.player !== viewer) {

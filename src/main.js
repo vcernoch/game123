@@ -690,16 +690,21 @@ function doEndTurn(force = false) {
   pending = null;
   showNotice([]);
   undoStack = [];
+  const beforeEnd = cloneState(state);
   endTurn(state);
-  drainEvents(state);
+  const volleys = drainEvents(state).filter((e) => e.type === 'volley'); // the player's walls shoot
   aiRunning = true;
+  save();
   draw();
   setTimeout(async () => {
+    if (volleys.length) await anim.play(beforeEnd, volleys);
     const before = cloneState(state);
     runAITurn(state);
     const events = drainEvents(state);
     if (state.winner === null) endTurn(state);
-    const happened = drainEvents(state).filter((e) => e.type === 'happening' && e.player === 0);
+    const ended = drainEvents(state);
+    const happened = ended.filter((e) => e.type === 'happening' && e.player === 0);
+    events.push(...ended.filter((e) => e.type === 'volley')); // the AI's walls shoot at the end of its turn
     // the report must be made before the animation, which plays the events on top of `before`
     const report = state.winner === null ? turnReport(before, events, 0) : null;
     updateSightings(state, 0, events);
