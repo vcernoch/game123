@@ -10,6 +10,7 @@ Newest entry on top. Format: date – what was done – test status – question
 - State structure: `state.version` 22 (optional `tile.roadBuilt`), trivial migration.
 - Test adjusted (not weakened): the smoke "Same map again" check now also removes built roads (`roadBuilt`) before comparing maps, because road building is a third thing a game may change on its map.
 - Tests: +2 logic (gold, turn spent, cheaper step next to the capital, event replay, not undoable, sound, save/import keeps the road, migration, keys B; who can't – no gold, attacked, no moves, not own turn, already a road, in a city, outside own territory; disabled-button case; the AI keeps its reserve, doesn't build next to an enemy, builds otherwise; AI-vs-AI games build roads without going under the reserve). Smoke test: a warrior next to the capital builds a road with the panel button, checks gold, tile and chronicle (`artifacts/screenshot-road.png`).
+- Small fix: the unit panel said "already attacked" also after pillage, repair or road building (they end the turn the same way); a unit with no moves left now reads "done for this turn".
 - Status: `npm run check` green (93 logic tests + smoke).
 
 ## 2026-11-16 – Swap places (v0.28.0)
