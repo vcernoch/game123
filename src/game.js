@@ -4,7 +4,7 @@ import { generateMap, hasRiverEdge } from './map.js';
 import {
   TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY, VISION, DIFFICULTY, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, ROAD_COST, RIVER, FLANK, HIGH_GROUND, CHARGE,
   FACTIONS, NO_FACTION, MAP_SIZES, HAPPENINGS, FORTIFY, TERRITORY, RESOURCES,
-  UPGRADES, UPGRADE, DISBAND, SIGHTINGS, RUINS, EXPLORE, PILLAGE, REPAIR, ROADWORK, SENTRY, VOLLEY,
+  UPGRADES, UPGRADE, DISBAND, SIGHTINGS, RUINS, EXPLORE, PILLAGE, REPAIR, ROADWORK, SENTRY, VOLLEY, ANIM_SPEEDS,
 } from './rules.js';
 import { createRng } from './rng.js';
 
@@ -1614,6 +1614,20 @@ export function endTurn(state) {
   }
   if (state.happenings) rollHappening(state, state.current);
   return true;
+}
+
+// ---------- animation speed (viewer preference) ----------
+
+// The speed entry for a saved preference id. Without a valid saved choice the system "reduce motion"
+// setting picks 'off', otherwise 'normal'.
+export function animSpeedOf(id, reducedMotion = false) {
+  return ANIM_SPEEDS.find((s) => s.id === id) || ANIM_SPEEDS.find((s) => s.id === (reducedMotion ? 'off' : 'normal'));
+}
+
+// The next speed after `id` (normal → fast → off → normal).
+export function nextAnimSpeed(id) {
+  const i = ANIM_SPEEDS.findIndex((s) => s.id === id);
+  return ANIM_SPEEDS[(i + 1) % ANIM_SPEEDS.length];
 }
 
 // ---------- wall volley ----------

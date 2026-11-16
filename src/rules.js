@@ -195,6 +195,14 @@ export const EXPLORE = { ruinBonus: 6, enemyRadius: 2, legsPerTurn: 3 };
 // besiegers, they don't finish them off.
 export const VOLLEY = { damage: 2, range: 1, minHp: 1 };
 
+// Animation speed (a viewer preference, not part of the game state): mult scales animation durations,
+// 0 = no animations. The header button / key A cycle through them in this order.
+export const ANIM_SPEEDS = [
+  { id: 'normal', mult: 1, icon: '▶', label: 'normal' },
+  { id: 'fast', mult: 0.4, icon: '⏩', label: 'fast' },
+  { id: 'off', mult: 0, icon: '⏸', label: 'off' },
+];
+
 // Sentry: a unit on watch is skipped by Tab and the end-turn reminder until, at the start of its owner's
 // turn, a visible enemy is within `radius` (it wakes up) – or, when it was put on watch wounded, until it
 // is fully healed ("rest until healed").

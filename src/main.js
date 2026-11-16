@@ -2,7 +2,7 @@
 import {
   createGame, reachable, attackTargets, moveUnit, attack, buyUnit, endTurn,
   unitAt, cityAt, getUnit, incomeOf, previewAttack, tileAt, pathTo, nextActiveUnit, cityInfo,
-  cloneState, drainEvents, migrateState, logFor, turnReport, reportText, reportIsBad, isUndoableMove, canFortify, fortify, canSentry, sentry, SENTRY_TEXT, activeUnits, territoryOwner, cityResources, unitSummary, planRoute, setOrder, runOrders, cancelOrder, visibleTiles, exploredTiles, build, unitCost, hasBuilding,
+  cloneState, drainEvents, migrateState, logFor, turnReport, reportText, reportIsBad, isUndoableMove, canFortify, fortify, canSentry, sentry, SENTRY_TEXT, animSpeedOf, nextAnimSpeed, activeUnits, territoryOwner, cityResources, unitSummary, planRoute, setOrder, runOrders, cancelOrder, visibleTiles, exploredTiles, build, unitCost, hasBuilding,
   rankOf, rankMult, buildingCost, unitMove, factionOf, riverDefense, flankers, zocTiles, threatTiles, exportGame, importGame, saveFileName, parseSeed, restartOptions,
   upgradeOptions, upgradeUnit, canDisband, disbandRefund, disbandUnit, chargeReady,
   updateSightings, lastSeen, lastSeenAt, lastSeenText, armyOverview, ARMY_STATUS, ruinBelieved,
@@ -53,9 +53,12 @@ const anim = createAnimator(
 );
 let lastWinner = state.winner;
 let showThreats = false; // threat overlay, set from the preferences below
+let reducedMotion = false;
 try {
-  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) anim.speed = 0;
+  reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 } catch { /* old browser */ }
+let animSpeed = animSpeedOf(loadPrefs().animSpeed, reducedMotion); // see ANIM_SPEEDS
+anim.speed = animSpeed.mult;
 
 // Unit on a tile, only if the player can see it (enemy units in fog are treated as absent).
 function seenUnitAt(q, r) {
@@ -981,6 +984,7 @@ window.addEventListener('keydown', (ev) => {
   else if (act.type === 'recruit') recruitSelected(act.unitType);
   else if (act.type === 'help') $('keys-dialog').showModal();
   else if (act.type === 'threats') toggleThreats();
+  else if (act.type === 'animSpeed') cycleAnimSpeed();
   else if (act.type === 'rally') startRallyPick();
   else if (act.type === 'swap') startSwapPick();
   else if (act.type === 'escape') {
@@ -1005,6 +1009,24 @@ function updateThreatButton() {
 $('threats').addEventListener('click', toggleThreats);
 showThreats = loadPrefs().threats === true;
 updateThreatButton();
+
+// Animation speed (A / header button): normal → fast → off; remembered in the preferences.
+function cycleAnimSpeed() {
+  animSpeed = nextAnimSpeed(animSpeed.id);
+  anim.speed = animSpeed.mult;
+  if (!animSpeed.mult) anim.skip(); // turning animations off also finishes the one running
+  savePrefs({ ...loadPrefs(), animSpeed: animSpeed.id });
+  updateAnimButton();
+}
+
+function updateAnimButton() {
+  const b = $('anim-speed');
+  b.textContent = animSpeed.icon;
+  b.setAttribute('aria-pressed', String(animSpeed.mult > 0));
+  b.title = `Animations: ${animSpeed.label} (click or A to change)`;
+}
+$('anim-speed').addEventListener('click', cycleAnimSpeed);
+updateAnimButton();
 
 // Recruits in the selected own city (number keys and the panel buttons).
 function recruitSelected(type) {
@@ -1155,6 +1177,7 @@ window.__game = {
   isBusy: busy,
   version: GAME_VERSION,
   setAnimSpeed: (x) => { anim.speed = x; },
+  animSpeed: () => ({ id: animSpeed.id, speed: anim.speed }),
   refresh: () => { resize(); draw(); },
   newGame: (seed, options = {}) => { state = createGame({ seed, ...options }); updateSightings(state, 0); undoStack = []; showNotice([]); resize(); draw(); },
   showNotice: (events) => { showNotice(events); draw(); },

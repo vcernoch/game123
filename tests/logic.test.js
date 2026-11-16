@@ -13,7 +13,7 @@ import {
   armyOverview, unitStatus, unitWhere, ARMY_STATUS, ruinBelieved, ruinKind, exploreRuin,
   exploreTarget, canExplore, setExplore, followExplore, canPillage, pillage, isPillaged, pillageTurnsLeft, cityAt, canRepair, repair,
   rallyPath, rallyTarget, canRally, setRally, clearRally, canSwap, swapPartners, swapUnits,
-  canBuildRoad, buildRoad, roadLinks, canSentry, sentry, checkSentries, SENTRY_TEXT, volleyTarget, cityVolleys,
+  canBuildRoad, buildRoad, roadLinks, canSentry, sentry, checkSentries, SENTRY_TEXT, volleyTarget, cityVolleys, animSpeedOf, nextAnimSpeed,
 } from '../src/game.js';
 import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
@@ -32,7 +32,7 @@ import { distance, key, neighbors } from '../src/hex.js';
 import {
   RESOURCES, FORTIFY, TERRITORY, ECONOMY, UNIT_TYPES, TERRAIN, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FLANK, HIGH_GROUND, CHARGE, REPAIR,
   UPGRADES, UPGRADE, DISBAND, RUINS, EXPLORE, PILLAGE,
-  SIGHTINGS, ROADWORK, SENTRY, VOLLEY,
+  SIGHTINGS, ROADWORK, SENTRY, VOLLEY, ANIM_SPEEDS,
 } from '../src/rules.js';
 
 test('map is deterministic and starting cities are connected', () => {
@@ -1339,7 +1339,7 @@ test('keyboard shortcuts: one table for keys and the overlay', () => {
   assert.equal(keyAction('q'), null);
   // every entry has overlay text, and no key is claimed by two entries
   for (const sc of SHORTCUTS) assert.ok(sc.keys && sc.text);
-  for (const [k, shift] of [['Tab', false], ['Enter', false], ['Enter', true], ['f', false], ['x', false], ['g', false], ['1', false], ['?', true]]) {
+  for (const [k, shift] of [['Tab', false], ['Enter', false], ['Enter', true], ['f', false], ['x', false], ['g', false], ['w', false], ['a', false], ['1', false], ['?', true]]) {
     assert.equal(SHORTCUTS.filter((sc) => sc.match(k, shift)).length, 1, `${k}${shift ? '+shift' : ''}`);
   }
 });
@@ -3368,4 +3368,25 @@ test('wall volley: who shoots and who is hit; threat overlay; AI games', () => {
     }
   }
   assert.ok(shots > 0, 'walls shoot in real games');
+});
+
+test('animation speed: normal → fast → off cycle, saved choice wins over reduced motion', () => {
+  assert.deepEqual(ANIM_SPEEDS.map((x) => x.id), ['normal', 'fast', 'off']);
+  assert.equal(animSpeedOf('normal').mult, 1);
+  assert.ok(animSpeedOf('fast').mult > 0 && animSpeedOf('fast').mult < 1, 'fast is shorter but still shown');
+  assert.equal(animSpeedOf('off').mult, 0);
+  // no or broken preference: the system setting decides
+  assert.equal(animSpeedOf(undefined).id, 'normal');
+  assert.equal(animSpeedOf('warp').id, 'normal');
+  assert.equal(animSpeedOf(undefined, true).id, 'off', 'reduce motion → off by default');
+  assert.equal(animSpeedOf('fast', true).id, 'fast', 'an explicit choice wins');
+  // the cycle visits every speed and comes back
+  let id = 'normal';
+  const seen = [];
+  for (let i = 0; i < ANIM_SPEEDS.length; i++) { id = nextAnimSpeed(id).id; seen.push(id); }
+  assert.deepEqual(seen, ['fast', 'off', 'normal']);
+  assert.equal(nextAnimSpeed('warp').id, 'normal');
+  for (const x of ANIM_SPEEDS) assert.ok(x.icon && x.label);
+  assert.equal(keyAction('a').type, 'animSpeed');
+  assert.equal(keyAction('A').type, 'animSpeed');
 });

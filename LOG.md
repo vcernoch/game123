@@ -2,6 +2,13 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-16 – Animation speed (v0.29.0, same run as sentry and wall volley)
+- Phase 14, third task of this run. The AI turn always played at one fixed speed; animations could only be skipped per turn (click / Esc) or switched off by the operating system's "reduce motion" setting. Experienced players want them faster, some want none.
+- `ANIM_SPEEDS` in `rules.js` (normal ×1, fast ×0.4, off). Pure helpers in `game.js`: `animSpeedOf(id, reducedMotion)` (a valid saved choice wins; otherwise "reduce motion" → off, else normal) and `nextAnimSpeed`. It's a viewer preference stored with the other preferences in localStorage, not game state (`state.version` stays 23).
+- UI: a ▶ / ⏩ / ⏸ icon button in the header next to sound, key A (shortcut overlay); switching to off also finishes a running animation. Help text updated. `window.__game.animSpeed()` for tests.
+- Tests: +1 logic (order, multipliers, defaults with/without reduce motion, explicit choice wins, broken pref, cycle, key A; the shortcut uniqueness check now also covers W and A). Smoke test: the button switches to fast (icon, speed, saved preference), A to off and back to normal. Checked the header at 390 px: the extra button fits on the first row.
+- Status: `npm run check` green (98 logic tests + smoke).
+
 ## 2026-11-16 – Wall volley (v0.29.0, same run as sentry)
 - Phase 14, second task of this run (the version was bumped once for the run). Walls only helped a garrison that was attacked, so a besieger could sit next to a city for free – in AI-vs-AI games two of 20 matches ended in a 150-turn stalemate this way. Now walls fight back a little.
 - `VOLLEY` in `rules.js` (`damage` 2, `range` 1, `minHp` 1). In `game.js`: `volleyTarget` (owned city with walls; enemy units within range above `minHp`; weakest first, then lowest id) and `cityVolleys`, called at the start of `endTurn` for the player ending the turn – one shot per walled city, no counterattack, never below 1 HP (walls harass, they don't kill, so no XP/kill bookkeeping is needed). New replayable `volley` event (`applyEvent` sets the HP), chronicle entry seen by both sides, `turnReport` counts the victim's unit as wounded. `threatTiles` adds +1 on tiles next to a known enemy walled city, so both the T overlay and the AI's danger map (archers and catapults keep out) know about it. Walls' description updated.

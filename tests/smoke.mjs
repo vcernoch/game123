@@ -325,6 +325,20 @@ try {
   });
   if (!volThreat) throw new Error('the threat overlay ignores enemy walls');
 
+  // animation speed: the header button cycles normal → fast → off (remembered), A cycles back to normal
+  const sp0 = await page.evaluate(() => window.__game.animSpeed().id);
+  await page.click('#anim-speed');
+  const sp1 = await page.evaluate(() => ({ ...window.__game.animSpeed(), icon: document.getElementById('anim-speed').textContent,
+    pref: JSON.parse(localStorage.getItem(Object.keys(localStorage).find((k) => localStorage.getItem(k).includes('animSpeed')) || 'x') || '{}').animSpeed }));
+  if (sp0 !== 'normal' || sp1.id !== 'fast' || !(sp1.speed > 0 && sp1.speed < 1) || sp1.icon !== '⏩' || sp1.pref !== 'fast') {
+    throw new Error(`animation speed button: ${JSON.stringify({ sp0, sp1 })}`);
+  }
+  await page.keyboard.press('a');
+  const sp2 = await page.evaluate(() => window.__game.animSpeed());
+  await page.keyboard.press('a');
+  const sp3 = await page.evaluate(() => window.__game.animSpeed());
+  if (sp2.id !== 'off' || sp2.speed !== 0 || sp3.id !== 'normal' || sp3.speed !== 1) throw new Error(`key A: ${JSON.stringify({ sp2, sp3 })}`);
+
   // end-turn reminder: with idle units the first press only asks, the second ends the turn
   await page.evaluate(() => window.__game.newGame(4242));
   const label0 = await page.textContent('#end-turn');
