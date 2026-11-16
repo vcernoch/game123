@@ -2,6 +2,16 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-16 – Road building (v0.28.0, same run as swap places)
+- Phase 13 (logistics, own improvement), second task of this run (the version was bumped once for the run, as `CLAUDE.md` asks). Roads came only with the map; now the player can shape the network – e.g. a fast lane from the capital to the front, or through forest and hills where a road helps most (cost 2 → ½).
+- `ROADWORK` in `rules.js` (`gold` 4, `aiReserve` 16). In `game.js`: `canBuildRoad(state, unit, { affordable })` (own unit of the current player of any kind, hasn't attacked, a move left, roadless non-city tile in its own territory), `roadLinks` (road tiles / cities next to a tile), `buildRoad` (sets `tile.road` and `tile.roadBuilt`, −4 gold, the unit's turn ends, fortify / orders cleared, chronicle entry). New replayable `road` event (floater "🛤 road built", the `build` sound). Not undoable. A built road is an ordinary road: both sides use it, bridges over rivers appear when both banks have a road.
+- AI: `layRoad` at the end of its turn – with at least 16 + 4 gold, one idle unit a turn (moves left, nothing else to do) builds where the road joins its network (next to a road or own city), preferring links between two pieces and costly terrain, never with a visible enemy within 2 tiles. Rare in practice (~1.5 roads per AI-vs-AI game on Medium) – AI units seldom stand idle, which is fine: roads are mostly a player tool.
+- UI: "🛤 Build road (4 gold)" button in the unit panel (disabled when short of gold), key B, the tile panel says "built road". Help text and shortcut overlay updated.
+- State structure: `state.version` 22 (optional `tile.roadBuilt`), trivial migration.
+- Test adjusted (not weakened): the smoke "Same map again" check now also removes built roads (`roadBuilt`) before comparing maps, because road building is a third thing a game may change on its map.
+- Tests: +2 logic (gold, turn spent, cheaper step next to the capital, event replay, not undoable, sound, save/import keeps the road, migration, keys B; who can't – no gold, attacked, no moves, not own turn, already a road, in a city, outside own territory; disabled-button case; the AI keeps its reserve, doesn't build next to an enemy, builds otherwise; AI-vs-AI games build roads without going under the reserve). Smoke test: a warrior next to the capital builds a road with the panel button, checks gold, tile and chronicle (`artifacts/screenshot-road.png`).
+- Status: `npm run check` green (93 logic tests + smoke).
+
 ## 2026-11-16 – Swap places (v0.28.0)
 - **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.26.0–v0.28.0) is ahead of `main` (v0.25.0) – please merge it.
 - Phase 13 (logistics, own improvement), new task. A wounded unit at the front with a fresh one right behind it could only get out by walking around – often impossible in a narrow pass or next to a river. Now the two can trade tiles.

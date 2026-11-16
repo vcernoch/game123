@@ -7,7 +7,7 @@ import {
   upgradeOptions, upgradeUnit, canDisband, disbandRefund, disbandUnit, chargeReady,
   updateSightings, lastSeen, lastSeenAt, lastSeenText, armyOverview, ARMY_STATUS, ruinBelieved,
   canExplore, setExplore, canPillage, pillage, isPillaged, pillageTurnsLeft, canRepair, repair,
-  rallyPath, setRally, clearRally, swapPartners, swapUnits,
+  rallyPath, setRally, clearRally, swapPartners, swapUnits, canBuildRoad, buildRoad,
 } from './game.js';
 import { createAnimator } from './anim.js';
 import { decideTap } from './input.js';
@@ -19,7 +19,7 @@ import { SHORTCUTS, keyAction, recruitKey } from './keys.js';
 import { render, canvasSize, pickHex, tileCenter } from './render.js';
 import { key } from './hex.js';
 import {
-  UNIT_TYPES, TERRAIN, PLAYERS, DIFFICULTY, BUILDINGS, RANKS, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FORTIFY, TERRITORY, ECONOMY, RESOURCES, HIGH_GROUND, CHARGE, RUINS, PILLAGE, REPAIR,
+  UNIT_TYPES, TERRAIN, PLAYERS, DIFFICULTY, BUILDINGS, RANKS, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FORTIFY, TERRITORY, ECONOMY, RESOURCES, HIGH_GROUND, CHARGE, RUINS, PILLAGE, REPAIR, ROADWORK,
 } from './rules.js';
 
 const SAVE_KEY = 'game123-save';
@@ -221,6 +221,10 @@ function updateHud() {
       const ok = canRepair(state, u);
       html += `<button data-repair class="secondary wide-btn" ${ok ? '' : 'disabled'} title="Rebuild this pillaged resource of yours: it works again right away; costs ${REPAIR.gold} gold and ends the unit's turn (R)">🔧 Repair (${REPAIR.gold} gold)</button>`;
     }
+    if (u.owner === 0 && !busy() && canBuildRoad(state, u, { affordable: false })) {
+      const ok = canBuildRoad(state, u);
+      html += `<button data-road class="secondary wide-btn" ${ok ? '' : 'disabled'} title="Lay a road on this tile of your territory: moving between road tiles costs ½; costs ${ROADWORK.gold} gold and ends the unit's turn (B)">🛤 Build road (${ROADWORK.gold} gold)</button>`;
+    }
     if (u.fortified) html += `<p class="fortified">⛨ Fortified: +${Math.round(FORTIFY.defBonus * 100)} % defense until it moves or attacks</p>`;
     if (u.owner === 0 && !busy() && canFortify(state, u)) {
       html += `<button data-fortify class="secondary wide-btn" title="Dig in: +${Math.round(FORTIFY.defBonus * 100)} % defense, ends the unit's turn (F)">⛨ Fortify</button>`;
@@ -287,7 +291,7 @@ function updateHud() {
   } else if (!u && !city && hover && tileAt(state, hover.q, hover.r)) {
     const tile = tileAt(state, hover.q, hover.r);
     const t = TERRAIN[tile.terrain];
-    const road = tile.road ? ' · road (move cost ½ along roads)' : '';
+    const road = tile.road ? ` · ${tile.roadBuilt ? 'built road' : 'road'} (move cost ½ along roads)` : '';
     const river = tile.rivers && tile.rivers.length ? ` · river (crossing +${RIVER.crossCost} move, defender +${Math.round(RIVER.defBonus * 100)} %)` : '';
     const high = HIGH_GROUND.terrain.includes(tile.terrain) ? ` · high ground (attack +${Math.round(HIGH_GROUND.atkBonus * 100)} % against units below)` : '';
     const noCharge = CHARGE.blockedBy.includes(tile.terrain) ? ' · no cavalry charge' : '';
@@ -921,6 +925,7 @@ $('info').addEventListener('click', (ev) => {
   if (ev.target.closest('button[data-explore]')) { exploreSelected(); return; }
   if (ev.target.closest('button[data-pillage]')) { pillageSelected(); return; }
   if (ev.target.closest('button[data-repair]')) { repairSelected(); return; }
+  if (ev.target.closest('button[data-road]')) { roadSelected(); return; }
   if (ev.target.closest('button[data-disband]')) { disbandSelected(); return; }
   const uBtn = ev.target.closest('button[data-upgrade]');
   if (uBtn) { upgradeSelected(uBtn.dataset.upgrade); return; }
@@ -954,6 +959,7 @@ window.addEventListener('keydown', (ev) => {
   else if (act.type === 'explore') exploreSelected();
   else if (act.type === 'pillage') pillageSelected();
   else if (act.type === 'repair') repairSelected();
+  else if (act.type === 'road') roadSelected();
   else if (act.type === 'disband') disbandSelected();
   else if (act.type === 'recruit') recruitSelected(act.unitType);
   else if (act.type === 'help') $('keys-dialog').showModal();
@@ -1032,6 +1038,17 @@ function repairSelected() {
   if (!u || u.owner !== 0 || !canRepair(state, u)) return;
   const before = cloneState(state);
   repair(state, u.id);
+  undoStack = [];
+  afterAction(before);
+}
+
+// Lays a road under the selected unit (B / button in the panel).
+function roadSelected() {
+  if (busy() || state.winner !== null) return;
+  const u = selectedUnit();
+  if (!u || u.owner !== 0 || !canBuildRoad(state, u)) return;
+  const before = cloneState(state);
+  buildRoad(state, u.id);
   undoStack = [];
   afterAction(before);
 }

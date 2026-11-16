@@ -4,7 +4,7 @@ import { generateMap, hasRiverEdge } from './map.js';
 import {
   TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY, VISION, DIFFICULTY, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, ROAD_COST, RIVER, FLANK, HIGH_GROUND, CHARGE,
   FACTIONS, NO_FACTION, MAP_SIZES, HAPPENINGS, FORTIFY, TERRITORY, RESOURCES,
-  UPGRADES, UPGRADE, DISBAND, SIGHTINGS, RUINS, EXPLORE, PILLAGE, REPAIR,
+  UPGRADES, UPGRADE, DISBAND, SIGHTINGS, RUINS, EXPLORE, PILLAGE, REPAIR, ROADWORK,
 } from './rules.js';
 import { createRng } from './rng.js';
 
@@ -128,7 +128,7 @@ function countStat(state, name, player) {
   state.stats[name][player]++;
 }
 
-export const STATE_VERSION = 21;
+export const STATE_VERSION = 22;
 
 // Converts a saved state of an older version to the current one; returns null for an unknown format.
 export function migrateState(s) {
@@ -216,6 +216,10 @@ export function migrateState(s) {
   if (s.version === 20) {
     // rally points arrived in version 21 – a missing `city.rally` means none
     s.version = 21;
+  }
+  if (s.version === 21) {
+    // road building arrived in version 22 – a missing `tile.roadBuilt` means the road came with the map
+    s.version = 22;
   }
   return s.version === STATE_VERSION ? s : null;
 }
@@ -422,6 +426,12 @@ export function applyEvent(state, ev) {
   } else if (ev.type === 'repair') {
     const t = tileAt(state, ev.q, ev.r);
     if (t) delete t.pillagedUntil;
+    const u = getUnit(state, ev.unitId);
+    if (u) { u.movesLeft = 0; u.hasAttacked = true; delete u.fortified; }
+    if (ev.gold) state.gold[ev.player] -= ev.gold;
+  } else if (ev.type === 'road') {
+    const t = tileAt(state, ev.q, ev.r);
+    if (t) { t.road = true; t.roadBuilt = true; }
     const u = getUnit(state, ev.unitId);
     if (u) { u.movesLeft = 0; u.hasAttacked = true; delete u.fortified; }
     if (ev.gold) state.gold[ev.player] -= ev.gold;
@@ -1532,6 +1542,49 @@ export function endTurn(state) {
   }
   if (state.happenings) rollHappening(state, state.current);
   return true;
+}
+
+// ---------- road building ----------
+// A built road works like a road from the map (tile.road) – both sides can use it; `tile.roadBuilt` only
+// remembers that it was built during the game.
+
+// Can the unit lay a road on the tile it stands on? An own unit of the current player (any kind) that hasn't
+// attacked and has moves left, on a roadless tile of its own territory that is not a city.
+// `affordable` = also checks the gold.
+export function canBuildRoad(state, unit, { affordable = true } = {}) {
+  if (!unit || unit.owner !== state.current || state.winner !== null) return false;
+  if (unit.hasAttacked || unit.movesLeft <= 0) return false;
+  const tile = tileAt(state, unit.q, unit.r);
+  if (!tile || tile.road || cityAt(state, unit.q, unit.r)) return false;
+  if (territoryOwner(state, unit.q, unit.r) !== unit.owner) return false;
+  return !affordable || state.gold[unit.owner] >= ROADWORK.gold;
+}
+
+// Own road tiles and own cities next to the tile: a new road there joins the network (used by the AI and the panel).
+export function roadLinks(state, q, r) {
+  return neighbors(q, r).filter((n) => {
+    const t = tileAt(state, n.q, n.r);
+    return t && (t.road || cityAt(state, n.q, n.r));
+  }).length;
+}
+
+// Lays a road under the unit. Returns the 'road' event or null when not allowed.
+export function buildRoad(state, unitId) {
+  const unit = getUnit(state, unitId);
+  if (!canBuildRoad(state, unit)) return null;
+  const tile = tileAt(state, unit.q, unit.r);
+  tile.road = true;
+  tile.roadBuilt = true;
+  state.gold[unit.owner] -= ROADWORK.gold;
+  unit.movesLeft = 0;
+  unit.hasAttacked = true;
+  delete unit.fortified;
+  delete unit.goto;
+  delete unit.explore;
+  const ev = { type: 'road', unitId: unit.id, player: unit.owner, q: tile.q, r: tile.r, gold: ROADWORK.gold };
+  emit(state, ev);
+  addLog(state, `${PLAYERS[unit.owner].name}: ${UNIT_TYPES[unit.type].name} built a road (−${ROADWORK.gold} gold)`, { by: unit.owner, at: [tile] });
+  return ev;
 }
 
 // ---------- pillage ----------

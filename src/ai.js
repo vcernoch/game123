@@ -4,9 +4,9 @@ import {
   reachable, attackTargets, previewAttack, moveUnit, attack, buyUnit,
   unitAt, getUnit, tileAt, fortify, difficultyOf, visibleTiles, exploredTiles, build, hasBuilding, unitCost, buildingCost, factionOf,
   threatTiles, cityAt, upgradeOptions, upgradeUnit, ruinBelieved, canPillage, pillage, isPillaged, repair, pillageTurnsLeft, territoryOwner,
-  swapPartners, swapUnits,
+  swapPartners, swapUnits, canBuildRoad, buildRoad, roadLinks,
 } from './game.js';
-import { UNIT_TYPES, TERRAIN } from './rules.js';
+import { UNIT_TYPES, TERRAIN, ROADWORK } from './rules.js';
 
 // What the AI knows about the map. On hard it sees everything, otherwise only what it has explored and sees.
 export function aiKnowledge(state, me) {
@@ -56,6 +56,25 @@ export function runAITurn(state) {
   if (state.winner !== null) return;
   recruit(state, me);
   buildSomething(state, me);
+  layRoad(state, me, know);
+}
+
+// Road building: with spare gold, one idle unit a turn lays a road in own territory where it joins the
+// network (next to a road or an own city), preferring tiles that link two pieces; never with a visible enemy
+// within 2 tiles. Returns the 'road' event or null.
+export function layRoad(state, me, know = aiKnowledge(state, me)) {
+  if (state.gold[me] < ROADWORK.aiReserve + ROADWORK.gold) return null;
+  let best = null;
+  let bestScore = 0;
+  for (const u of state.units) {
+    if (u.owner !== me || !canBuildRoad(state, u) || enemiesNear(state, u, know, 2).length) continue;
+    const links = roadLinks(state, u.q, u.r);
+    if (!links) continue;
+    // cost-2 terrain gains the most from a road
+    const score = Math.min(links, 2) * 2 + TERRAIN[tileAt(state, u.q, u.r).terrain].cost;
+    if (score > bestScore || (score === bestScore && u.id < best.id)) { best = u; bestScore = score; }
+  }
+  return best ? buildRoad(state, best.id) : null;
 }
 
 // Carries out lined-up melee strikes in the order they were planned (later plans assume the earlier hits);

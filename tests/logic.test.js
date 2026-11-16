@@ -13,12 +13,13 @@ import {
   armyOverview, unitStatus, unitWhere, ARMY_STATUS, ruinBelieved, ruinKind, exploreRuin,
   exploreTarget, canExplore, setExplore, followExplore, canPillage, pillage, isPillaged, pillageTurnsLeft, cityAt, canRepair, repair,
   rallyPath, rallyTarget, canRally, setRally, clearRally, canSwap, swapPartners, swapUnits,
+  canBuildRoad, buildRoad, roadLinks,
 } from '../src/game.js';
 import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
   dangerMap, dangerPenalty, moveTowardsGoal, DANGER, unexploredLand, SCOUT_WHEN_UNKNOWN, aiKnowledge,
   upgradeSomething, UPGRADE_HORSE_RADIUS, strikeLinedUp, pillageGoals, PILLAGE_DETOUR, repairGoals, REPAIR_DETOUR,
-  relieveWounded, RELIEF_MIN_HP,
+  relieveWounded, RELIEF_MIN_HP, layRoad,
 } from '../src/ai.js';
 import { decideTap } from '../src/input.js';
 import { SHORTCUTS, keyAction, recruitKey } from '../src/keys.js';
@@ -31,7 +32,7 @@ import { distance, key, neighbors } from '../src/hex.js';
 import {
   RESOURCES, FORTIFY, TERRITORY, ECONOMY, UNIT_TYPES, TERRAIN, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FLANK, HIGH_GROUND, CHARGE, REPAIR,
   UPGRADES, UPGRADE, DISBAND, RUINS, EXPLORE, PILLAGE,
-  SIGHTINGS,
+  SIGHTINGS, ROADWORK,
 } from '../src/rules.js';
 
 test('map is deterministic and starting cities are connected', () => {
@@ -3060,4 +3061,112 @@ test('swap places: who can\'t, picking on the map, key S, the AI relieves a woun
   for (const u of [calm.front, calm.back]) u.owner = 1;
   calm.front.hp = 2;
   assert.equal(relieveWounded(calm.s, calm.front, aiKnowledge(calm.s, 1)), null);
+});
+
+// A roadless plains tile in the player's territory, two tiles from its capital, with a player warrior on it.
+function roadSetup(seed = 3) {
+  const s = createGame({ seed, fog: false });
+  const cap = s.cities.find((c) => c.capital && c.owner === 0);
+  s.units = s.units.filter((u) => u.owner !== 0);
+  const tile = Object.values(s.tiles).find((t) => t.terrain === 'plains' && !t.road && !t.ruin && !cityAt(s, t.q, t.r)
+    && territoryOwner(s, t.q, t.r) === 0 && distance(t, cap) === 1);
+  const u = spawnUnit(s, 'warrior', 0, tile.q, tile.r);
+  u.movesLeft = 2; u.hasAttacked = false;
+  s.gold[0] = 30;
+  drainEvents(s);
+  return { s, cap, tile, u };
+}
+
+test('road building: a unit lays a road in own territory, it costs gold and the turn, moves get cheaper, the event replays', () => {
+  const { s, cap, tile, u } = roadSetup();
+  assert.ok(canBuildRoad(s, u));
+  assert.ok(roadLinks(s, tile.q, tile.r) >= 1, 'next to the capital');
+  const before = cloneState(s);
+  const ev = buildRoad(s, u.id);
+  assert.equal(ev.type, 'road');
+  assert.equal(s.gold[0], 30 - ROADWORK.gold);
+  assert.ok(tile.road && tile.roadBuilt);
+  assert.equal(u.movesLeft, 0);
+  assert.ok(u.hasAttacked, 'the unit\'s turn is over');
+  assert.ok(!canBuildRoad(s, u), 'not twice');
+  assert.match(s.log.at(-1).msg, /^You: Warrior built a road \(−4 gold\)$/);
+  // capitals sit on the road network, so stepping between them is now a road step
+  if (tileAt(s, cap.q, cap.r).road) assert.equal(stepCost(s, cap, tile), 0.5);
+  const evs = drainEvents(s);
+  for (const e of evs) applyEvent(before, e);
+  assert.deepEqual(snapshot(before), snapshot(s));
+  assert.equal(before.gold[0], s.gold[0]);
+  assert.ok(tileAt(before, tile.q, tile.r).roadBuilt);
+  assert.equal(isUndoableMove(cloneState(s), s, evs, 0), false);
+  assert.equal(soundFor(ev, 0), 'build');
+  // saves keep the road, an old save migrates
+  const back = importGame(exportGame(s, GAME_VERSION));
+  assert.ok(back.state.tiles[key(tile.q, tile.r)].roadBuilt);
+  const old = cloneState(s);
+  old.version = 21;
+  assert.equal(migrateState(old).version, STATE_VERSION);
+  assert.equal(keyAction('b').type, 'road');
+  assert.equal(keyAction('B').type, 'road');
+});
+
+test('road building: who can\'t, and the AI extends its network with spare gold', () => {
+  const t = roadSetup();
+  const cases = [
+    ['no gold', (s) => { s.gold[0] = ROADWORK.gold - 1; }],
+    ['attacked', (s, u) => { u.hasAttacked = true; }],
+    ['no moves', (s, u) => { u.movesLeft = 0; }],
+    ['not own turn', (s) => { s.current = 1; }],
+    ['already a road', (s, u) => { tileAt(s, u.q, u.r).road = true; }],
+    ['in a city', (s, u) => { const c = s.cities.find((x) => x.owner === 0); u.q = c.q; u.r = c.r; }],
+    ['outside own territory', (s, u) => {
+      const far = Object.values(s.tiles).find((x) => isPassable(s, x.q, x.r) && !x.road && !cityAt(s, x.q, x.r) && territoryOwner(s, x.q, x.r) !== 0);
+      u.q = far.q; u.r = far.r;
+    }],
+  ];
+  for (const [why, spoil] of cases) {
+    const s = cloneState(t.s);
+    const u = getUnit(s, t.u.id);
+    spoil(s, u);
+    assert.ok(!canBuildRoad(s, u), why);
+    assert.equal(buildRoad(s, u.id), null, why);
+  }
+  // short of gold the button still shows (disabled)
+  const poor = cloneState(t.s);
+  poor.gold[0] = 1;
+  assert.ok(canBuildRoad(poor, getUnit(poor, t.u.id), { affordable: false }));
+
+  // AI: an idle unit next to its capital builds a road only with spare gold and no enemy close by
+  const s = createGame({ seed: 3, fog: false });
+  s.current = 1;
+  const cap = s.cities.find((c) => c.capital && c.owner === 1);
+  s.units = [];
+  const tile = Object.values(s.tiles).find((x) => isPassable(s, x.q, x.r) && !x.road && !x.ruin && !cityAt(s, x.q, x.r)
+    && territoryOwner(s, x.q, x.r) === 1 && distance(x, cap) === 1);
+  const w = spawnUnit(s, 'warrior', 1, tile.q, tile.r);
+  w.movesLeft = 2; w.hasAttacked = false;
+  s.gold[1] = ROADWORK.aiReserve + ROADWORK.gold - 1;
+  assert.equal(layRoad(s, 1), null, 'keeps its reserve');
+  s.gold[1] += 1;
+  const foe = neighbors(tile.q, tile.r).find((n) => isPassable(s, n.q, n.r) && !cityAt(s, n.q, n.r));
+  const enemy = spawnUnit(s, 'warrior', 0, foe.q, foe.r);
+  assert.equal(layRoad(s, 1), null, 'not with an enemy next to it');
+  s.units = s.units.filter((x) => x.id !== enemy.id);
+  assert.equal(layRoad(s, 1).type, 'road');
+  assert.ok(tile.road);
+  assert.equal(s.gold[1], ROADWORK.aiReserve);
+  // AI-vs-AI games build some roads, always in their own territory and never go into debt
+  let roads = 0;
+  for (const seed of [7, 10]) {
+    const g = createGame({ seed });
+    for (let i = 0; i < 80 && g.winner === null; i++) {
+      runAITurn(g);
+      for (const e of drainEvents(g).filter((x) => x.type === 'road')) {
+        roads++;
+        assert.ok(g.gold[e.player] >= ROADWORK.aiReserve);
+      }
+      if (g.winner === null) endTurn(g);
+      drainEvents(g);
+    }
+  }
+  assert.ok(roads >= 1, `roads built: ${roads}`);
 });

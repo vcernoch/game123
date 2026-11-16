@@ -86,6 +86,7 @@ Check off `[x]` when done. Add new ideas to the end of the relevant phase or to 
 ## Phase 13 – logistics (own improvements)
 - [x] Rally points (🚩 / G): an own city can have a flag on a known tile; every unit recruited there gets a move order to it (or the nearest free tile next to it) and sets off at the start of the next turn; a captured city loses its flag
 - [x] Swap places (⇄ / S): two neighbouring own units with a move left trade tiles in one step, so a fresh unit can relieve a wounded one at the front; undoable like a move; the AI swaps a wounded unit pressed by an enemy with a healthy melee neighbour
+- [x] Road building (🛤 / B): a unit that hasn't attacked builds a road on a roadless tile of own territory for 4 gold (ends its turn); roads serve both sides; the AI extends its network next to roads and cities with spare gold
 
 ## Ideas (unordered)
 - Diplomacy with multiple AIs

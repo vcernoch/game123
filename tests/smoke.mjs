@@ -433,9 +433,13 @@ try {
   await page.screenshot({ path: 'artifacts/screenshot-mobile.png', fullPage: true });
 
   // "Same map again" on the game-over banner restarts the same map with the same settings
-  // (looted ruins and pillaged resources are the only changes a game makes to its map – undo them before comparing)
+  // (looted ruins, pillaged resources and built roads are the only changes a game makes to its map – undo them before comparing)
   const endTiles = await page.evaluate(() => JSON.stringify(Object.fromEntries(Object.entries(window.__game.getState().tiles)
-    .map(([k, t]) => { const { ruinGone, pillagedUntil, ...rest } = t; return [k, ruinGone ? { ...rest, ruin: true } : rest]; }))));
+    .map(([k, t]) => {
+      const { ruinGone, pillagedUntil, roadBuilt, ...rest } = t;
+      if (roadBuilt) delete rest.road;
+      return [k, ruinGone ? { ...rest, ruin: true } : rest];
+    }))));
   await page.click('#banner-again');
   const again = await page.evaluate(() => {
     const s = window.__game.getState();
@@ -865,6 +869,41 @@ try {
   await page.keyboard.press('z');
   const unswapped = await page.evaluate((id) => { const u = window.__game.getState().units.find((x) => x.id === id); return [u.q, u.r]; }, swap.a.id);
   if (unswapped[0] !== swap.a.q || unswapped[1] !== swap.a.r) throw new Error('swap: undo did not put the units back');
+
+  // road building: a warrior next to the capital builds a road with the panel button, the tile panel names it
+  const road = await page.evaluate(async () => {
+    const g = await import('./src/game.js');
+    const rnd = await import('./src/render.js');
+    window.__game.newGame(31, { fog: false, happenings: false });
+    const st = window.__game.getState();
+    st.units = st.units.filter((u) => u.owner !== 0);
+    st.gold[0] = 20;
+    const cap = st.cities.find((c) => c.capital && c.owner === 0);
+    const hexDist = (a, b) => Math.max(Math.abs(a.q - b.q), Math.abs(a.r - b.r), Math.abs(a.q + a.r - b.q - b.r));
+    const t = Object.values(st.tiles).find((x) => hexDist(x, cap) === 1 && g.isFree(st, x.q, x.r) && !x.road && !x.ruin
+      && g.territoryOwner(st, x.q, x.r) === 0);
+    if (!t) return { error: 'no tile' };
+    const u = g.spawnUnit(st, 'warrior', 0, t.q, t.r);
+    u.movesLeft = 2; u.hasAttacked = false;
+    g.drainEvents(st);
+    window.__game.refresh();
+    const rect = document.getElementById('board').getBoundingClientRect();
+    const k = rect.width / rnd.canvasSize(st).w;
+    const c = rnd.tileCenter(t.q, t.r);
+    return { q: t.q, r: t.r, x: rect.left + c.x * k, y: rect.top + c.y * k };
+  });
+  if (road.error) throw new Error(`road: ${road.error}`);
+  await page.mouse.click(road.x, road.y);
+  if (!(await page.textContent('#info')).includes('Build road (4 gold)')) throw new Error('road: no button in the unit panel');
+  await page.click('#info button[data-road]');
+  await page.waitForFunction(() => !window.__game.isBusy(), null, { timeout: 10000 });
+  const built = await page.evaluate((p) => {
+    const st = window.__game.getState();
+    const t = st.tiles[`${p.q},${p.r}`];
+    return { road: t.road, built: t.roadBuilt, gold: st.gold[0], log: document.getElementById('log').textContent };
+  }, road);
+  if (!built.road || !built.built || built.gold !== 16 || !built.log.includes('built a road')) throw new Error(`road: ${JSON.stringify(built)}`);
+  await page.screenshot({ path: 'artifacts/screenshot-road.png' });
 
   // rivers: large map without fog, hovering a river tile shows its description in the panel
   await page.setViewportSize({ width: 1280, height: 800 });

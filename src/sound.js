@@ -18,6 +18,7 @@ export function soundFor(ev, viewer = 0) {
     case 'ruin': return 'discover';
     case 'pillage': return ev.player === viewer ? 'pillage' : 'bane';
     case 'repair': return 'repair';
+    case 'road': return 'build';
     case 'happening': {
       const good = ev.kind === 'harvest' || ev.suppressed;
       return (ev.player === viewer) === good ? 'boon' : 'bane';
