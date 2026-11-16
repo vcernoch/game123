@@ -114,6 +114,9 @@ export function createAnimator(redraw, isVisible = () => true, onShow = () => {}
     } else if (ev.type === 'pillage') {
       addFloater(tileCenter(ev.q, ev.r), `🔥 pillaged +${ev.gold}`, '#ffb36b');
       await tween(PAUSE_MS * 2, () => {});
+    } else if (ev.type === 'repair') {
+      addFloater(tileCenter(ev.q, ev.r), '🔧 repaired', '#bfe8a6');
+      await tween(PAUSE_MS * 2, () => {});
     } else if (ev.type === 'disband') {
       addFloater(tileCenter(ev.q, ev.r), ev.refund ? `✖ disbanded +${ev.refund}` : '✖ disbanded', '#e8e2d0');
       await tween(PAUSE_MS, () => {});
@@ -151,7 +154,7 @@ export function createAnimator(redraw, isVisible = () => true, onShow = () => {}
     if (ev.type === 'capture') return see(st.cities.find((c) => c.id === ev.cityId));
     if (ev.type === 'spawn') return see(ev.unit);
     if (ev.type === 'fortify' || ev.type === 'upgrade') return see(getUnit(st, ev.unitId));
-    if (ev.type === 'disband' || ev.type === 'ruin' || ev.type === 'pillage') return see(ev);
+    if (ev.type === 'disband' || ev.type === 'ruin' || ev.type === 'pillage' || ev.type === 'repair') return see(ev);
     return true;
   }
 

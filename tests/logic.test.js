@@ -11,12 +11,12 @@ import {
   upgradeOptions, upgradeUnit, upgradeCost, canDisband, disbandRefund, disbandUnit,
   turnReport, reportText, reportIsBad, updateSightings, lastSeen, lastSeenAt, lastSeenText,
   armyOverview, unitStatus, unitWhere, ARMY_STATUS, ruinBelieved, ruinKind, exploreRuin,
-  exploreTarget, canExplore, setExplore, followExplore, canPillage, pillage, isPillaged, pillageTurnsLeft, cityAt,
+  exploreTarget, canExplore, setExplore, followExplore, canPillage, pillage, isPillaged, pillageTurnsLeft, cityAt, canRepair, repair,
 } from '../src/game.js';
 import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
   dangerMap, dangerPenalty, moveTowardsGoal, DANGER, unexploredLand, SCOUT_WHEN_UNKNOWN, aiKnowledge,
-  upgradeSomething, UPGRADE_HORSE_RADIUS, strikeLinedUp, pillageGoals, PILLAGE_DETOUR,
+  upgradeSomething, UPGRADE_HORSE_RADIUS, strikeLinedUp, pillageGoals, PILLAGE_DETOUR, repairGoals, REPAIR_DETOUR,
 } from '../src/ai.js';
 import { decideTap } from '../src/input.js';
 import { SHORTCUTS, keyAction, recruitKey } from '../src/keys.js';
@@ -27,7 +27,7 @@ import { GAME_VERSION, GAME_DATE } from '../src/version.js';
 import { pathExists, generateMap, dirTo } from '../src/map.js';
 import { distance, key, neighbors } from '../src/hex.js';
 import {
-  RESOURCES, FORTIFY, TERRITORY, ECONOMY, UNIT_TYPES, TERRAIN, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FLANK, HIGH_GROUND, CHARGE,
+  RESOURCES, FORTIFY, TERRITORY, ECONOMY, UNIT_TYPES, TERRAIN, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FLANK, HIGH_GROUND, CHARGE, REPAIR,
   UPGRADES, UPGRADE, DISBAND, RUINS, EXPLORE, PILLAGE,
   SIGHTINGS,
 } from '../src/rules.js';
@@ -2703,4 +2703,127 @@ test('pillage: the AI raids enemy resources it stands on or walks to, but not pi
       }
     }
   }
+});
+
+// The AI pillaged the player's resource; a player unit then stands on it, ready to repair.
+function repairSetup(kind = 'gold', { type = 'warrior' } = {}) {
+  const { s, u: raider, tile, victimCap } = pillageSetup(1, kind);
+  assert.ok(pillage(s, raider.id));
+  s.units = s.units.filter((x) => x.id !== raider.id);
+  drainEvents(s);
+  s.current = 0;
+  const u = spawnUnit(s, type, 0, tile.q, tile.r);
+  u.movesLeft = 1; u.hasAttacked = false;
+  drainEvents(s);
+  return { s, u, tile, cap: victimCap };
+}
+
+test('repair: an own unit rebuilds a pillaged resource for gold, income returns at once, the event replays', () => {
+  let { s, u, tile, cap } = repairSetup('gold');
+  const income = incomeOf(s, 0);
+  const gold = s.gold[0];
+  assert.ok(isPillaged(s, tile));
+  assert.ok(canRepair(s, u));
+  const before = cloneState(s);
+  const ev = repair(s, u.id);
+  assert.equal(ev.type, 'repair');
+  assert.equal(ev.gold, REPAIR.gold);
+  assert.ok(ev.saved >= 1);
+  assert.equal(s.gold[0], gold - REPAIR.gold);
+  assert.ok(!isPillaged(s, tile));
+  assert.equal(tile.pillagedUntil, undefined, 'the field is gone');
+  assert.equal(incomeOf(s, 0), income + RESOURCES.gold.income);
+  assert.equal(u.movesLeft, 0);
+  assert.ok(u.hasAttacked, 'the unit\'s turn is over');
+  assert.ok(!canRepair(s, u), 'not twice');
+  assert.match(s.log.at(-1).msg, /^You: Warrior repaired gold mine near .* \(−3 gold\)$/);
+  const evs = drainEvents(s);
+  for (const e of evs) applyEvent(before, e);
+  assert.deepEqual(snapshot(before), snapshot(s));
+  assert.equal(before.gold[0], s.gold[0]);
+  assert.equal(isUndoableMove(cloneState(s), s, evs, 0), false);
+  assert.equal(soundFor(ev, 0), 'repair');
+  assert.ok(SOUND_NAMES.includes('repair'));
+  // a repaired resource can be pillaged again
+  s.current = 1;
+  s.units = s.units.filter((x) => x.id !== u.id);
+  const again = spawnUnit(s, 'warrior', 1, tile.q, tile.r);
+  again.movesLeft = 1; again.hasAttacked = false;
+  assert.ok(canPillage(s, again));
+  // horses: the discount is back right away; scouts can repair too
+  ({ s, u, cap } = repairSetup('horses', { type: 'scout' }));
+  const dear = unitCost(s, cap, 'horseman');
+  assert.ok(repair(s, u.id));
+  assert.equal(unitCost(s, cap, 'horseman'), dear - RESOURCES.horses.discount.horseman);
+
+  // who can't: no gold, attacked, no moves, not own turn, a working resource, enemy territory
+  ({ s, u } = repairSetup());
+  s.gold[0] = REPAIR.gold - 1;
+  assert.ok(!canRepair(s, u));
+  assert.ok(canRepair(s, u, { affordable: false }), 'the button shows, disabled');
+  assert.equal(repair(s, u.id), null);
+  s.gold[0] = 50;
+  u.hasAttacked = true;
+  assert.ok(!canRepair(s, u));
+  u.hasAttacked = false; u.movesLeft = 0;
+  assert.ok(!canRepair(s, u));
+  u.movesLeft = 1; s.current = 1;
+  assert.ok(!canRepair(s, u));
+  s.current = 0;
+  ({ s, u, tile, cap } = repairSetup());
+  delete tile.pillagedUntil;
+  assert.ok(!canRepair(s, u), 'nothing to repair');
+  ({ s, u, tile, cap } = repairSetup());
+  cap.owner = 1; // the land now belongs to the enemy
+  assert.ok(!canRepair(s, u), 'not in enemy territory');
+  // orders and fortification are dropped
+  ({ s, u } = repairSetup());
+  u.fortified = true; u.goto = { q: 0, r: 0 };
+  repair(s, u.id);
+  assert.ok(!u.fortified && !u.goto);
+  // key R
+  assert.deepEqual(keyAction('r'), { type: 'repair' });
+  assert.deepEqual(keyAction('R'), { type: 'repair' });
+});
+
+test('repair: the AI walks back to its pillaged resources and repairs them', () => {
+  // the player pillages the AI's gold mine; an AI warrior standing on it repairs it on its turn
+  let { s, u: raider, tile } = pillageSetup(0, 'gold');
+  assert.ok(pillage(s, raider.id));
+  s.units = s.units.filter((x) => x.id !== raider.id);
+  endTurn(s);
+  assert.equal(s.current, 1);
+  const w = spawnUnit(s, 'warrior', 1, tile.q, tile.r);
+  w.movesLeft = 1; w.hasAttacked = false;
+  s.gold[1] = 40;
+  drainEvents(s);
+  runAITurn(s);
+  assert.ok(!isPillaged(s, tile), 'repaired');
+  assert.ok(drainEvents(s).some((e) => e.type === 'repair' && e.unitId === w.id));
+  // a unit nearby gets it as a goal; a resource that recovers next round, a far one or an enemy one does not
+  ({ s, u: raider, tile } = pillageSetup(0, 'gold'));
+  pillage(s, raider.id);
+  s.current = 1;
+  const away = Object.values(s.tiles).find((t) => isPassable(s, t.q, t.r) && distance(t, tile) === 2 && !cityAt(s, t.q, t.r));
+  const h = spawnUnit(s, 'horseman', 1, away.q, away.r);
+  assert.ok(repairGoals(s, h).some((g) => g.q === tile.q && g.r === tile.r && g.repair));
+  assert.ok(goalsFor(s, h, aiKnowledge(s, 1)).some((g) => g.repair));
+  for (const g of repairGoals(s, h)) {
+    assert.ok(distance(g, h) <= REPAIR_DETOUR);
+    assert.equal(territoryOwner(s, g.q, g.r), 1);
+  }
+  tile.pillagedUntil = s.turn + 1;
+  assert.ok(!repairGoals(s, h).some((g) => g.q === tile.q && g.r === tile.r), 'recovers soon anyway');
+  // real AI-vs-AI games: pillaged resources get repaired now and then, the state stays consistent
+  let repairs = 0;
+  for (const seed of [2, 6, 9]) {
+    const g = createGame({ seed, happenings: false });
+    for (let i = 0; i < 80 && g.winner === null; i++) {
+      runAITurn(g);
+      repairs += drainEvents(g).filter((e) => e.type === 'repair').length;
+      endTurn(g);
+      assert.ok(g.gold.every((x) => x >= 0));
+    }
+  }
+  assert.ok(repairs >= 1, 'the AI repairs in real games');
 });

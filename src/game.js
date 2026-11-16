@@ -4,7 +4,7 @@ import { generateMap, hasRiverEdge } from './map.js';
 import {
   TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY, VISION, DIFFICULTY, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, ROAD_COST, RIVER, FLANK, HIGH_GROUND, CHARGE,
   FACTIONS, NO_FACTION, MAP_SIZES, HAPPENINGS, FORTIFY, TERRITORY, RESOURCES,
-  UPGRADES, UPGRADE, DISBAND, SIGHTINGS, RUINS, EXPLORE, PILLAGE,
+  UPGRADES, UPGRADE, DISBAND, SIGHTINGS, RUINS, EXPLORE, PILLAGE, REPAIR,
 } from './rules.js';
 import { createRng } from './rng.js';
 
@@ -415,6 +415,12 @@ export function applyEvent(state, ev) {
     const u = getUnit(state, ev.unitId);
     if (u) { u.movesLeft = 0; u.hasAttacked = true; delete u.fortified; }
     if (ev.gold) state.gold[ev.player] += ev.gold;
+  } else if (ev.type === 'repair') {
+    const t = tileAt(state, ev.q, ev.r);
+    if (t) delete t.pillagedUntil;
+    const u = getUnit(state, ev.unitId);
+    if (u) { u.movesLeft = 0; u.hasAttacked = true; delete u.fortified; }
+    if (ev.gold) state.gold[ev.player] -= ev.gold;
   } else if (ev.type === 'disband') {
     removeUnit(state, ev.unitId); // gold is not replayed, as for recruiting and upgrades
   }
@@ -1432,6 +1438,38 @@ export function pillage(state, unitId) {
   emit(state, ev);
   addLog(state, `${PLAYERS[unit.owner].name}: ${UNIT_TYPES[unit.type].name} pillaged ${RESOURCES[tile.resource].name.toLowerCase()} near ${city.name} (+${PILLAGE.gold} gold, out of use for ${PILLAGE.turns} turns)`,
     { by: unit.owner, also: [victim], at: [tile] });
+  return ev;
+}
+
+// Can the unit repair the tile it stands on? An own unit of the current player (any kind) that hasn't attacked
+// and has moves left, on a pillaged resource in its own territory. `affordable` = also checks the gold.
+export function canRepair(state, unit, { affordable = true } = {}) {
+  if (!unit || unit.owner !== state.current || state.winner !== null) return false;
+  if (unit.hasAttacked || unit.movesLeft <= 0) return false;
+  const tile = tileAt(state, unit.q, unit.r);
+  if (!tile || !tile.resource || !isPillaged(state, tile)) return false;
+  if (territoryOwner(state, unit.q, unit.r) !== unit.owner) return false;
+  return !affordable || state.gold[unit.owner] >= REPAIR.gold;
+}
+
+// Repairs the pillaged resource under the unit. Returns the 'repair' event or null when not allowed.
+export function repair(state, unitId) {
+  const unit = getUnit(state, unitId);
+  if (!canRepair(state, unit)) return null;
+  const tile = tileAt(state, unit.q, unit.r);
+  const city = state.cities.find((c) => c.id === territoryMap(state).get(key(tile.q, tile.r)));
+  const left = pillageTurnsLeft(state, tile);
+  delete tile.pillagedUntil;
+  state.gold[unit.owner] -= REPAIR.gold;
+  unit.movesLeft = 0;
+  unit.hasAttacked = true;
+  delete unit.fortified;
+  delete unit.goto;
+  delete unit.explore;
+  const ev = { type: 'repair', unitId: unit.id, player: unit.owner, q: tile.q, r: tile.r, resource: tile.resource, gold: REPAIR.gold, saved: left };
+  emit(state, ev);
+  addLog(state, `${PLAYERS[unit.owner].name}: ${UNIT_TYPES[unit.type].name} repaired ${RESOURCES[tile.resource].name.toLowerCase()} near ${city.name} (−${REPAIR.gold} gold)`,
+    { by: unit.owner, at: [tile] });
   return ev;
 }
 

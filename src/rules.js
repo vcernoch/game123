@@ -150,6 +150,10 @@ export const RESOURCES = {
 // nothing (no income, no discount) during its owner's next `turns` turns, then it recovers by itself.
 export const PILLAGE = { gold: 6, turns: 4 };
 
+// Repair: a unit of any kind that hasn't attacked and still has moves left, standing on a pillaged resource in its
+// own territory, can rebuild it for `gold`: the resource works again right away and the unit's turn ends.
+export const REPAIR = { gold: 3 };
+
 // Ancient ruins: scattered over the map in pairs (one nearer each capital, about equally far, so neither
 // side is favoured). The first unit of any kind to end its move on a ruin explores it and gets one reward.
 // perPair: one pair per this many map tiles (small 1, medium 2, large 4 pairs).

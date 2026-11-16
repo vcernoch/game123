@@ -2,6 +2,16 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-16 – Repair pillaged resources (v0.26.0)
+- **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". Thanks for merging v0.25.0 into `main`; `dev` now only adds v0.26.0 on top.
+- Phase 12 (economy war, own improvement), new task. After pillage the victim could only wait 4 turns; now guarding and recovering resources is an active choice: spend a unit's turn and a little gold to get the income back right away.
+- `REPAIR` in `rules.js` (`gold` 3). In `game.js`: `canRepair(state, unit, { affordable })`, `repair`. A unit of the current player of any kind (scouts too – no capture involved) that hasn't attacked and has a move left, standing on a pillaged resource in its own territory, pays 3 gold; `pillagedUntil` is removed (income / horse discount back at once), the unit's turn ends, fortify / move order / explore cleared. New `repair` event (replayable incl. the gold, floater "🔧 repaired", new synthesized hammer-and-ring `repair` sound), chronicle entry. Not undoable (extra event). A repaired resource can be pillaged again.
+- AI: `repairGoals` in `ai.js` – own resources pillaged for 2+ more rounds within 3 tiles are movement goals (weight 0.9, scouts too; like ruins and pillage goals they don't stop exploring); a unit with nothing to attack or pillage repairs where it stands, before or after moving. 3 repairs in 3 AI-vs-AI test games.
+- UI: "🔧 Repair (3 gold)" button in the unit panel (disabled when short of gold), key R (shortcut overlay), the tile panel of an own pillaged resource says a unit standing there can repair it. Help text updated.
+- No state structure change (`state.version` stays 20).
+- Tests: +2 logic (gold, income and discount return at once, event replay, not undoable, sound, can be pillaged again, scouts can repair; who can't – no gold, attacked, no moves, not own turn, nothing pillaged, enemy territory; orders cleared, key R; AI repairs where it stands, goals only for own resources pillaged long enough and nearby, real AI-vs-AI games repair and never go into debt). Smoke test: the player's pillaged resource is repaired with the panel button, checks gold and chronicle (`artifacts/screenshot-repair.png`).
+- Status: `npm run check` green (87 logic tests + smoke).
+
 ## 2026-11-15 – Pillage (v0.25.0)
 - **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.9.0–v0.25.0) is far ahead of `main` (v0.8.0) – please merge it.
 - Phase 11 was done, so I opened phase 12 (economy war, own improvement). Resources were only ever a passive bonus; now they are something to raid and to guard, which gives fast units a job besides charging.

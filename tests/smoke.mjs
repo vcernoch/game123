@@ -728,6 +728,37 @@ try {
   await page.screenshot({ path: 'artifacts/screenshot-pillage.png' });
   await page.keyboard.press('Escape');
 
+  // repair: the AI's raid burned the player's gold mine; a unit standing on it repairs it with the panel button
+  const fix = await page.evaluate(async () => {
+    const g = await import('./src/game.js');
+    const rnd = await import('./src/render.js');
+    const st = window.__game.getState();
+    const cap = st.cities.find((c) => c.capital && c.owner === 0);
+    const mine = g.cityResources(st, cap).find((t) => t.resource === 'gold' || t.resource === 'horses');
+    if (!mine) return { error: 'player capital lacks a resource' };
+    mine.pillagedUntil = st.turn + 3;
+    const u = st.units.find((x) => x.owner === 0 && x.movesLeft > 0 && !x.hasAttacked)
+      || st.units.find((x) => x.owner === 0);
+    u.q = mine.q; u.r = mine.r; u.movesLeft = 2; u.hasAttacked = false; delete u.fortified;
+    window.__game.refresh();
+    const rect = document.getElementById('board').getBoundingClientRect();
+    const k = rect.width / rnd.canvasSize(st).w;
+    const c = rnd.tileCenter(mine.q, mine.r);
+    return { q: mine.q, r: mine.r, x: rect.left + c.x * k, y: rect.top + c.y * k, gold: st.gold[0] };
+  });
+  if (fix.error) throw new Error(`repair: ${fix.error}`);
+  await page.mouse.click(fix.x, fix.y);
+  if (!(await page.textContent('#info')).includes('Repair (3 gold)')) throw new Error('repair: no button in the unit panel');
+  await page.screenshot({ path: 'artifacts/screenshot-repair.png' });
+  await page.click('#info button[data-repair]');
+  await page.waitForFunction(() => !window.__game.isBusy(), null, { timeout: 5000 });
+  const fixed = await page.evaluate((f) => {
+    const st = window.__game.getState();
+    return { until: st.tiles[`${f.q},${f.r}`].pillagedUntil, gold: st.gold[0], log: document.getElementById('log').textContent };
+  }, fix);
+  if (fixed.until !== undefined || fixed.gold !== fix.gold - 3 || !fixed.log.includes('repaired')) throw new Error(`repair: not repaired ${JSON.stringify(fixed)}`);
+  await page.keyboard.press('Escape');
+
   // rivers: large map without fog, hovering a river tile shows its description in the panel
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.evaluate(() => { window.__game.newGame(4242, { size: 'large', fog: false }); });

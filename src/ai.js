@@ -3,7 +3,7 @@ import { distance, key } from './hex.js';
 import {
   reachable, attackTargets, previewAttack, moveUnit, attack, buyUnit,
   unitAt, getUnit, tileAt, fortify, difficultyOf, visibleTiles, exploredTiles, build, hasBuilding, unitCost, buildingCost, factionOf,
-  threatTiles, cityAt, upgradeOptions, upgradeUnit, ruinBelieved, canPillage, pillage, isPillaged, territoryOwner,
+  threatTiles, cityAt, upgradeOptions, upgradeUnit, ruinBelieved, canPillage, pillage, isPillaged, repair, pillageTurnsLeft, territoryOwner,
 } from './game.js';
 import { UNIT_TYPES, TERRAIN } from './rules.js';
 
@@ -43,10 +43,10 @@ export function runAITurn(state) {
       if (plan && typeof plan === 'object') { lined.push(plan); continue; }
       if (plan) continue;
       if (tryBestAttack(state, unit)) continue;
-      if (pillage(state, unit.id)) continue; // already standing on an enemy resource
+      if (pillage(state, unit.id) || repair(state, unit.id)) continue; // already standing on an enemy / own pillaged resource
       moveTowardsGoal(state, unit, danger.get());
       const after = getUnit(state, id);
-      if (after && !tryBestAttack(state, after)) pillage(state, after.id);
+      if (after && !tryBestAttack(state, after) && !pillage(state, after.id)) repair(state, after.id);
     }
   }
   strikeLinedUp(state, lined);
@@ -309,14 +309,14 @@ function tryBestAttack(state, unit, { safeOnly = false } = {}) {
 // Movement goals: known foreign cities and visible enemies. If there are none, the AI explores.
 // Scouts can't capture, so they only ever explore (and stay put once everything is known).
 export function goalsFor(state, unit, know = aiKnowledge(state, unit.owner)) {
-  const goals = ruinGoals(state, unit, know);
+  const goals = [...ruinGoals(state, unit, know), ...repairGoals(state, unit)];
   if (UNIT_TYPES[unit.type].noCapture) return [...goals, ...exploreGoals(state, know)];
   goals.push(...pillageGoals(state, unit, know));
   for (const c of state.cities) {
     if (c.owner !== unit.owner && know.knows(c.q, c.r)) goals.push({ q: c.q, r: c.r, w: c.owner === null ? 1 : 1.3 });
   }
   for (const u of state.units) if (u.owner !== unit.owner && know.sees(u.q, u.r)) goals.push({ q: u.q, r: u.r, w: 1.1, enemy: true });
-  return goals.some((g) => !g.ruin && !g.pillage) ? goals : [...goals, ...exploreGoals(state, know)];
+  return goals.some((g) => !g.ruin && !g.pillage && !g.repair) ? goals : [...goals, ...exploreGoals(state, know)];
 }
 
 // Known unexplored ruins within a few turns' walk are worth a detour (scouts are made for this).
@@ -336,6 +336,15 @@ export function pillageGoals(state, unit, know) {
       && !cityAt(state, t.q, t.r))
     .filter((t) => { const o = territoryOwner(state, t.q, t.r); return o !== undefined && o !== null && o !== unit.owner; })
     .map((t) => ({ q: t.q, r: t.r, w: 0.95, pillage: true }));
+}
+
+// Own pillaged resources close by that would stay out of use for a while are worth walking back to and repairing.
+export const REPAIR_DETOUR = 3; // tiles
+export function repairGoals(state, unit) {
+  return Object.values(state.tiles)
+    .filter((t) => t.resource && pillageTurnsLeft(state, t) >= 2 && distance(t, unit) <= REPAIR_DETOUR
+      && territoryOwner(state, t.q, t.r) === unit.owner)
+    .map((t) => ({ q: t.q, r: t.r, w: 0.9, repair: true }));
 }
 
 function exploreGoals(state, know) {

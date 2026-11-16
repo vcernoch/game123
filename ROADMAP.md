@@ -81,6 +81,7 @@ Check off `[x]` when done. Add new ideas to the end of the relevant phase or to 
 
 ## Phase 12 – economy war (own improvements)
 - [x] Pillage (🔥 / P): a unit standing on an enemy resource plunders it for gold; the resource gives its owner nothing for their next 4 turns; the AI raids nearby player resources too
+- [x] Repair (🔧 / R): an own unit standing on a pillaged resource in own territory rebuilds it for 3 gold (ends its turn), the resource works again at once; the AI walks back to repair its own
 
 ## Ideas (unordered)
 - Diplomacy with multiple AIs
