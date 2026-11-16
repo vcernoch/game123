@@ -4,6 +4,7 @@ import {
   reachable, attackTargets, previewAttack, moveUnit, attack, buyUnit,
   unitAt, getUnit, tileAt, fortify, difficultyOf, visibleTiles, exploredTiles, build, hasBuilding, unitCost, buildingCost, factionOf,
   threatTiles, cityAt, upgradeOptions, upgradeUnit, ruinBelieved, canPillage, pillage, isPillaged, repair, pillageTurnsLeft, territoryOwner,
+  swapPartners, swapUnits,
 } from './game.js';
 import { UNIT_TYPES, TERRAIN } from './rules.js';
 
@@ -36,7 +37,9 @@ export function runAITurn(state) {
     if (garrisons.has(id)) {
       holdCity(state, unit, garrisons.get(id));
     } else if (isWounded(unit) && enemiesNear(state, unit, know, 3).length) {
-      retreat(state, unit, know, danger.get());
+      relieveWounded(state, unit, know, garrisons);
+      const u = getUnit(state, id);
+      if (u) retreat(state, u, know, danger.get());
     } else {
       const melee = UNIT_TYPES[unit.type].range === 1;
       const plan = planStrike(state, unit, know, danger.get(), melee ? { lineUp: lined } : {});
@@ -197,6 +200,24 @@ export function dangerPenalty(state, unit, q, r, attackers) {
   return extra > 0 ? extra * fragile * hurt : 0;
 }
 export const DANGER = { ranged: 1.2, melee: 0.6, strike: 1 };
+
+// A wounded unit pressed by an adjacent enemy swaps places with a healthy melee neighbour standing on a
+// quieter tile, so the fresh unit takes the front and the wounded one gets out from behind it.
+// Returns the partner it swapped with, or null.
+export const RELIEF_MIN_HP = 0.6;
+export function relieveWounded(state, unit, know = aiKnowledge(state, unit.owner), garrisons = new Map()) {
+  const pressure = (q, r) => state.units.filter((e) => e.owner !== unit.owner && know.sees(e.q, e.r) && distance(e, { q, r }) === 1).length;
+  const here = pressure(unit.q, unit.r);
+  if (!here) return null;
+  let best = null;
+  for (const o of swapPartners(state, unit)) {
+    const t = UNIT_TYPES[o.type];
+    if (garrisons.has(o.id) || t.range !== 1 || t.noCapture || o.hp / t.hp < RELIEF_MIN_HP) continue;
+    if (pressure(o.q, o.r) >= here) continue;
+    if (!best || o.hp > best.hp || (o.hp === best.hp && o.id < best.id)) best = o;
+  }
+  return best && swapUnits(state, unit.id, best.id) ? best : null;
+}
 
 // A wounded unit retreats to an own city, or as far from enemies as possible. It attacks only when it's safe.
 function retreat(state, unit, know, danger = new Map()) {

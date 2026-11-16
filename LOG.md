@@ -2,6 +2,16 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-16 – Swap places (v0.28.0)
+- **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.26.0–v0.28.0) is ahead of `main` (v0.25.0) – please merge it.
+- Phase 13 (logistics, own improvement), new task. A wounded unit at the front with a fresh one right behind it could only get out by walking around – often impossible in a narrow pass or next to a river. Now the two can trade tiles.
+- In `game.js`: `canSwap` (both own units of the current player, neighbours, both with a move left and not having attacked, scouts never into a foreign city), `swapPartners`, `swapUnits`. Each unit pays the step cost into the other's tile (with any points left a single step is always allowed, as for a normal first step); fortify, move order and explore end for both; chronicle "Warrior and Spearman swapped places". It emits two one-step `move` events marked with `swap` (partner id), so replay, animation, sounds and last-seen markers work unchanged; `isUndoableMove` accepts exactly such a pair, so Z undoes a swap that revealed nothing.
+- AI: `relieveWounded` in `ai.js` – a wounded unit with a visible enemy next to it swaps with a healthy (≥ 60 % HP) melee neighbour that is not a garrison and stands on a quieter tile, then retreats from there with what is left of its moves. ~2 swaps per game in 30 AI-vs-AI games on Medium.
+- UI: "⇄ Swap places" button in the unit panel (names the partner when there is only one; then it swaps at once), key S. With more partners the panel says "Tap a unit with a blue ring" and the partners get a light-blue dashed ring with two arrows; any other tap or Esc cancels. Picking is an explicit mode, so touch needs no second tap. Help text and shortcut overlay updated.
+- No state structure change (`state.version` stays 21).
+- Tests: +2 logic (positions, step costs, orders/fortify cleared, log, event replay, undoable only as a marked pair; who can't – no moves, attacked, not neighbours, enemy, not own turn, game over, itself; `decideTap` swap / cancel and normal selection without picking, key S; the AI relieves a wounded warrior with a healthy spearman, but not with a hurt one, a garrison, or without an enemy next to it). Smoke test: three own units, S starts picking (`artifacts/screenshot-swap.png`), a click swaps, Z undoes.
+- Status: `npm run check` green (91 logic tests + smoke).
+
 ## 2026-11-16 – Rally points (v0.27.0)
 - **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.26.0–v0.27.0) is ahead of `main` (v0.25.0) – please merge it.
 - Phase 12 was done, so I opened phase 13 (logistics, own improvement). Sending every new recruit to the front took a selection and a click each turn; now a city can stream its recruits to a flag.

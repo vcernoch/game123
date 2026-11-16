@@ -7,7 +7,7 @@ import {
   upgradeOptions, upgradeUnit, canDisband, disbandRefund, disbandUnit, chargeReady,
   updateSightings, lastSeen, lastSeenAt, lastSeenText, armyOverview, ARMY_STATUS, ruinBelieved,
   canExplore, setExplore, canPillage, pillage, isPillaged, pillageTurnsLeft, canRepair, repair,
-  rallyPath, setRally, clearRally,
+  rallyPath, setRally, clearRally, swapPartners, swapUnits,
 } from './game.js';
 import { createAnimator } from './anim.js';
 import { decideTap } from './input.js';
@@ -36,6 +36,7 @@ let hover = null;
 let aiRunning = false;
 let pending = null;        // touch: target awaiting confirmation by a second tap
 let rallyPick = null;      // id of the city whose rally point the player is picking on the map
+let swapPick = null;       // id of the unit that is picking a neighbour to swap places with
 let lastPointer = 'mouse'; // type of the last pointer (mouse / touch / pen)
 let endArmed = false;      // end-turn reminder: the first press only asks for confirmation
 let endArmTimer = null;
@@ -175,6 +176,7 @@ function drawBoard() {
     targets: mine ? new Set(attackTargets(state, u).map((t) => t.id)) : null,
     hover,
     flankers: mine ? flankView(u) : null,
+    swaps: mine && swapPick === u.id ? new Set(swapPartners(state, u).map((o) => o.id)) : null,
     lossMarks: busy() ? null : lossMarks,
     ghosts: busy() ? null : lastSeen(state, 0),
     ...pathView(u, mine),
@@ -222,6 +224,14 @@ function updateHud() {
     if (u.fortified) html += `<p class="fortified">⛨ Fortified: +${Math.round(FORTIFY.defBonus * 100)} % defense until it moves or attacks</p>`;
     if (u.owner === 0 && !busy() && canFortify(state, u)) {
       html += `<button data-fortify class="secondary wide-btn" title="Dig in: +${Math.round(FORTIFY.defBonus * 100)} % defense, ends the unit's turn (F)">⛨ Fortify</button>`;
+    }
+    if (u.owner === 0 && !busy() && state.current === 0) {
+      const partners = swapPartners(state, u);
+      if (swapPick === u.id) {
+        html += '<p class="order">⇄ Tap a unit with a blue ring to swap places</p><button data-swap class="secondary wide-btn">✖ Cancel swap</button>';
+      } else if (partners.length) {
+        html += `<button data-swap class="secondary wide-btn" title="Trade tiles with a neighbouring unit of yours – both use one step (S)">⇄ Swap places${partners.length === 1 ? ` with ${UNIT_TYPES[partners[0].type].name}` : ''}</button>`;
+      }
     }
     const ups = u.owner === 0 && !busy() ? upgradeOptions(state, u) : [];
     if (ups.length) {
@@ -374,9 +384,39 @@ function startRallyPick() {
   const city = state.cities.find((c) => c.id === selectedCityId);
   if (!city || city.owner !== 0) return;
   rallyPick = rallyPick === city.id ? null : city.id;
+  swapPick = null;
   pending = null;
   sound.play('click');
   draw();
+}
+
+// Starts picking a neighbour to swap places with (S / panel button). With a single partner it swaps at
+// once; pressing again cancels the picking.
+function startSwapPick() {
+  if (busy() || state.winner !== null || state.current !== 0) return;
+  const u = selectedUnit();
+  if (swapPick !== null) { swapPick = null; draw(); return; }
+  if (!u || u.owner !== 0) return;
+  const partners = swapPartners(state, u);
+  if (!partners.length) return;
+  rallyPick = null;
+  pending = null;
+  if (partners.length === 1) { doSwap(u.id, partners[0].id); return; }
+  swapPick = u.id;
+  sound.play('click');
+  draw();
+}
+
+// Swaps two own units; undoable like a move. The selection stays on the unit that asked for the swap.
+function doSwap(unitId, otherId) {
+  const before = cloneState(state);
+  if (!swapUnits(state, unitId, otherId)) { draw(); return; }
+  if (isUndoableMove(before, state, state.events, 0)) undoStack.push(cloneState(before));
+  else undoStack = [];
+  const u = getUnit(state, unitId);
+  const c = cityAt(state, u.q, u.r);
+  selectedCityId = c ? c.id : null;
+  afterAction(before);
 }
 
 let armyKey = '';
@@ -410,6 +450,7 @@ function selectFromArmy(id) {
   if (busy() || !u || u.owner !== 0) return;
   pending = null;
   rallyPick = null;
+  swapPick = null;
   selectedId = u.id;
   const city = cityAt(state, u.q, u.r);
   selectedCityId = city ? city.id : null;
@@ -457,12 +498,20 @@ function onClick(ev) {
   const p = canvasPoint(ev);
   const hex = pickHex(p.x, p.y);
   const touch = lastPointer === 'touch' || lastPointer === 'pen';
-  const act = decideTap(state, { selectedId, pending, viewer: 0, confirm: touch, rallyCityId: rallyPick }, hex.q, hex.r);
+  const act = decideTap(state, { selectedId, pending, viewer: 0, confirm: touch, rallyCityId: rallyPick, swapUnitId: swapPick }, hex.q, hex.r);
   pending = null;
   if (act.type === 'none') return;
+  if (act.type === 'swap' || act.type === 'swapCancel') {
+    swapPick = null;
+    if (touch) hover = null;
+    if (act.type === 'swap') doSwap(act.unitId, act.otherId);
+    else draw();
+    return;
+  }
   if (act.type === 'rally' || act.type === 'rallyCancel') {
     if (act.type === 'rally' && setRally(state, act.cityId, act.q, act.r)) { sound.play('fortify'); save(); }
     rallyPick = null;
+    swapPick = null;
     if (touch) hover = null;
     draw();
     return;
@@ -624,6 +673,7 @@ function doEndTurn(force = false) {
   selectedId = null;
   selectedCityId = null;
   rallyPick = null;
+  swapPick = null;
   $('tooltip').hidden = true;
   pending = null;
   showNotice([]);
@@ -866,6 +916,7 @@ $('info').addEventListener('click', (ev) => {
     draw();
     return;
   }
+  if (ev.target.closest('button[data-swap]')) { startSwapPick(); return; }
   if (ev.target.closest('button[data-fortify]')) { fortifySelected(); return; }
   if (ev.target.closest('button[data-explore]')) { exploreSelected(); return; }
   if (ev.target.closest('button[data-pillage]')) { pillageSelected(); return; }
@@ -908,8 +959,10 @@ window.addEventListener('keydown', (ev) => {
   else if (act.type === 'help') $('keys-dialog').showModal();
   else if (act.type === 'threats') toggleThreats();
   else if (act.type === 'rally') startRallyPick();
+  else if (act.type === 'swap') startSwapPick();
   else if (act.type === 'escape') {
     if (busy()) { anim.skip(); return; }
+    if (swapPick !== null) { swapPick = null; draw(); return; }
     if (rallyPick !== null) { rallyPick = null; draw(); return; }
     selectedId = null; selectedCityId = null; pending = null; draw();
   }
@@ -941,6 +994,7 @@ function selectNextUnit() {
   if (busy() || state.winner !== null) return;
   pending = null;
   rallyPick = null;
+  swapPick = null;
   const cur = selectedUnit();
   const next = nextActiveUnit(state, 0, cur && cur.owner === 0 ? cur.id : null);
   selectedId = next ? next.id : null;
@@ -1053,6 +1107,7 @@ window.__game = {
   nextUnit: selectNextUnit,
   selectedId: () => selectedId,
   rallyPicking: () => rallyPick,
+  swapPicking: () => swapPick,
   isBusy: busy,
   version: GAME_VERSION,
   setAnimSpeed: (x) => { anim.speed = x; },

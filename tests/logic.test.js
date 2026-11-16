@@ -12,12 +12,13 @@ import {
   turnReport, reportText, reportIsBad, updateSightings, lastSeen, lastSeenAt, lastSeenText,
   armyOverview, unitStatus, unitWhere, ARMY_STATUS, ruinBelieved, ruinKind, exploreRuin,
   exploreTarget, canExplore, setExplore, followExplore, canPillage, pillage, isPillaged, pillageTurnsLeft, cityAt, canRepair, repair,
-  rallyPath, rallyTarget, canRally, setRally, clearRally,
+  rallyPath, rallyTarget, canRally, setRally, clearRally, canSwap, swapPartners, swapUnits,
 } from '../src/game.js';
 import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
   dangerMap, dangerPenalty, moveTowardsGoal, DANGER, unexploredLand, SCOUT_WHEN_UNKNOWN, aiKnowledge,
   upgradeSomething, UPGRADE_HORSE_RADIUS, strikeLinedUp, pillageGoals, PILLAGE_DETOUR, repairGoals, REPAIR_DETOUR,
+  relieveWounded, RELIEF_MIN_HP,
 } from '../src/ai.js';
 import { decideTap } from '../src/input.js';
 import { SHORTCUTS, keyAction, recruitKey } from '../src/keys.js';
@@ -2943,4 +2944,120 @@ test('rally points: a captured city loses its flag (also when replayed), unexplo
   assert.equal(decideTap(f, { selectedId: null, pending: null }, fcap.q, fcap.r).type, 'select');
   assert.equal(keyAction('g').type, 'rally');
   assert.equal(keyAction('G').type, 'rally');
+});
+
+// Two own units on neighbouring plains tiles away from cities (no fog), all other units removed.
+function swapSetup(seed = 5) {
+  const s = createGame({ seed, fog: false });
+  s.units = [];
+  const plain = (t) => t && t.terrain === 'plains' && !cityAt(s, t.q, t.r) && !t.ruin
+    && s.cities.every((c) => distance(c, t) >= 3);
+  let a = null;
+  let b = null;
+  let foe = null; // a free tile next to a, on the far side from b (for an enemy at the front)
+  for (const t of Object.values(s.tiles)) {
+    if (!plain(t)) continue;
+    const near = neighbors(t.q, t.r).map((x) => tileAt(s, x.q, x.r));
+    const n = near.find((x) => plain(x) && !riverBetween(s, t, x) && !(t.road && x.road));
+    const f = n && near.find((x) => x && isPassable(s, x.q, x.r) && !cityAt(s, x.q, x.r) && distance(x, n) === 2);
+    if (f) { a = t; b = n; foe = f; break; }
+  }
+  const front = spawnUnit(s, 'warrior', 0, a.q, a.r);
+  const back = spawnUnit(s, 'spearman', 0, b.q, b.r);
+  for (const u of [front, back]) { u.movesLeft = unitMove(s, u); u.hasAttacked = false; }
+  drainEvents(s);
+  return { s, a, b, foe, front, back };
+}
+
+test('swap places: neighbours trade tiles, pay a step, orders end, the events replay and undo works', () => {
+  const { s, a, b, front, back } = swapSetup();
+  front.fortified = false;
+  back.goto = { q: 0, r: 0 };
+  assert.ok(canSwap(s, front, back));
+  assert.deepEqual(swapPartners(s, front).map((u) => u.id), [back.id]);
+  const before = cloneState(s);
+  const fm = front.movesLeft;
+  const bm = back.movesLeft;
+  assert.ok(swapUnits(s, front.id, back.id));
+  assert.deepEqual([front.q, front.r], [b.q, b.r]);
+  assert.deepEqual([back.q, back.r], [a.q, a.r]);
+  assert.equal(front.movesLeft, fm - stepCost(s, a, b, front));
+  assert.equal(back.movesLeft, bm - stepCost(s, b, a, back));
+  assert.ok(front.moved && back.moved);
+  assert.equal(back.goto, undefined, 'a swap cancels a move order');
+  assert.match(s.log.at(-1).msg, /^You: Warrior and Spearman swapped places$/);
+  const evs = drainEvents(s);
+  assert.equal(evs.length, 2);
+  assert.ok(evs.every((e) => e.type === 'move' && e.path.length === 2));
+  const replay = cloneState(before);
+  for (const e of evs) applyEvent(replay, e);
+  assert.deepEqual(snapshot(replay), snapshot(s));
+  assert.ok(isUndoableMove(before, s, evs, 0), 'a swap that reveals nothing can be undone');
+  // a plain pair of moves is not a swap
+  assert.equal(isUndoableMove(before, s, evs.map(({ swap, ...e }) => e), 0), false);
+
+  // fortified units leave their fortification; one move point left is enough even for a costly tile
+  const t2 = swapSetup();
+  t2.front.fortified = true;
+  t2.front.movesLeft = 0.5;
+  assert.ok(swapUnits(t2.s, t2.front.id, t2.back.id));
+  assert.equal(t2.front.fortified, undefined);
+  assert.equal(t2.front.movesLeft, 0);
+});
+
+test('swap places: who can\'t, picking on the map, key S, the AI relieves a wounded unit at the front', () => {
+  const { s, a, b, front, back } = swapSetup();
+  const cases = [
+    ['no moves', () => { getUnit(s, back.id).movesLeft = 0; }],
+    ['attacked', () => { getUnit(s, front.id).hasAttacked = true; }],
+    ['not neighbours', () => { getUnit(s, back.id).q += 5; }],
+    ['enemy unit', () => { getUnit(s, back.id).owner = 1; }],
+    ['not own turn', () => { s.current = 1; }],
+    ['game over', () => { s.winner = 1; }],
+  ];
+  for (const [why, spoil] of cases) {
+    const keep = cloneState(s);
+    spoil();
+    assert.ok(!canSwap(s, getUnit(s, front.id), getUnit(s, back.id)), why);
+    assert.ok(!swapUnits(s, front.id, back.id), why);
+    Object.assign(s, keep);
+  }
+  assert.ok(!canSwap(s, front, front), 'not with itself');
+  assert.ok(canSwap(s, getUnit(s, front.id), getUnit(s, back.id)), 'state restored');
+  s.units = [getUnit(s, front.id), getUnit(s, back.id)];
+  Object.assign(front, s.units[0]); Object.assign(back, s.units[1]);
+  s.units = [front, back];
+
+  // picking: a tap on the partner swaps, anything else cancels
+  assert.deepEqual(decideTap(s, { selectedId: front.id, pending: null, swapUnitId: front.id, confirm: true }, b.q, b.r),
+    { type: 'swap', unitId: front.id, otherId: back.id });
+  assert.deepEqual(decideTap(s, { selectedId: front.id, pending: null, swapUnitId: front.id }, a.q, a.r), { type: 'swapCancel' });
+  const empty = neighbors(a.q, a.r).find((t) => isPassable(s, t.q, t.r) && !unitAt(s, t.q, t.r));
+  assert.deepEqual(decideTap(s, { selectedId: front.id, pending: null, swapUnitId: front.id }, empty.q, empty.r), { type: 'swapCancel' });
+  // without picking, a tap on an own neighbour still selects it
+  assert.equal(decideTap(s, { selectedId: front.id, pending: null }, b.q, b.r).type, 'select');
+  assert.equal(keyAction('s').type, 'swap');
+  assert.equal(keyAction('S').type, 'swap');
+
+  // AI: a wounded warrior next to an enemy swaps with a healthy spearman behind it
+  const ai = swapSetup();
+  ai.s.current = 1;
+  for (const u of [ai.front, ai.back]) u.owner = 1;
+  ai.front.hp = 2;
+  spawnUnit(ai.s, 'warrior', 0, ai.foe.q, ai.foe.r);
+  const know = aiKnowledge(ai.s, 1);
+  // not when the partner is hurt too, or holds a city as garrison
+  ai.back.hp = Math.floor(UNIT_TYPES.spearman.hp * RELIEF_MIN_HP) - 1;
+  assert.equal(relieveWounded(ai.s, ai.front, know), null);
+  ai.back.hp = UNIT_TYPES.spearman.hp;
+  assert.equal(relieveWounded(ai.s, ai.front, know, new Map([[ai.back.id, {}]])), null);
+  assert.equal(relieveWounded(ai.s, ai.front, know).id, ai.back.id);
+  assert.deepEqual([ai.back.q, ai.back.r], [ai.a.q, ai.a.r], 'the fresh spearman holds the front');
+  assert.deepEqual([ai.front.q, ai.front.r], [ai.b.q, ai.b.r]);
+  // no enemy next to it = no reason to swap
+  const calm = swapSetup();
+  calm.s.current = 1;
+  for (const u of [calm.front, calm.back]) u.owner = 1;
+  calm.front.hp = 2;
+  assert.equal(relieveWounded(calm.s, calm.front, aiKnowledge(calm.s, 1)), null);
 });

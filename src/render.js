@@ -36,6 +36,7 @@ function hexPath(ctx, cx, cy, size) {
 
 // view = { selectedId, reachable: Map, targets: Set(unitId), hover: {q,r}, path: [{q,r}],
 //          unitPos: Map(unitId -> {x,y}) for animations, floaters: [{x,y,text,color,age}],
+//          swaps: Set(unitId) of own units the selected unit can swap places with (while picking),
 //          flankers: Set(unitId) of own units flanking the hovered target (marked with a small ⚔ badge),
 //          visible/explored: Set of keys for fog of war (missing = everything visible), viewer: player at the screen }
 export function render(ctx, state, view = {}) {
@@ -135,6 +136,7 @@ export function render(ctx, state, view = {}) {
       ctx.setLineDash([]);
     }
     if (view.flankers && view.flankers.has(u.id)) drawFlankBadge(ctx, c.x, c.y);
+    if (view.swaps && view.swaps.has(u.id)) drawSwapRing(ctx, c.x, c.y);
   }
 
   // where the player lost units or cities in the last enemy turn (until the player ends the turn)
@@ -320,6 +322,34 @@ function drawPath(ctx, path, turns = null, faint = false) {
       ctx.fill();
       ctx.stroke();
     }
+  }
+  ctx.restore();
+}
+
+// Swap partner while picking: a light-blue dashed ring with two small arrows chasing each other.
+function drawSwapRing(ctx, x, y) {
+  const rad = HEX_SIZE * 0.72;
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(x, y, rad, 0, Math.PI * 2);
+  ctx.strokeStyle = '#7fd8ff';
+  ctx.lineWidth = 3;
+  ctx.setLineDash([6, 4]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = '#7fd8ff';
+  for (const a of [-Math.PI / 4, (3 * Math.PI) / 4]) {
+    // arrow head on the ring pointing clockwise
+    const px = x + Math.cos(a) * rad;
+    const py = y + Math.sin(a) * rad;
+    const tx = -Math.sin(a);
+    const ty = Math.cos(a);
+    ctx.beginPath();
+    ctx.moveTo(px + tx * 6, py + ty * 6);
+    ctx.lineTo(px - tx * 3 + Math.cos(a) * 5, py - ty * 3 + Math.sin(a) * 5);
+    ctx.lineTo(px - tx * 3 - Math.cos(a) * 5, py - ty * 3 - Math.sin(a) * 5);
+    ctx.closePath();
+    ctx.fill();
   }
   ctx.restore();
 }

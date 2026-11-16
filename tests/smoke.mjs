@@ -812,6 +812,60 @@ try {
   }, recruit.id);
   if (!recruitAt || (recruitAt.q === rally.cap.q && recruitAt.r === rally.cap.r)) throw new Error(`rally: recruit did not set off ${JSON.stringify(recruitAt)}`);
 
+  // swap places: a warrior with two own neighbours – S starts picking (blue rings), a click on one of
+  // them swaps, Z undoes it
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const swap = await page.evaluate(async () => {
+    const g = await import('./src/game.js');
+    const rnd = await import('./src/render.js');
+    window.__game.newGame(31, { fog: false, happenings: false });
+    const st = window.__game.getState();
+    st.units = st.units.filter((u) => u.owner !== 0);
+    const free = (t) => t && g.isFree(st, t.q, t.r) && !g.cityAt(st, t.q, t.r) && !t.ruin;
+    const hexN = (t) => [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]].map(([dq, dr]) => st.tiles[`${t.q + dq},${t.r + dr}`]);
+    const enemy = st.units.filter((u) => u.owner === 1);
+    const far = (t) => enemy.every((e) => Math.max(Math.abs(e.q - t.q), Math.abs(e.r - t.r), Math.abs(e.q + e.r - t.q - t.r)) > 3);
+    let mid = null;
+    let ns = [];
+    for (const t of Object.values(st.tiles)) {
+      if (!free(t) || !far(t)) continue;
+      ns = hexN(t).filter(free);
+      if (ns.length >= 2) { mid = t; break; }
+    }
+    if (!mid) return { error: 'no spot' };
+    const a = g.spawnUnit(st, 'warrior', 0, mid.q, mid.r);
+    const b = g.spawnUnit(st, 'spearman', 0, ns[0].q, ns[0].r);
+    const c = g.spawnUnit(st, 'archer', 0, ns[1].q, ns[1].r);
+    for (const u of [a, b, c]) { u.movesLeft = 1; u.hasAttacked = false; }
+    g.drainEvents(st);
+    window.__game.refresh();
+    const rect = document.getElementById('board').getBoundingClientRect();
+    const k = rect.width / rnd.canvasSize(st).w;
+    const at = (p) => { const cc = rnd.tileCenter(p.q, p.r); return { x: rect.left + cc.x * k, y: rect.top + cc.y * k }; };
+    return { a: { id: a.id, q: a.q, r: a.r, ...at(a) }, b: { id: b.id, q: b.q, r: b.r, ...at(b) } };
+  });
+  if (swap.error) throw new Error(`swap: ${swap.error}`);
+  await page.mouse.click(swap.a.x, swap.a.y);
+  if (!(await page.textContent('#info')).includes('Swap places')) throw new Error('swap: no button in the unit panel');
+  await page.keyboard.press('s');
+  if ((await page.evaluate(() => window.__game.swapPicking())) !== swap.a.id) throw new Error('swap: picking did not start');
+  if (!(await page.textContent('#info')).includes('Cancel swap')) throw new Error('swap: panel does not show the picking');
+  await page.screenshot({ path: 'artifacts/screenshot-swap.png' });
+  await page.mouse.click(swap.b.x, swap.b.y);
+  await page.waitForFunction(() => !window.__game.isBusy(), null, { timeout: 10000 });
+  const swapped = await page.evaluate((sw) => {
+    const st = window.__game.getState();
+    const pos = (id) => { const u = st.units.find((x) => x.id === id); return [u.q, u.r]; };
+    return { a: pos(sw.a.id), b: pos(sw.b.id), undo: window.__game.canUndo(), picking: window.__game.swapPicking() };
+  }, swap);
+  if (swapped.a[0] !== swap.b.q || swapped.a[1] !== swap.b.r || swapped.b[0] !== swap.a.q || swapped.b[1] !== swap.a.r) {
+    throw new Error(`swap: units did not trade tiles ${JSON.stringify(swapped)}`);
+  }
+  if (!swapped.undo || swapped.picking !== null) throw new Error(`swap: undo / picking state ${JSON.stringify(swapped)}`);
+  await page.keyboard.press('z');
+  const unswapped = await page.evaluate((id) => { const u = window.__game.getState().units.find((x) => x.id === id); return [u.q, u.r]; }, swap.a.id);
+  if (unswapped[0] !== swap.a.q || unswapped[1] !== swap.a.r) throw new Error('swap: undo did not put the units back');
+
   // rivers: large map without fog, hovering a river tile shows its description in the panel
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.evaluate(() => { window.__game.newGame(4242, { size: 'large', fog: false }); });

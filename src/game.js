@@ -1025,7 +1025,9 @@ export function armyOverview(state, player) {
 // no newly explored tile, and no foreign unit or foreign city on newly visible tiles.
 export function isUndoableMove(before, after, events, viewer) {
   if (after.winner !== null || before.current !== viewer || after.current !== viewer) return false;
-  if (events.length !== 1 || events[0].type !== 'move') return false;
+  // a single move, or the two moves of a swap
+  const isSwap = events.length === 2 && events.every((e) => e.type === 'move' && e.swap !== undefined);
+  if (!isSwap && (events.length !== 1 || events[0].type !== 'move')) return false;
   if (exploredTiles(after, viewer).size !== exploredTiles(before, viewer).size) return false;
   const wasVisible = visibleTiles(before, viewer);
   for (const k of visibleTiles(after, viewer)) {
@@ -1220,6 +1222,54 @@ export function moveUnit(state, unitId, q, r) {
   }
   if (tileAt(state, q, r).ruin && state.winner === null) exploreRuin(state, unit);
   updateExplored(state, unit.owner);
+  return true;
+}
+
+// ---------- swapping places ----------
+// Two neighbouring own units trade tiles in one step, so a fresh unit can relieve a wounded one at the
+// front line (normally the front tile is occupied and the back unit can only walk around it).
+// Both need a move left; each pays the step cost into the other's tile (a single step is always allowed
+// with any points left, as for the first step of a normal move).
+
+// Can `unit` swap places with `other` right now?
+export function canSwap(state, unit, other) {
+  if (!unit || !other || unit.id === other.id || state.winner !== null) return false;
+  if (unit.owner !== state.current || other.owner !== unit.owner) return false;
+  if (distance(unit, other) !== 1 || unit.movesLeft <= 0 || other.movesLeft <= 0) return false;
+  if (unit.hasAttacked || other.hasAttacked) return false;
+  return !cityForbidden(state, unit, other.q, other.r) && !cityForbidden(state, other, unit.q, unit.r);
+}
+
+// Own units the unit could swap with now (for the panel and the map highlight).
+export function swapPartners(state, unit) {
+  if (!unit) return [];
+  return state.units.filter((o) => canSwap(state, unit, o));
+}
+
+// Swaps the two units. Emits two one-step move events (replayable, animated, undoable like a move).
+export function swapUnits(state, unitId, otherId) {
+  const a = getUnit(state, unitId);
+  const b = getUnit(state, otherId);
+  if (!canSwap(state, a, b)) return false;
+  const pa = { q: a.q, r: a.r };
+  const pb = { q: b.q, r: b.r };
+  const costA = stepCost(state, pa, pb, a);
+  const costB = stepCost(state, pb, pa, b);
+  emit(state, { type: 'move', unitId: a.id, path: [pa, pb], swap: b.id });
+  emit(state, { type: 'move', unitId: b.id, path: [pb, pa], swap: a.id });
+  for (const [u, to, cost] of [[a, pb, costA], [b, pa, costB]]) {
+    u.q = to.q;
+    u.r = to.r;
+    u.movesLeft = Math.max(0, u.movesLeft - cost);
+    u.moved = true;
+    delete u.fortified;
+    delete u.goto;
+    delete u.explore;
+  }
+  addLog(state, `${PLAYERS[a.owner].name}: ${UNIT_TYPES[a.type].name} and ${UNIT_TYPES[b.type].name} swapped places`, {
+    by: a.owner, at: [pa, pb],
+  });
+  updateExplored(state, a.owner);
   return true;
 }
 
