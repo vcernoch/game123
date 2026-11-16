@@ -256,7 +256,41 @@ try {
     if (!ok) throw new Error('the X key did not send the unit exploring');
   }
 
-  // end-turn reminder: with idle units the first press only asks, the second ends the turn
+  // sentry: the panel button puts a wounded unit to rest (eye badge, Tab moves on, end-turn count drops),
+  // W puts the next one on watch; at the start of the next turn the healed one wakes with a banner line
+  await page.evaluate(() => window.__game.newGame(31, { happenings: false }));
+  await page.evaluate(() => window.__game.nextUnit());
+  const sen0 = await page.evaluate(() => {
+    const g = window.__game;
+    const u = g.getState().units.find((x) => x.id === g.selectedId());
+    u.hp -= 1; // wounded: the button offers rest until healed
+    g.refresh();
+    return { id: u.id, label: document.getElementById('end-turn').textContent };
+  });
+  const senBtn = await page.textContent('#info button[data-sentry]');
+  if (!senBtn.includes('Rest until healed')) throw new Error(`sentry button text: ${senBtn}`);
+  await page.click('#info button[data-sentry]');
+  const sen1 = await page.evaluate((id) => {
+    const g = window.__game;
+    return { sentry: g.getState().units.find((u) => u.id === id).sentry, sel: g.selectedId(), label: document.getElementById('end-turn').textContent };
+  }, sen0.id);
+  const idle = (t) => Number((t.match(/· (\d+)/) || [0, 0])[1]);
+  if (sen1.sentry !== 'heal' || sen1.sel === sen0.id || idle(sen1.label) !== idle(sen0.label) - 1) {
+    throw new Error(`sentry did not rest the unit: ${JSON.stringify({ sen0, sen1 })}`);
+  }
+  if (sen1.sel !== null) {
+    await page.keyboard.press('w');
+    const watch = await page.evaluate((id) => window.__game.getState().units.find((u) => u.id === id).sentry, sen1.sel);
+    if (watch !== 'watch') throw new Error(`the W key did not put the unit on watch: ${watch}`);
+  }
+  await page.screenshot({ path: 'artifacts/screenshot-sentry.png' });
+  await page.evaluate(() => window.__game.endTurn());
+  await page.waitForFunction(() => !window.__game.isBusy() && window.__game.getState().current === 0, null, { timeout: 15000 });
+  const sen2 = await page.evaluate((id) => ({
+    sentry: window.__game.getState().units.find((u) => u.id === id).sentry, notice: document.getElementById('notice').textContent,
+  }), sen0.id);
+  if (sen2.sentry || !sen2.notice.includes('is fully healed and ready')) throw new Error(`the rested unit did not wake: ${JSON.stringify(sen2)}`);
+
   await page.evaluate(() => window.__game.newGame(4242));
   const label0 = await page.textContent('#end-turn');
   if (!/End turn · \d+/.test(label0)) throw new Error(`end-turn button does not count idle units: ${label0}`);

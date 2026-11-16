@@ -2,7 +2,7 @@
 import {
   createGame, reachable, attackTargets, moveUnit, attack, buyUnit, endTurn,
   unitAt, cityAt, getUnit, incomeOf, previewAttack, tileAt, pathTo, nextActiveUnit, cityInfo,
-  cloneState, drainEvents, migrateState, logFor, turnReport, reportText, reportIsBad, isUndoableMove, canFortify, fortify, activeUnits, territoryOwner, cityResources, unitSummary, planRoute, setOrder, runOrders, cancelOrder, visibleTiles, exploredTiles, build, unitCost, hasBuilding,
+  cloneState, drainEvents, migrateState, logFor, turnReport, reportText, reportIsBad, isUndoableMove, canFortify, fortify, canSentry, sentry, SENTRY_TEXT, activeUnits, territoryOwner, cityResources, unitSummary, planRoute, setOrder, runOrders, cancelOrder, visibleTiles, exploredTiles, build, unitCost, hasBuilding,
   rankOf, rankMult, buildingCost, unitMove, factionOf, riverDefense, flankers, zocTiles, threatTiles, exportGame, importGame, saveFileName, parseSeed, restartOptions,
   upgradeOptions, upgradeUnit, canDisband, disbandRefund, disbandUnit, chargeReady,
   updateSightings, lastSeen, lastSeenAt, lastSeenText, armyOverview, ARMY_STATUS, ruinBelieved,
@@ -19,7 +19,7 @@ import { SHORTCUTS, keyAction, recruitKey } from './keys.js';
 import { render, canvasSize, pickHex, tileCenter } from './render.js';
 import { key } from './hex.js';
 import {
-  UNIT_TYPES, TERRAIN, PLAYERS, DIFFICULTY, BUILDINGS, RANKS, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FORTIFY, TERRITORY, ECONOMY, RESOURCES, HIGH_GROUND, CHARGE, RUINS, PILLAGE, REPAIR, ROADWORK,
+  UNIT_TYPES, TERRAIN, PLAYERS, DIFFICULTY, BUILDINGS, RANKS, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FORTIFY, TERRITORY, ECONOMY, RESOURCES, HIGH_GROUND, CHARGE, RUINS, PILLAGE, REPAIR, ROADWORK, SENTRY,
 } from './rules.js';
 
 const SAVE_KEY = 'game123-save';
@@ -226,6 +226,14 @@ function updateHud() {
       html += `<button data-road class="secondary wide-btn" ${ok ? '' : 'disabled'} title="Lay a road on this tile of your territory: moving between road tiles costs ½; costs ${ROADWORK.gold} gold and ends the unit's turn (B)">🛤 Build road (${ROADWORK.gold} gold)</button>`;
     }
     if (u.fortified) html += `<p class="fortified">⛨ Fortified: +${Math.round(FORTIFY.defBonus * 100)} % defense until it moves or attacks</p>`;
+    if (u.sentry && u.owner === 0) {
+      html += `<p class="sentry">${SENTRY_TEXT[u.sentry]}</p>`;
+      if (!busy()) html += '<button data-cancel-order class="secondary wide-btn">✖ Wake up</button>';
+    }
+    if (u.owner === 0 && !busy() && canSentry(state, u)) {
+      const heal = u.hp < UNIT_TYPES[u.type].hp;
+      html += `<button data-sentry class="secondary wide-btn" title="${heal ? 'Rest here until fully healed' : 'Keep watch here'}; Tab skips the unit until an enemy comes within ${SENTRY.radius} tiles (W)">👁 ${heal ? 'Rest until healed' : 'Sentry'}</button>`;
+    }
     if (u.owner === 0 && !busy() && canFortify(state, u)) {
       html += `<button data-fortify class="secondary wide-btn" title="Dig in: +${Math.round(FORTIFY.defBonus * 100)} % defense, ends the unit's turn (F)">⛨ Fortify</button>`;
     }
@@ -616,7 +624,7 @@ function showTooltip(ev, hex) {
 
 function unitTipText(u) {
   const s = unitSummary(state, u);
-  const tags = [s.rank !== RANKS[0].name ? s.rank : '', s.fortified ? 'fortified' : '', s.marching ? 'marching' : '', s.exploring ? 'exploring' : ''].filter(Boolean);
+  const tags = [s.rank !== RANKS[0].name ? s.rank : '', s.fortified ? 'fortified' : '', s.marching ? 'marching' : '', s.exploring ? 'exploring' : '', s.sentry && s.owner === 0 ? (s.sentry === 'heal' ? 'resting' : 'on watch') : ''].filter(Boolean);
   return `${PLAYERS[s.owner].name}: ${s.name}${tags.length ? ` (${tags.join(', ')})` : ''} · HP ${s.hp}/${s.maxHp}\n`
     + `Attack ${fmt(s.attack)} · Defense ${fmt(s.defense)}${s.notes.length ? ` (${s.notes.join(', ')})` : ''} · Range ${s.range} · Move ${s.move}`;
 }
@@ -705,7 +713,7 @@ function doEndTurn(force = false) {
     save();
     if (walked.length) await anim.play(beforeOrders, walked);
     aiRunning = false;
-    const stopped = orders.filter((o) => o.result === 'interrupted' || o.result === 'blocked' || o.result === 'done')
+    const stopped = orders.filter((o) => ['interrupted', 'blocked', 'done', 'alert', 'healed'].includes(o.result))
       .map((o) => orderText(getUnit(state, o.unitId), o.result));
     showNotice(happened, stopped, report);
     draw();
@@ -716,6 +724,8 @@ function doEndTurn(force = false) {
 function orderText(unit, result) {
   const name = unit ? UNIT_TYPES[unit.type].name : 'A unit';
   if (result === 'done') return `${name} has explored all the land it can reach.`;
+  if (result === 'alert') return `${name} on watch spotted an enemy nearby.`;
+  if (result === 'healed') return `${name} is fully healed and ready.`;
   return result === 'interrupted' ? `${name} stopped its march: enemy in sight.` : `${name} can't get through – order cancelled.`;
 }
 
@@ -923,6 +933,7 @@ $('info').addEventListener('click', (ev) => {
   if (ev.target.closest('button[data-swap]')) { startSwapPick(); return; }
   if (ev.target.closest('button[data-fortify]')) { fortifySelected(); return; }
   if (ev.target.closest('button[data-explore]')) { exploreSelected(); return; }
+  if (ev.target.closest('button[data-sentry]')) { sentrySelected(); return; }
   if (ev.target.closest('button[data-pillage]')) { pillageSelected(); return; }
   if (ev.target.closest('button[data-repair]')) { repairSelected(); return; }
   if (ev.target.closest('button[data-road]')) { roadSelected(); return; }
@@ -957,6 +968,7 @@ window.addEventListener('keydown', (ev) => {
   else if (act.type === 'undo') undoMove();
   else if (act.type === 'fortify') fortifySelected();
   else if (act.type === 'explore') exploreSelected();
+  else if (act.type === 'sentry') sentrySelected();
   else if (act.type === 'pillage') pillageSelected();
   else if (act.type === 'repair') repairSelected();
   else if (act.type === 'road') roadSelected();
@@ -1016,6 +1028,16 @@ function fortifySelected() {
   if (!u || u.owner !== 0 || !fortify(state, u.id)) return;
   undoStack = [];
   afterAction(null); // no animation needed – the shield appears right away
+  sound.play('fortify');
+  selectNextUnit();
+}
+
+// Puts the selected unit on watch (W / button in the panel) and moves on to the next unit that can act.
+function sentrySelected() {
+  if (busy() || state.winner !== null) return;
+  const u = selectedUnit();
+  if (!u || u.owner !== 0 || !sentry(state, u.id)) return;
+  save();
   sound.play('fortify');
   selectNextUnit();
 }

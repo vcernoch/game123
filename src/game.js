@@ -4,7 +4,7 @@ import { generateMap, hasRiverEdge } from './map.js';
 import {
   TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY, VISION, DIFFICULTY, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, ROAD_COST, RIVER, FLANK, HIGH_GROUND, CHARGE,
   FACTIONS, NO_FACTION, MAP_SIZES, HAPPENINGS, FORTIFY, TERRITORY, RESOURCES,
-  UPGRADES, UPGRADE, DISBAND, SIGHTINGS, RUINS, EXPLORE, PILLAGE, REPAIR, ROADWORK,
+  UPGRADES, UPGRADE, DISBAND, SIGHTINGS, RUINS, EXPLORE, PILLAGE, REPAIR, ROADWORK, SENTRY,
 } from './rules.js';
 import { createRng } from './rng.js';
 
@@ -128,7 +128,7 @@ function countStat(state, name, player) {
   state.stats[name][player]++;
 }
 
-export const STATE_VERSION = 22;
+export const STATE_VERSION = 23;
 
 // Converts a saved state of an older version to the current one; returns null for an unknown format.
 export function migrateState(s) {
@@ -220,6 +220,10 @@ export function migrateState(s) {
   if (s.version === 21) {
     // road building arrived in version 22 – a missing `tile.roadBuilt` means the road came with the map
     s.version = 22;
+  }
+  if (s.version === 22) {
+    // sentry arrived in version 23 – a missing `unit.sentry` means not on watch
+    s.version = 23;
   }
   return s.version === STATE_VERSION ? s : null;
 }
@@ -376,7 +380,7 @@ export function applyEvent(state, ev) {
   if (ev.type === 'move') {
     const u = getUnit(state, ev.unitId);
     const end = ev.path[ev.path.length - 1];
-    if (u) { u.q = end.q; u.r = end.r; delete u.fortified; }
+    if (u) { u.q = end.q; u.r = end.r; delete u.fortified; delete u.sentry; }
   } else if (ev.type === 'attack') {
     const a = getUnit(state, ev.attackerId);
     const d = getUnit(state, ev.defenderId);
@@ -386,6 +390,7 @@ export function applyEvent(state, ev) {
     }
     if (a) {
       delete a.fortified;
+      delete a.sentry;
       a.hp = ev.attackerHp ?? a.hp - ev.counter;
       a.xp = ev.attackerXp ?? a.xp;
     }
@@ -393,7 +398,7 @@ export function applyEvent(state, ev) {
     if (ev.died) removeUnit(state, ev.attackerId);
   } else if (ev.type === 'fortify') {
     const u = getUnit(state, ev.unitId);
-    if (u) u.fortified = true;
+    if (u) { u.fortified = true; delete u.sentry; }
   } else if (ev.type === 'spawn') {
     state.units.push({ ...ev.unit });
   } else if (ev.type === 'capture') {
@@ -410,7 +415,7 @@ export function applyEvent(state, ev) {
     if (c && !hasBuilding(c, ev.building)) c.buildings = [...(c.buildings || []), ev.building];
   } else if (ev.type === 'upgrade') {
     const u = getUnit(state, ev.unitId);
-    if (u) { u.type = ev.to; u.hp = ev.hp; delete u.fortified; }
+    if (u) { u.type = ev.to; u.hp = ev.hp; delete u.fortified; delete u.sentry; }
   } else if (ev.type === 'ruin') {
     const t = tileAt(state, ev.q, ev.r);
     if (t) { delete t.ruin; t.ruinGone = [...ev.knownBy]; }
@@ -421,19 +426,19 @@ export function applyEvent(state, ev) {
     const t = tileAt(state, ev.q, ev.r);
     if (t) t.pillagedUntil = ev.until;
     const u = getUnit(state, ev.unitId);
-    if (u) { u.movesLeft = 0; u.hasAttacked = true; delete u.fortified; }
+    if (u) { u.movesLeft = 0; u.hasAttacked = true; delete u.fortified; delete u.sentry; }
     if (ev.gold) state.gold[ev.player] += ev.gold;
   } else if (ev.type === 'repair') {
     const t = tileAt(state, ev.q, ev.r);
     if (t) delete t.pillagedUntil;
     const u = getUnit(state, ev.unitId);
-    if (u) { u.movesLeft = 0; u.hasAttacked = true; delete u.fortified; }
+    if (u) { u.movesLeft = 0; u.hasAttacked = true; delete u.fortified; delete u.sentry; }
     if (ev.gold) state.gold[ev.player] -= ev.gold;
   } else if (ev.type === 'road') {
     const t = tileAt(state, ev.q, ev.r);
     if (t) { t.road = true; t.roadBuilt = true; }
     const u = getUnit(state, ev.unitId);
-    if (u) { u.movesLeft = 0; u.hasAttacked = true; delete u.fortified; }
+    if (u) { u.movesLeft = 0; u.hasAttacked = true; delete u.fortified; delete u.sentry; }
     if (ev.gold) state.gold[ev.player] -= ev.gold;
   } else if (ev.type === 'disband') {
     removeUnit(state, ev.unitId); // gold is not replayed, as for recruiting and upgrades
@@ -782,13 +787,14 @@ export function setOrder(state, unitId, q, r) {
   const unit = getUnit(state, unitId);
   if (!unit || unit.owner !== state.current || state.winner !== null || !planRoute(state, unit, q, r)) return null;
   delete unit.fortified;
+  delete unit.sentry;
   unit.goto = { q, r };
   return followOrder(state, unit);
 }
 
 export function cancelOrder(state, unitId) {
   const unit = getUnit(state, unitId);
-  if (unit) { delete unit.goto; delete unit.explore; }
+  if (unit) { delete unit.goto; delete unit.explore; delete unit.sentry; }
 }
 
 // Visible enemy units within `radius` of the unit (used to interrupt move orders).
@@ -822,10 +828,11 @@ export function followOrder(state, unit) {
   return 'moved';
 }
 
-// At the start of a player's turn: units with orders walk on. An enemy already in sight stops the order
-// before moving. Returns [{ unitId, result }].
+// At the start of a player's turn: units on watch wake up when needed ('alert' / 'healed', see
+// checkSentries), then units with orders walk on. An enemy already in sight stops the order before
+// moving. Returns [{ unitId, result }].
 export function runOrders(state, player) {
-  const out = [];
+  const out = checkSentries(state, player);
   for (const unit of state.units.filter((u) => u.owner === player && (u.goto || u.explore))) {
     if (state.winner !== null) break;
     if (enemyInSight(state, unit)) {
@@ -921,6 +928,7 @@ export function setExplore(state, unitId) {
   const unit = getUnit(state, unitId);
   if (!canExplore(state, unit)) return null;
   delete unit.fortified;
+  delete unit.sentry;
   delete unit.goto;
   unit.explore = true;
   return followExplore(state, unit);
@@ -965,10 +973,10 @@ export function followExplore(state, unit) {
   return moved ? 'moved' : 'idle';
 }
 
-// Own units that can still move or attack, sorted by id. Fortified units are left alone (like sleeping
-// units); they can still be selected by clicking. Used by Tab and by the end-turn reminder.
+// Own units that can still move or attack, sorted by id. Fortified units and units on watch are left
+// alone (like sleeping units); they can still be selected by clicking. Used by Tab and by the end-turn reminder.
 export function activeUnits(state, player) {
-  const canAct = (u) => !u.fortified && (u.movesLeft > 0 || attackTargets(state, u).length > 0);
+  const canAct = (u) => !u.fortified && !u.sentry && (u.movesLeft > 0 || attackTargets(state, u).length > 0);
   return state.units.filter((u) => u.owner === player && canAct(u)).sort((a, b) => a.id - b.id);
 }
 
@@ -986,13 +994,15 @@ export const ARMY_STATUS = {
   ready:     { order: 0, label: 'ready' },
   marching:  { order: 1, label: 'marching' },
   fortified: { order: 2, label: 'fortified' },
-  done:      { order: 3, label: 'done' },
+  sentry:    { order: 3, label: 'on watch' },
+  done:      { order: 4, label: 'done' },
 };
 
 // What a unit is doing this turn: ready (can still move or attack), marching (has a move order and no
-// moves left), fortified, or done.
+// moves left), fortified, on watch (sentry), or done.
 export function unitStatus(state, unit) {
   if (unit.fortified) return 'fortified';
+  if (unit.sentry) return 'sentry';
   if (unit.movesLeft > 0 || attackTargets(state, unit).length > 0) return 'ready'; // same rule as activeUnits / Tab
   return unit.goto || unit.explore ? 'marching' : 'done';
 }
@@ -1050,6 +1060,49 @@ export function isUndoableMove(before, after, events, viewer) {
   return true;
 }
 
+// ---------- sentry ----------
+// unit.sentry = 'watch' | 'heal': the unit stays where it is and is skipped by Tab, the end-turn reminder
+// and the "ready" count, until an enemy shows up near it ('heal' also ends when it is fully healed). It
+// keeps its moves, so it can still be clicked and given orders; any action wakes it.
+
+// Panel line for a unit on watch, by mode.
+export const SENTRY_TEXT = {
+  watch: `👁 On watch – Tab skips it until an enemy comes within ${SENTRY.radius} tiles`,
+  heal: `👁 Resting until healed – or until an enemy comes within ${SENTRY.radius} tiles`,
+};
+
+// Can the unit go on watch? An own unit of the current player that isn't fortified or on watch already.
+export function canSentry(state, unit) {
+  return !!unit && unit.owner === state.current && state.winner === null && !unit.fortified && !unit.sentry;
+}
+
+// Puts the unit on watch. A wounded unit rests until healed ('heal'), a healthy one just keeps watch.
+// Cancels a move or explore order. Returns the mode or null.
+export function sentry(state, unitId) {
+  const unit = getUnit(state, unitId);
+  if (!canSentry(state, unit)) return null;
+  delete unit.goto;
+  delete unit.explore;
+  unit.sentry = unit.hp < UNIT_TYPES[unit.type].hp ? 'heal' : 'watch';
+  return unit.sentry;
+}
+
+// Start of the player's turn: wakes units on watch. An enemy in sight within SENTRY.radius → 'alert';
+// a resting unit back at full HP → 'healed'. Returns [{ unitId, result }] for the banner.
+export function checkSentries(state, player) {
+  const out = [];
+  for (const unit of state.units.filter((u) => u.owner === player && u.sentry)) {
+    if (enemyInSight(state, unit, SENTRY.radius)) {
+      delete unit.sentry;
+      out.push({ unitId: unit.id, result: 'alert' });
+    } else if (unit.sentry === 'heal' && unit.hp >= UNIT_TYPES[unit.type].hp) {
+      delete unit.sentry;
+      out.push({ unitId: unit.id, result: 'healed' });
+    }
+  }
+  return out;
+}
+
 // Can the unit fortify now? Only an own unit of the current player that hasn't moved or attacked this turn.
 export function canFortify(state, unit) {
   return !!unit && unit.owner === state.current && state.winner === null
@@ -1061,6 +1114,7 @@ export function fortify(state, unitId) {
   const unit = getUnit(state, unitId);
   if (!canFortify(state, unit)) return false;
   unit.fortified = true;
+  delete unit.sentry;
   delete unit.goto;
   delete unit.explore;
   unit.movesLeft = 0;
@@ -1131,6 +1185,7 @@ export function unitSummary(state, unit) {
     fortified: !!unit.fortified,
     marching: !!unit.goto,
     exploring: !!unit.explore,
+    sentry: unit.sentry || null,
     notes,
   };
 }
@@ -1214,6 +1269,7 @@ export function moveUnit(state, unitId, q, r) {
   unit.movesLeft = Math.max(0, unit.movesLeft - cost);
   unit.moved = true;
   delete unit.fortified;
+  delete unit.sentry;
   delete unit.goto; // a manual move cancels a move order (followOrder puts it back)
   delete unit.explore; // … and an explore order (followExplore puts it back)
   const city = cityAt(state, q, r);
@@ -1273,6 +1329,7 @@ export function swapUnits(state, unitId, otherId) {
     u.movesLeft = Math.max(0, u.movesLeft - cost);
     u.moved = true;
     delete u.fortified;
+    delete u.sentry;
     delete u.goto;
     delete u.explore;
   }
@@ -1289,6 +1346,7 @@ export function attack(state, attackerId, defenderId) {
   if (!a || !d || a.owner !== state.current || state.winner !== null) return false;
   if (!attackTargets(state, a).includes(d)) return false;
   delete a.fortified; // attacking leaves the fortification before the fight
+  delete a.sentry;
   delete a.goto;
   const res = previewAttack(state, a, d);
   d.hp -= res.damage;
@@ -1469,6 +1527,7 @@ export function upgradeUnit(state, unitId, to) {
   unit.movesLeft = 0;
   unit.hasAttacked = true;
   delete unit.fortified;
+  delete unit.sentry;
   delete unit.goto;
   emit(state, { type: 'upgrade', unitId: unit.id, from, to, hp: unit.hp });
   const city = cityAt(state, unit.q, unit.r);
@@ -1581,6 +1640,7 @@ export function buildRoad(state, unitId) {
   delete unit.fortified;
   delete unit.goto;
   delete unit.explore;
+  delete unit.sentry;
   const ev = { type: 'road', unitId: unit.id, player: unit.owner, q: tile.q, r: tile.r, gold: ROADWORK.gold };
   emit(state, ev);
   addLog(state, `${PLAYERS[unit.owner].name}: ${UNIT_TYPES[unit.type].name} built a road (−${ROADWORK.gold} gold)`, { by: unit.owner, at: [tile] });
@@ -1634,6 +1694,7 @@ export function pillage(state, unitId) {
   delete unit.fortified;
   delete unit.goto;
   delete unit.explore;
+  delete unit.sentry;
   const ev = { type: 'pillage', unitId: unit.id, player: unit.owner, victim, q: tile.q, r: tile.r,
     resource: tile.resource, gold: PILLAGE.gold, until: tile.pillagedUntil };
   emit(state, ev);
@@ -1667,6 +1728,7 @@ export function repair(state, unitId) {
   delete unit.fortified;
   delete unit.goto;
   delete unit.explore;
+  delete unit.sentry;
   const ev = { type: 'repair', unitId: unit.id, player: unit.owner, q: tile.q, r: tile.r, resource: tile.resource, gold: REPAIR.gold, saved: left };
   emit(state, ev);
   addLog(state, `${PLAYERS[unit.owner].name}: ${UNIT_TYPES[unit.type].name} repaired ${RESOURCES[tile.resource].name.toLowerCase()} near ${city.name} (−${REPAIR.gold} gold)`,
@@ -2006,6 +2068,7 @@ export function stateProblem(s) {
     if (taken.has(k)) return `two units on ${k}`;
     taken.add(k);
     if (!Number.isFinite(u.hp) || u.hp <= 0) return `unit ${u.id} has no HP`;
+    if (u.sentry !== undefined && u.sentry !== 'watch' && u.sentry !== 'heal') return `unit ${u.id} has a bad watch order`;
   }
   if (s.winner !== null && s.winner !== undefined && !validOwner(s.winner)) return 'bad winner';
   return null;

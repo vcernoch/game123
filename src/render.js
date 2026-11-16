@@ -832,6 +832,29 @@ function drawCompass(ctx, x, y) {
   ctx.fill();
 }
 
+// Small eye (sentry): a light disc with a dark eye; green-tinted while resting until healed.
+function drawEye(ctx, x, y, heal) {
+  ctx.beginPath();
+  ctx.arc(x, y, 5.5, 0, Math.PI * 2);
+  ctx.fillStyle = heal ? '#c9f2d8' : '#eef2f6';
+  ctx.fill();
+  ctx.lineWidth = 1.2;
+  ctx.strokeStyle = 'rgba(0,0,0,0.75)';
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(x - 4, y);
+  ctx.quadraticCurveTo(x, y - 3.6, x + 4, y);
+  ctx.quadraticCurveTo(x, y + 3.6, x - 4, y);
+  ctx.closePath();
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = '#2a3340';
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(x, y, 1.5, 0, Math.PI * 2);
+  ctx.fillStyle = '#2a3340';
+  ctx.fill();
+}
+
 function drawUnit(ctx, u, x, y, selected, active) {
   const t = UNIT_TYPES[u.type];
   const p = PLAYERS[u.owner];
@@ -863,6 +886,8 @@ function drawUnit(ctx, u, x, y, selected, active) {
   if (u.fortified) drawShield(ctx, x + 11, y + 10);
   // exploring: a small compass at the bottom left
   if (u.explore) drawCompass(ctx, x - 11, y + 10);
+  // on watch: a small eye at the bottom left (a unit on watch has no explore order)
+  if (u.sentry) drawEye(ctx, x - 11, y + 10, u.sentry === 'heal');
   // HP bar
   const frac = u.hp / t.hp;
   ctx.fillStyle = 'rgba(0,0,0,0.6)';

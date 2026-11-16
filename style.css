@@ -171,5 +171,7 @@ kbd { font: 600 11px ui-monospace, monospace; background: #3c434f; color: var(--
 .army-row.ready .st { background: #e0b44a; color: #1d2128; font-weight: 600; }
 .army-row.marching .st { color: #ffe27a; }
 .army-row.fortified .st { color: #cfe3ff; }
+.army-row.sentry .st { color: #b9f0d0; }
+.sentry { color: #b9f0d0; }
 .army-row.done { opacity: 0.6; }
 .army-row.sel { border-color: var(--accent); }

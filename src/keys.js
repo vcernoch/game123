@@ -12,6 +12,8 @@ export const SHORTCUTS = [
   { keys: 'Shift + Enter', text: 'end the turn right away', action: () => ({ type: 'endTurn', force: true }),
     match: (k, shift) => k === 'Enter' && shift },
   { keys: 'F', text: 'fortify the selected unit', action: () => ({ type: 'fortify' }), match: (k) => k === 'f' || k === 'F' },
+  { keys: 'W', text: 'sentry: the selected unit keeps watch (a wounded one rests until healed) and Tab skips it until an enemy comes near',
+    action: () => ({ type: 'sentry' }), match: (k) => k === 'w' || k === 'W' },
   { keys: 'X', text: 'send the selected unit exploring the fog on its own', action: () => ({ type: 'explore' }), match: (k) => k === 'x' || k === 'X' },
   { keys: 'P', text: 'pillage the enemy resource under the selected unit (gold for you, no income for its owner)', action: () => ({ type: 'pillage' }),
     match: (k) => k === 'p' || k === 'P' },

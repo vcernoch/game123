@@ -13,7 +13,7 @@ import {
   armyOverview, unitStatus, unitWhere, ARMY_STATUS, ruinBelieved, ruinKind, exploreRuin,
   exploreTarget, canExplore, setExplore, followExplore, canPillage, pillage, isPillaged, pillageTurnsLeft, cityAt, canRepair, repair,
   rallyPath, rallyTarget, canRally, setRally, clearRally, canSwap, swapPartners, swapUnits,
-  canBuildRoad, buildRoad, roadLinks,
+  canBuildRoad, buildRoad, roadLinks, canSentry, sentry, checkSentries, SENTRY_TEXT,
 } from '../src/game.js';
 import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
@@ -32,7 +32,7 @@ import { distance, key, neighbors } from '../src/hex.js';
 import {
   RESOURCES, FORTIFY, TERRITORY, ECONOMY, UNIT_TYPES, TERRAIN, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FLANK, HIGH_GROUND, CHARGE, REPAIR,
   UPGRADES, UPGRADE, DISBAND, RUINS, EXPLORE, PILLAGE,
-  SIGHTINGS, ROADWORK,
+  SIGHTINGS, ROADWORK, SENTRY,
 } from '../src/rules.js';
 
 test('map is deterministic and starting cities are connected', () => {
@@ -2257,7 +2257,7 @@ test('army overview lists own units by status with a fog-safe location', () => {
   assert.equal(unitStatus(s, d), 'ready');
   ov = armyOverview(s, 0);
   assert.deepEqual(ov.rows.map((r) => r.id), [d.id, c.id, a.id, b.id], 'ready → marching → fortified → done');
-  assert.deepEqual(ov.counts, { ready: 1, marching: 1, fortified: 1, done: 1 });
+  assert.deepEqual(ov.counts, { ready: 1, marching: 1, fortified: 1, sentry: 0, done: 1 });
   // the ready list agrees with Tab
   assert.deepEqual(ov.rows.filter((r) => r.status === 'ready').map((r) => r.id), activeUnits(s, 0).map((u) => u.id));
   const row = ov.rows.find((r) => r.id === c.id);
@@ -3169,4 +3169,104 @@ test('road building: who can\'t, and the AI extends its network with spare gold'
     }
   }
   assert.ok(roads >= 1, `roads built: ${roads}`);
+});
+
+// duel() with the enemy moved out of the sentry radius (to a free passable tile).
+function farDuel(seed) {
+  const d = duel(seed);
+  const far = Object.values(d.s.tiles).find((t) => isPassable(d.s, t.q, t.r) && distance(t, d.me) > SENTRY.radius + 2
+    && !unitAt(d.s, t.q, t.r) && !d.s.cities.some((c) => c.q === t.q && c.r === t.r));
+  d.foe.q = far.q; d.foe.r = far.r;
+  return d;
+}
+
+test('sentry: a unit on watch is skipped by Tab and wakes when an enemy comes near', () => {
+  const { s, me, foe } = farDuel(6);
+  assert.ok(canSentry(s, me));
+  assert.equal(sentry(s, me.id), 'watch', 'a healthy unit keeps watch');
+  assert.equal(me.movesLeft, 2, 'going on watch costs no moves');
+  assert.equal(sentry(s, me.id), null, 'not twice');
+  assert.equal(unitStatus(s, me), 'sentry');
+  assert.deepEqual(activeUnits(s, 0), [], 'Tab and the end-turn reminder skip it');
+  assert.equal(nextActiveUnit(s, 0, null), null);
+  assert.equal(armyOverview(s, 0).counts.sentry, 1);
+  assert.equal(unitSummary(s, me).sentry, 'watch');
+  assert.ok(SENTRY_TEXT.watch && SENTRY_TEXT.heal);
+  assert.deepEqual(drainEvents(s), [], 'nothing to animate');
+  // quiet turns: it stays on watch
+  endTurn(s); endTurn(s);
+  assert.deepEqual(runOrders(s, 0), []);
+  assert.equal(me.sentry, 'watch');
+  // an enemy walks next to it: at the start of the turn it wakes up and counts as ready again
+  endTurn(s);
+  const n = neighbors(me.q, me.r).find((p) => isPassable(s, p.q, p.r) && !unitAt(s, p.q, p.r));
+  foe.q = n.q; foe.r = n.r;
+  endTurn(s);
+  assert.deepEqual(runOrders(s, 0), [{ unitId: me.id, result: 'alert' }]);
+  assert.ok(!me.sentry);
+  assert.deepEqual(activeUnits(s, 0).map((u) => u.id), [me.id]);
+  // keyboard
+  assert.equal(keyAction('w').type, 'sentry');
+  assert.equal(keyAction('W').type, 'sentry');
+});
+
+test('sentry: a wounded unit rests until healed; any order or action wakes it; rules and saves', () => {
+  const { s, me } = farDuel(6);
+  me.hp = UNIT_TYPES.warrior.hp - 1;
+  assert.equal(sentry(s, me.id), 'heal', 'a wounded unit rests until healed');
+  endTurn(s); endTurn(s); // resting heals at least 1
+  assert.equal(me.hp, UNIT_TYPES.warrior.hp);
+  assert.deepEqual(checkSentries(s, 0), [{ unitId: me.id, result: 'healed' }]);
+  assert.ok(!me.sentry);
+  // a far enemy doesn't wake a sentry, a wounded one that is not yet healed keeps resting
+  me.hp = 2;
+  sentry(s, me.id);
+  assert.deepEqual(checkSentries(s, 0), []);
+  // actions wake it: move, attack, fortify, move order, cancel (the "Wake up" button)
+  const wakers = [
+    ['move', (d) => { const [k] = reachable(d.s, d.me).keys(); const [q, r] = k.split(',').map(Number); assert.ok(moveUnit(d.s, d.me.id, q, r)); }],
+    ['attack', (d) => assert.ok(attack(d.s, d.me.id, d.foe.id))],
+    ['fortify', (d) => assert.ok(fortify(d.s, d.me.id))],
+    ['cancel', (d) => cancelOrder(d.s, d.me.id)],
+  ];
+  for (const [name, act] of wakers) {
+    const d = duel(6);
+    sentry(d.s, d.me.id);
+    act(d);
+    assert.ok(!d.me.sentry, `${name} wakes the unit`);
+  }
+  const d = farDuel(6);
+  sentry(d.s, d.me.id);
+  const goal = Object.values(d.s.tiles).find((t) => planRoute(d.s, d.me, t.q, t.r) && distance(t, d.me) >= 4);
+  assert.ok(setOrder(d.s, d.me.id, goal.q, goal.r));
+  assert.ok(!d.me.sentry && d.me.goto, 'a move order wakes it');
+  // going on watch cancels a move order; replaying a move clears the flag on the copy too
+  const e = farDuel(6);
+  e.me.goto = { q: goal.q, r: goal.r };
+  sentry(e.s, e.me.id);
+  assert.ok(!e.me.goto);
+  const copy = cloneState(e.s);
+  const [k] = reachable(e.s, e.me).keys();
+  const [q, r] = k.split(',').map(Number);
+  moveUnit(e.s, e.me.id, q, r);
+  for (const ev of drainEvents(e.s)) applyEvent(copy, ev);
+  assert.ok(!getUnit(copy, e.me.id).sentry);
+  // who can't: the enemy's unit, a fortified unit, after the game ended
+  const f = farDuel(6);
+  assert.ok(!canSentry(f.s, f.foe), 'not the other player\'s unit');
+  f.me.fortified = true;
+  assert.ok(!canSentry(f.s, f.me), 'a fortified unit already sleeps');
+  const g = farDuel(6);
+  g.s.winner = 1;
+  assert.ok(!canSentry(g.s, g.me));
+  // saves keep it, a bad value is rejected, an old save migrates
+  const h = farDuel(6);
+  sentry(h.s, h.me.id);
+  const back = importGame(exportGame(h.s, GAME_VERSION));
+  assert.equal(back.state.units.find((u) => u.id === h.me.id).sentry, 'watch');
+  h.me.sentry = 'nap';
+  assert.match(stateProblem(h.s), /watch order/);
+  const old = createGame({ seed: 2 });
+  old.version = 22;
+  assert.equal(migrateState(old).version, STATE_VERSION);
 });

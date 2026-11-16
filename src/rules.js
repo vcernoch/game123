@@ -190,6 +190,11 @@ export const SIGHTINGS = { maxAge: 3 };
 // as `ruinBonus` extra tiles. The order stops when an enemy comes within `enemyRadius` or nothing is left.
 export const EXPLORE = { ruinBonus: 6, enemyRadius: 2, legsPerTurn: 3 };
 
+// Sentry: a unit on watch is skipped by Tab and the end-turn reminder until, at the start of its owner's
+// turn, a visible enemy is within `radius` (it wakes up) – or, when it was put on watch wounded, until it
+// is fully healed ("rest until healed").
+export const SENTRY = { radius: 2 };
+
 export const NEUTRAL_COLOR = '#e8e2d0';
 
 export const ECONOMY = {

@@ -88,5 +88,8 @@ Check off `[x]` when done. Add new ideas to the end of the relevant phase or to 
 - [x] Swap places (⇄ / S): two neighbouring own units with a move left trade tiles in one step, so a fresh unit can relieve a wounded one at the front; undoable like a move; the AI swaps a wounded unit pressed by an enemy with a healthy melee neighbour
 - [x] Road building (🛤 / B): a unit that hasn't attacked builds a road on a roadless tile of own territory for 4 gold (ends its turn); roads serve both sides; the AI extends its network next to roads and cities with spare gold
 
+## Phase 14 – command comfort (own improvements)
+- [x] Sentry (👁 / W): a unit keeps watch where it stands (a wounded one rests until fully healed); Tab, the end-turn reminder and the army "ready" count skip it until an enemy comes within 2 tiles at the start of your turn; the banner says who woke up and why
+
 ## Ideas (unordered)
 - Diplomacy with multiple AIs
