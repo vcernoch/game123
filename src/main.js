@@ -449,7 +449,8 @@ function updateArmy() {
   if (k === armyKey) return;
   armyKey = k;
   $('army-count').textContent = sum;
-  if (!$('army-panel').open) return;
+  // a closed panel keeps no rows, so reopening never shows a stale list before the toggle redraw
+  if (!$('army-panel').open) { $('army').innerHTML = ''; return; }
   if (!rows.length) { $('army').innerHTML = '<li class="hint">You have no units. Recruit in a city.</li>'; return; }
   $('army').innerHTML = rows.map((r) => {
     const rank = RANKS[r.rank].symbol ? ` ${RANKS[r.rank].symbol}` : '';
