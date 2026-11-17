@@ -4,7 +4,7 @@ import { generateMap, hasRiverEdge } from './map.js';
 import {
   TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY, VISION, DIFFICULTY, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, ROAD_COST, RIVER, FLANK, HIGH_GROUND, CHARGE,
   FACTIONS, NO_FACTION, MAP_SIZES, HAPPENINGS, FORTIFY, TERRITORY, RESOURCES,
-  UPGRADES, UPGRADE, DISBAND, SIGHTINGS, RUINS, EXPLORE, PILLAGE, REPAIR, ROADWORK, SENTRY, VOLLEY, ANIM_SPEEDS,
+  UPGRADES, UPGRADE, DISBAND, SIGHTINGS, RUINS, EXPLORE, PILLAGE, REPAIR, ROADWORK, SENTRY, VOLLEY, ANIM_SPEEDS, HEROES,
 } from './rules.js';
 import { createRng } from './rng.js';
 
@@ -46,6 +46,7 @@ export function createGame({
     stats: emptyStats(),
     explored: PLAYERS.map(() => []),
     sightings: PLAYERS.map(() => []),
+    fallen: [],
   };
   starts.forEach((s, owner) => {
     spawnUnit(state, 'warrior', owner, s.q, s.r);
@@ -128,7 +129,7 @@ function countStat(state, name, player) {
   state.stats[name][player]++;
 }
 
-export const STATE_VERSION = 23;
+export const STATE_VERSION = 24;
 
 // Converts a saved state of an older version to the current one; returns null for an unknown format.
 export function migrateState(s) {
@@ -224,6 +225,12 @@ export function migrateState(s) {
   if (s.version === 22) {
     // sentry arrived in version 23 – a missing `unit.sentry` means not on watch
     s.version = 23;
+  }
+  if (s.version === 23) {
+    // heroes arrived in version 24: veterans already in the field get their names, kills start at 0
+    s.fallen = [];
+    for (const u of [...s.units].sort((a, b) => a.id - b.id)) nameHero(s, u);
+    s.version = 24;
   }
   return s.version === STATE_VERSION ? s : null;
 }
@@ -387,12 +394,16 @@ export function applyEvent(state, ev) {
     if (d) {
       d.hp = ev.defenderHp ?? d.hp - ev.damage;
       d.xp = ev.defenderXp ?? d.xp;
+      if (ev.defenderName) d.name = ev.defenderName;
+      if (ev.defenderKills) d.kills = ev.defenderKills;
     }
     if (a) {
       delete a.fortified;
       delete a.sentry;
       a.hp = ev.attackerHp ?? a.hp - ev.counter;
       a.xp = ev.attackerXp ?? a.xp;
+      if (ev.attackerName) a.name = ev.attackerName;
+      if (ev.attackerKills) a.kills = ev.attackerKills;
     }
     if (ev.killed) removeUnit(state, ev.defenderId);
     if (ev.died) removeUnit(state, ev.attackerId);
@@ -421,7 +432,7 @@ export function applyEvent(state, ev) {
     if (t) { delete t.ruin; t.ruinGone = [...ev.knownBy]; }
     if (ev.gold) state.gold[ev.player] += ev.gold;
     const u = getUnit(state, ev.unitId);
-    if (u && ev.xp !== undefined) { u.xp = ev.xp; u.hp = ev.hp; }
+    if (u && ev.xp !== undefined) { u.xp = ev.xp; u.hp = ev.hp; if (ev.name) u.name = ev.name; }
   } else if (ev.type === 'pillage') {
     const t = tileAt(state, ev.q, ev.r);
     if (t) t.pillagedUntil = ev.until;
@@ -1043,7 +1054,7 @@ export function armyOverview(state, player) {
   const rows = state.units.filter((u) => u.owner === player).map((u) => {
     const t = UNIT_TYPES[u.type];
     return {
-      id: u.id, type: u.type, name: t.name, symbol: t.symbol, hp: u.hp, maxHp: t.hp,
+      id: u.id, type: u.type, name: t.name, hero: u.name || null, kills: u.kills || 0, symbol: t.symbol, hp: u.hp, maxHp: t.hp,
       rank: rankOf(u), status: unitStatus(state, u), where: unitWhere(state, u, explored),
     };
   });
@@ -1157,10 +1168,64 @@ function gainXp(state, unit, amount) {
   unit.xp = (unit.xp || 0) + amount;
   if (rankOf(unit) <= before) return false;
   unit.hp = Math.min(UNIT_TYPES[unit.type].hp, unit.hp + XP.promotionHeal);
-  addLog(state, `${PLAYERS[unit.owner].name}: ${UNIT_TYPES[unit.type].name} promoted to ${RANKS[rankOf(unit)].name}`, {
+  const was = unitTitle(unit);
+  const named = nameHero(state, unit);
+  addLog(state, `${PLAYERS[unit.owner].name}: ${was} promoted to ${RANKS[rankOf(unit)].name}${named ? ` – now known as ${unit.name}` : ''}`, {
     by: unit.owner, at: [unit],
   });
   return true;
+}
+
+// ---------- heroes ----------
+// A unit reaching HEROES.minRank gets a name (unit.name) for life; unit.kills counts its kills.
+// Named units that leave the game are remembered in state.fallen for the hall of fame.
+
+// "Aldric (Warrior)" for a named unit, "Warrior" otherwise.
+export function unitTitle(unit) {
+  const type = UNIT_TYPES[unit.type].name;
+  return unit.name ? `${unit.name} (${type})` : type;
+}
+
+// A free name for the unit, chosen from the seed and the unit id (reproducible). Names used by any
+// living or remembered unit are skipped; when all are taken, a numeral is added ("Aldric II").
+export function heroName(state, unit) {
+  const names = HEROES.names;
+  const used = new Set([...state.units, ...(state.fallen || [])].map((u) => u.name).filter(Boolean));
+  const start = Math.abs(state.seed * 31 + unit.id * 7) % names.length;
+  for (let round = 1; ; round++) {
+    const suffix = round === 1 ? '' : ` ${['', '', 'II', 'III', 'IV', 'V'][round] || round}`;
+    for (let i = 0; i < names.length; i++) {
+      const n = names[(start + i) % names.length] + suffix;
+      if (!used.has(n)) return n;
+    }
+  }
+}
+
+// Names the unit if it has earned a rank worth a name and has none yet. Returns true when it did.
+function nameHero(state, unit) {
+  if (unit.name || rankOf(unit) < HEROES.minRank) return false;
+  unit.name = heroName(state, unit);
+  return true;
+}
+
+// Remembers a named unit that leaves the game (fate: 'fell' | 'disbanded').
+function rememberHero(state, unit, fate) {
+  if (!unit.name) return;
+  if (!state.fallen) state.fallen = [];
+  state.fallen.push({ name: unit.name, type: unit.type, owner: unit.owner, xp: unit.xp || 0, kills: unit.kills || 0, fate, turn: state.turn });
+}
+
+// The player's best units of the game: living and remembered named units plus any unit with kills,
+// best first (kills, then experience, then the living). Each row: { name, type, kills, xp, rank, fate }.
+export function hallOfFame(state, player, limit = HEROES.hallSize) {
+  const living = state.units.filter((u) => u.owner === player && (u.name || u.kills))
+    .map((u) => ({ name: u.name || null, type: u.type, kills: u.kills || 0, xp: u.xp || 0, fate: 'alive', id: u.id }));
+  const gone = (state.fallen || []).filter((f) => f.owner === player)
+    .map((f) => ({ name: f.name, type: f.type, kills: f.kills, xp: f.xp, fate: f.fate, turn: f.turn }));
+  return [...living, ...gone]
+    .sort((a, b) => b.kills - a.kills || b.xp - a.xp || (a.fate === 'alive' ? 0 : 1) - (b.fate === 'alive' ? 0 : 1))
+    .slice(0, limit)
+    .map((h) => ({ ...h, rank: rankOf(h) }));
 }
 
 // Unit strength multiplier against a specific opponent (spearman vs. horseman…).
@@ -1184,6 +1249,8 @@ export function unitSummary(state, unit) {
   if (unit.fortified) notes.push('fortified');
   return {
     name: t.name,
+    hero: unit.name || null,
+    kills: unit.kills || 0,
     owner: unit.owner,
     hp: unit.hp,
     maxHp: t.hp,
@@ -1263,6 +1330,7 @@ export function spawnUnit(state, type, owner, q, r, xp = 0, extra = {}) {
     hasAttacked: true,
     xp,
   };
+  nameHero(state, unit); // e.g. an academy recruit starts as a Veteran
   state.units.push(unit);
   emit(state, { type: 'spawn', unit: { ...unit } });
   updateExplored(state, owner);
@@ -1365,8 +1433,8 @@ export function attack(state, attackerId, defenderId) {
   a.hasAttacked = true;
   a.movesLeft = 0;
   a.moved = true;
-  const aName = UNIT_TYPES[a.type].name;
-  const dName = UNIT_TYPES[d.type].name;
+  const aName = unitTitle(a);
+  const dName = unitTitle(d);
   // the fight is seen by both participants and anyone who sees at least one of the tiles (computed before units are lost)
   const fight = { by: a.owner, at: [{ q: a.q, r: a.r }, { q: d.q, r: d.r }], also: [d.owner] };
   fight.seen = seenBy(state, fight);
@@ -1374,6 +1442,8 @@ export function attack(state, attackerId, defenderId) {
   emit(state, ev);
   if (d.hp <= 0) {
     removeUnit(state, d.id);
+    a.kills = (a.kills || 0) + 1;
+    rememberHero(state, d, 'fell');
     addLog(state, `${PLAYERS[a.owner].name}: ${aName} destroyed ${dName}`, fight);
     countStat(state, 'kills', a.owner);
     countStat(state, 'losses', d.owner);
@@ -1385,6 +1455,8 @@ export function attack(state, attackerId, defenderId) {
     addLog(state, `${PLAYERS[a.owner].name}: ${aName} attacks ${dName} (−${res.damage}, counter −${res.counter})`, fight);
     if (a.hp <= 0) {
       removeUnit(state, a.id);
+      d.kills = (d.kills || 0) + 1;
+      rememberHero(state, a, 'fell');
       addLog(state, `${aName} fell in battle`, fight);
       countStat(state, 'kills', d.owner);
       countStat(state, 'losses', a.owner);
@@ -1398,6 +1470,10 @@ export function attack(state, attackerId, defenderId) {
   ev.attackerXp = a.xp;
   ev.defenderHp = d.hp;
   ev.defenderXp = d.xp;
+  if (a.name) ev.attackerName = a.name;
+  if (d.name) ev.defenderName = d.name;
+  if (a.kills) ev.attackerKills = a.kills;
+  if (d.kills) ev.defenderKills = d.kills;
   checkWinner(state);
   return true;
 }
@@ -1569,9 +1645,10 @@ export function disbandUnit(state, unitId) {
   const refund = disbandRefund(state, unit);
   state.gold[unit.owner] += refund;
   removeUnit(state, unit.id);
+  rememberHero(state, unit, 'disbanded');
   emit(state, { type: 'disband', unitId: unit.id, owner: unit.owner, refund, q: unit.q, r: unit.r });
   const city = cityAt(state, unit.q, unit.r);
-  addLog(state, `${PLAYERS[unit.owner].name}: disbanded ${UNIT_TYPES[unit.type].name}${refund ? ` (${city.name}, +${refund} gold)` : ''}`,
+  addLog(state, `${PLAYERS[unit.owner].name}: disbanded ${unitTitle(unit)}${refund ? ` (${city.name}, +${refund} gold)` : ''}`,
     { by: unit.owner, at: [unit] });
   return refund;
 }
@@ -1856,6 +1933,7 @@ export function exploreRuin(state, unit) {
     gainXp(state, unit, info.xp);
     ev.xp = unit.xp;
     ev.hp = unit.hp;
+    if (unit.name) ev.name = unit.name;
   }
   emit(state, ev);
   if (kind === 'recruits') spawnUnit(state, info.unit, player, spot.q, spot.r);
@@ -2123,6 +2201,15 @@ export function stateProblem(s) {
     taken.add(k);
     if (!Number.isFinite(u.hp) || u.hp <= 0) return `unit ${u.id} has no HP`;
     if (u.sentry !== undefined && u.sentry !== 'watch' && u.sentry !== 'heal') return `unit ${u.id} has a bad watch order`;
+    if (u.name !== undefined && !(typeof u.name === 'string' && u.name.length > 0 && u.name.length <= 40)) return `unit ${u.id} has a bad name`;
+    if (u.kills !== undefined && !(isInt(u.kills) && u.kills >= 0)) return `unit ${u.id} has bad kills`;
+  }
+  if (s.fallen !== undefined) {
+    if (!Array.isArray(s.fallen)) return 'bad hall of fame';
+    for (const f of s.fallen) {
+      if (!f || typeof f.name !== 'string' || f.name.length > 40 || !UNIT_TYPES[f.type] || !validOwner(f.owner)
+        || !isInt(f.kills) || f.kills < 0 || !isInt(f.xp) || f.xp < 0) return 'bad hall of fame';
+    }
   }
   if (s.winner !== null && s.winner !== undefined && !validOwner(s.winner)) return 'bad winner';
   return null;

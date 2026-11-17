@@ -1,5 +1,6 @@
 // Army strength over time chart as an SVG string (pure function without DOM, testable).
-import { PLAYERS } from './rules.js';
+import { PLAYERS, UNIT_TYPES, RANKS } from './rules.js';
+import { hallOfFame } from './game.js';
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
@@ -44,4 +45,24 @@ export function summaryRows(state) {
     ['Cities captured', st.captures[0], st.captures[1]],
     ['Peak army strength', peak(0), peak(1)],
   ];
+}
+
+// Hall of fame: each side's best units (named heroes and anyone with kills) as an HTML string.
+export function hallOfFameHtml(state) {
+  const fate = (h) => (h.fate === 'alive' ? '' : h.fate === 'fell' ? ` · fell in turn ${h.turn}` : ` · disbanded in turn ${h.turn}`);
+  const sides = PLAYERS.map((p, i) => {
+    // the enemy's heroes stay secret until the game is over (they would give away its army)
+    if (PLAYERS[i].isAI && state.winner === null) {
+      return `<div class="hall-side"><h5 style="color:${p.color}">${esc(p.name)}</h5><p class="hint">Revealed when the game ends.</p></div>`;
+    }
+    const rows = hallOfFame(state, i).map((h) => {
+      const type = UNIT_TYPES[h.type].name;
+      const who = h.name ? `<b>${esc(h.name)}</b> <small>${type}</small>` : `<b>${type}</b>`;
+      const rank = RANKS[h.rank].symbol ? ` ${RANKS[h.rank].symbol}` : '';
+      return `<li class="${h.fate === 'alive' ? '' : 'gone'}">${who}${rank}<small> · ${h.kills} kill${h.kills === 1 ? '' : 's'}${fate(h)}</small></li>`;
+    });
+    return `<div class="hall-side"><h5 style="color:${p.color}">${esc(p.name)}</h5>`
+      + (rows.length ? `<ol>${rows.join('')}</ol>` : '<p class="hint">No heroes yet.</p>') + '</div>';
+  });
+  return `<div class="hall">${sides.join('')}</div>`;
 }

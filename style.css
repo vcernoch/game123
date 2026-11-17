@@ -175,3 +175,11 @@ kbd { font: 600 11px ui-monospace, monospace; background: #3c434f; color: var(--
 .sentry { color: #b9f0d0; }
 .army-row.done { opacity: 0.6; }
 .army-row.sel { border-color: var(--accent); }
+.hall { display: grid; grid-template-columns: 1fr; gap: 6px; font-size: 13px; }
+.hall h5 { margin: 0 0 2px; font-size: 13px; }
+.hall ol { margin: 0; padding-left: 18px; }
+.hall li { margin: 2px 0; }
+.hall li.gone { opacity: 0.7; }
+.hall small { color: var(--muted); }
+.hero { color: #e8b84a; font-weight: 700; }
+.army-row .nm small.ty { display: inline; font-size: 11px; }

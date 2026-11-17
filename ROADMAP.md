@@ -93,5 +93,8 @@ Check off `[x]` when done. Add new ideas to the end of the relevant phase or to 
 - [x] Wall volley: at the end of its owner's turn a city with walls shoots the weakest adjacent enemy for 2 HP (never below 1, no counter); animated stone, chronicle, turn report, threat overlay and AI danger map count it
 - [x] Animation speed (▶ / A): header button and key cycle normal → fast → off, remembered between visits; a saved choice wins over the system "reduce motion" setting (which still makes "off" the default)
 
+## Phase 15 – war stories (own improvements)
+- [x] Heroes: a unit reaching Veteran earns a name for life, every unit counts its kills (panel, tooltip, army list, chronicle); a hall of fame in the statistics remembers each side's best units, fallen ones too (the enemy's are revealed at the end)
+
 ## Ideas (unordered)
 - Diplomacy with multiple AIs

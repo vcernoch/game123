@@ -12,7 +12,7 @@ import {
 import { createAnimator } from './anim.js';
 import { decideTap } from './input.js';
 import { createSound, soundFor } from './sound.js';
-import { chartSvg, summaryRows } from './stats.js';
+import { chartSvg, summaryRows, hallOfFameHtml } from './stats.js';
 import { GAME_VERSION, GAME_DATE } from './version.js';
 import { runAITurn } from './ai.js';
 import { SHORTCUTS, keyAction, recruitKey } from './keys.js';
@@ -98,13 +98,17 @@ function resize() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
 
+// Escapes text for innerHTML (unit names may come from an imported save file).
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
 const fmt = (x) => (Math.round(x * 10) / 10).toLocaleString('en-US');
 
 // "Veteran ★ · XP 4/7" – rank and progress to the next one.
 function rankLine(u) {
   const r = rankOf(u);
   const next = RANKS[r + 1];
-  return `${RANKS[r].name} ${RANKS[r].symbol} · XP ${u.xp || 0}${next ? `/${next.xp}` : ''}`;
+  const kills = u.kills ? ` · ${u.kills} kill${u.kills === 1 ? '' : 's'}` : '';
+  return `${RANKS[r].name} ${RANKS[r].symbol} · XP ${u.xp || 0}${next ? `/${next.xp}` : ''}${kills}`;
 }
 
 // "Attack", "Attack across a river", "Flanking attack +20 %" … for the attack preview.
@@ -201,7 +205,7 @@ function updateHud() {
   let html = '';
   if (u) {
     const t = UNIT_TYPES[u.type];
-    html += `<h3>${t.name} <span class="tag" style="background:${PLAYERS[u.owner].color}">${PLAYERS[u.owner].name}</span></h3>
+    html += `<h3>${u.name ? `<span class="hero">${esc(u.name)}</span> ` : ''}${t.name} <span class="tag" style="background:${PLAYERS[u.owner].color}">${PLAYERS[u.owner].name}</span></h3>
       <p>HP ${u.hp}/${t.hp} · Attack ${fmt(t.atk * rankMult(u))} · Defense ${fmt(t.def * rankMult(u))} · Range ${t.range}</p>
       <p>Move ${fmt(u.movesLeft)}/${unitMove(state, u)}${u.fortified ? '' : u.hasAttacked ? (u.movesLeft > 0 ? ' · already attacked' : ' · done for this turn') : ''}${chargeReady(state, u) ? ` · <span class="charge">charge ready (+${Math.round(CHARGE.atkBonus * 100)} %)</span>` : ''}</p>
       <p>${rankLine(u)}</p>${t.desc ? `<p class="hint">${t.desc}</p>` : ''}`;
@@ -453,7 +457,7 @@ function updateArmy() {
     return `<li><button type="button" data-army="${r.id}" class="army-row ${r.status}${r.id === selectedId ? ' sel' : ''}"
       aria-pressed="${r.id === selectedId}" ${busy() ? 'disabled' : ''}>
       <span class="sym">${r.symbol}</span>
-      <span class="nm">${r.name}${rank}<small>${r.where}</small></span>
+      <span class="nm">${r.hero ? `${esc(r.hero)} <small class="ty">${r.name}</small>` : r.name}${rank}<small>${r.where}${r.kills ? ` · ${r.kills} ⚔` : ''}</small></span>
       <span class="hp${hurt}">${r.hp}/${r.maxHp}</span>
       <span class="st">${ARMY_STATUS[r.status].label}</span></button></li>`;
   }).join('');
@@ -488,7 +492,8 @@ let statsKey = '';
 function updateStats() {
   if (!$('stats-panel').open) return;
   const h = state.history || [];
-  const key = `${h.length}:${state.winner}:${JSON.stringify(state.stats)}:${h.length ? h[h.length - 1].power : ''}`;
+  const hall = hallOfFameHtml(state);
+  const key = `${h.length}:${state.winner}:${JSON.stringify(state.stats)}:${h.length ? h[h.length - 1].power : ''}:${hall}`;
   if (key === statsKey) return;
   statsKey = key;
   if (h.length < 2) {
@@ -498,7 +503,8 @@ function updateStats() {
   const rows = summaryRows(state).map(([label, a, b]) => `<tr><th>${label}</th><td>${a}</td><td>${b}</td></tr>`).join('');
   $('stats').innerHTML = '<h4>Army strength</h4>' + chartSvg(h, { title: 'Army strength over time' })
     + '<h4>Cities</h4>' + chartSvg(h, { metric: 'cities', height: 110, title: 'Cities' })
-    + `<table class="stats-table"><tr><th></th><th>${PLAYERS[0].name}</th><th>${PLAYERS[1].name}</th></tr>${rows}</table>`;
+    + `<table class="stats-table"><tr><th></th><th>${PLAYERS[0].name}</th><th>${PLAYERS[1].name}</th></tr>${rows}</table>`
+    + '<h4>Hall of fame</h4>' + hall;
 }
 
 function canvasPoint(ev) {
@@ -628,7 +634,8 @@ function showTooltip(ev, hex) {
 function unitTipText(u) {
   const s = unitSummary(state, u);
   const tags = [s.rank !== RANKS[0].name ? s.rank : '', s.fortified ? 'fortified' : '', s.marching ? 'marching' : '', s.exploring ? 'exploring' : '', s.sentry && s.owner === 0 ? (s.sentry === 'heal' ? 'resting' : 'on watch') : ''].filter(Boolean);
-  return `${PLAYERS[s.owner].name}: ${s.name}${tags.length ? ` (${tags.join(', ')})` : ''} · HP ${s.hp}/${s.maxHp}\n`
+  if (s.kills) tags.push(`${s.kills} kill${s.kills === 1 ? '' : 's'}`);
+  return `${PLAYERS[s.owner].name}: ${s.hero ? `${s.hero} the ${s.name}` : s.name}${tags.length ? ` (${tags.join(', ')})` : ''} · HP ${s.hp}/${s.maxHp}\n`
     + `Attack ${fmt(s.attack)} · Defense ${fmt(s.defense)}${s.notes.length ? ` (${s.notes.join(', ')})` : ''} · Range ${s.range} · Move ${s.move}`;
 }
 

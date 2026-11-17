@@ -14,6 +14,7 @@ import {
   exploreTarget, canExplore, setExplore, followExplore, canPillage, pillage, isPillaged, pillageTurnsLeft, cityAt, canRepair, repair,
   rallyPath, rallyTarget, canRally, setRally, clearRally, canSwap, swapPartners, swapUnits,
   canBuildRoad, buildRoad, roadLinks, canSentry, sentry, checkSentries, SENTRY_TEXT, volleyTarget, cityVolleys, animSpeedOf, nextAnimSpeed,
+  unitTitle, heroName, hallOfFame,
 } from '../src/game.js';
 import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
@@ -23,7 +24,7 @@ import {
 } from '../src/ai.js';
 import { decideTap } from '../src/input.js';
 import { SHORTCUTS, keyAction, recruitKey } from '../src/keys.js';
-import { chartSvg, summaryRows } from '../src/stats.js';
+import { chartSvg, summaryRows, hallOfFameHtml } from '../src/stats.js';
 import { soundFor, createLimiter, createSound, SOUND_NAMES } from '../src/sound.js';
 import { readFileSync } from 'node:fs';
 import { GAME_VERSION, GAME_DATE } from '../src/version.js';
@@ -32,7 +33,7 @@ import { distance, key, neighbors } from '../src/hex.js';
 import {
   RESOURCES, FORTIFY, TERRITORY, ECONOMY, UNIT_TYPES, TERRAIN, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FLANK, HIGH_GROUND, CHARGE, REPAIR,
   UPGRADES, UPGRADE, DISBAND, RUINS, EXPLORE, PILLAGE,
-  SIGHTINGS, ROADWORK, SENTRY, VOLLEY, ANIM_SPEEDS,
+  SIGHTINGS, ROADWORK, SENTRY, VOLLEY, ANIM_SPEEDS, HEROES,
 } from '../src/rules.js';
 
 test('map is deterministic and starting cities are connected', () => {
@@ -3389,4 +3390,131 @@ test('animation speed: normal → fast → off cycle, saved choice wins over red
   for (const x of ANIM_SPEEDS) assert.ok(x.icon && x.label);
   assert.equal(keyAction('a').type, 'animSpeed');
   assert.equal(keyAction('A').type, 'animSpeed');
+});
+
+test('heroes: a promoted unit gets a name, kills are counted, fallen heroes are remembered', () => {
+  const { s, me, foe } = duel(3);
+  me.xp = RANKS[1].xp - 1; // one fight from Veteran
+  foe.hp = 1;
+  assert.equal(unitTitle(me), 'Warrior');
+  const before = cloneState(s);
+  assert.ok(attack(s, me.id, foe.id));
+  assert.equal(rankOf(me), 1);
+  assert.ok(HEROES.names.includes(me.name), 'a name from the list');
+  assert.equal(me.kills, 1);
+  assert.equal(unitTitle(me), `${me.name} (Warrior)`);
+  assert.ok(s.log.some((l) => l.msg.includes(`promoted to Veteran – now known as ${me.name}`)));
+  assert.deepEqual(s.fallen, [], 'an unnamed unit is not remembered');
+  // replaying the event carries the name and the kill
+  const evs = drainEvents(s);
+  for (const ev of evs) applyEvent(before, ev);
+  const replayed = getUnit(before, me.id);
+  assert.equal(replayed.name, me.name);
+  assert.equal(replayed.kills, 1);
+  // the name is reproducible: same game, same unit → same name
+  const again = duel(3);
+  again.me.xp = RANKS[1].xp - 1;
+  again.foe.hp = 1;
+  attack(again.s, again.me.id, again.foe.id);
+  assert.equal(again.me.name, me.name);
+  // a unit that starts as a Veteran (academy) is named at once and the spawn event carries it
+  const vet = spawnUnit(s, 'warrior', 1, foe.q, foe.r, RANKS[1].xp);
+  assert.ok(vet.name && vet.name !== me.name, 'a different name');
+  assert.equal(drainEvents(s).find((e) => e.type === 'spawn').unit.name, vet.name);
+  // a named enemy killed in battle goes to the hall of fame
+  vet.hp = 1;
+  me.movesLeft = 2; me.hasAttacked = false;
+  attack(s, me.id, vet.id);
+  assert.equal(me.kills, 2);
+  assert.ok(s.log.some((l) => l.msg.includes(`destroyed ${vet.name} (Warrior)`)));
+  assert.deepEqual(s.fallen.map((f) => [f.name, f.owner, f.fate, f.turn]), [[vet.name, 1, 'fell', s.turn]]);
+  assert.notEqual(heroName(s, { id: vet.id }), vet.name, 'a fallen hero\'s name is not reused');
+  // a defender that kills its attacker by the counterattack gets the kill
+  const c = duel(4, 'warrior', 'spearman');
+  c.me.hp = 1;
+  attack(c.s, c.me.id, c.foe.id);
+  assert.ok(!getUnit(c.s, c.me.id), 'the attacker fell');
+  assert.equal(c.foe.kills, 1);
+  assert.equal(drainEvents(c.s).find((e) => e.type === 'attack').defenderKills, 1);
+  // disbanding a hero remembers it too
+  const d = duel(5);
+  d.me.xp = RANKS[2].xp;
+  d.me.name = 'Gwen';
+  d.me.kills = 3;
+  disbandUnit(d.s, d.me.id);
+  assert.deepEqual(d.s.fallen.map((f) => [f.name, f.kills, f.fate]), [['Gwen', 3, 'disbanded']]);
+  assert.ok(d.s.log.some((l) => l.msg.includes('disbanded Gwen (Warrior)')));
+  // all names taken → a numeral
+  const e = duel(6);
+  e.s.fallen = HEROES.names.map((name) => ({ name, type: 'warrior', owner: 0, kills: 0, xp: 3, fate: 'fell', turn: 1 }));
+  assert.match(heroName(e.s, e.me), / II$/);
+});
+
+test('heroes: hall of fame, panels, saves, migration and real AI games', () => {
+  const { s, me, foe } = duel(3);
+  me.name = 'Aldric'; me.xp = 4; me.kills = 2;
+  const spot = Object.values(s.tiles).find((t) => isPassable(s, t.q, t.r) && !unitAt(s, t.q, t.r) && !cityAt(s, t.q, t.r));
+  const rookie = { ...me, id: 902, xp: 1, kills: 1, q: spot.q, r: spot.r };
+  delete rookie.name;
+  s.units.push(rookie);
+  s.fallen = [{ name: 'Brenna', type: 'archer', owner: 0, kills: 4, xp: 7, fate: 'fell', turn: 5 },
+    { name: 'Corwin', type: 'horseman', owner: 1, kills: 1, xp: 3, fate: 'fell', turn: 6 }];
+  const hall = hallOfFame(s, 0);
+  assert.deepEqual(hall.map((h) => [h.name, h.kills, h.fate]), [['Brenna', 4, 'fell'], ['Aldric', 2, 'alive'], [null, 1, 'alive']]);
+  assert.equal(hall[0].rank, 2);
+  assert.equal(hallOfFame(s, 0, 1).length, 1, 'limit');
+  assert.deepEqual(hallOfFame(s, 1).map((h) => h.name), ['Corwin'], 'only the side\'s own heroes');
+  assert.equal(foe.kills, undefined);
+  // the HTML: own heroes always, the enemy's only after the game
+  let html = hallOfFameHtml(s);
+  assert.ok(html.includes('Brenna') && html.includes('fell in turn 5') && html.includes('Aldric'));
+  assert.ok(!html.includes('Corwin') && html.includes('Revealed when the game ends'));
+  s.winner = 0;
+  html = hallOfFameHtml(s);
+  assert.ok(html.includes('Corwin'));
+  me.name = '<i>x';
+  assert.ok(hallOfFameHtml(s).includes('&lt;i&gt;x'), 'names are escaped');
+  me.name = 'Aldric';
+  s.winner = null;
+  // tooltip and army data
+  const sum = unitSummary(s, me);
+  assert.equal(sum.hero, 'Aldric');
+  assert.equal(sum.kills, 2);
+  const row = armyOverview(s, 0).rows.find((r) => r.id === me.id);
+  assert.equal(row.hero, 'Aldric');
+  assert.equal(row.kills, 2);
+  // saves keep names, kills and the fallen; bad values are rejected
+  const back = importGame(exportGame(s, GAME_VERSION));
+  assert.equal(back.state.units.find((u) => u.id === me.id).name, 'Aldric');
+  assert.equal(back.state.fallen.length, 2);
+  me.kills = -1;
+  assert.match(stateProblem(s), /bad kills/);
+  me.kills = 2; me.name = '';
+  assert.match(stateProblem(s), /bad name/);
+  me.name = 'Aldric';
+  s.fallen.push({ name: 'X', type: 'dragon', owner: 0, kills: 0, xp: 0 });
+  assert.match(stateProblem(s), /hall of fame/);
+  // an old save: veterans already in the field get names, the hall starts empty
+  const old = createGame({ seed: 2 });
+  delete old.fallen;
+  old.units[0].xp = RANKS[1].xp;
+  old.version = 23;
+  const mig = migrateState(old);
+  assert.equal(mig.version, STATE_VERSION);
+  assert.deepEqual(mig.fallen, []);
+  assert.ok(HEROES.names.includes(mig.units[0].name));
+  assert.equal(mig.units[1].name, undefined, 'recruits stay nameless');
+  // real AI-vs-AI games: names unique, every named unit is at least a Veteran, kills add up
+  for (const seed of [2, 9]) {
+    const g = createGame({ seed, fog: false });
+    for (let i = 0; i < 80 && g.winner === null; i++) { runAITurn(g); endTurn(g); }
+    const names = [...g.units, ...g.fallen].map((u) => u.name).filter(Boolean);
+    assert.equal(new Set(names).size, names.length, `seed ${seed}: unique names`);
+    assert.ok(names.length >= 1, `seed ${seed}: someone became a hero`);
+    for (const u of g.units) if (u.name) assert.ok(rankOf(u) >= HEROES.minRank);
+    const living = g.units.reduce((n, u) => n + (u.kills || 0), 0);
+    const total = g.stats.kills[0] + g.stats.kills[1];
+    assert.ok(living <= total, `seed ${seed}: kills of living units ≤ all kills`);
+    assert.equal(stateProblem(g), null);
+  }
 });

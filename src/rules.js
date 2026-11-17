@@ -208,6 +208,19 @@ export const ANIM_SPEEDS = [
 // is fully healed ("rest until healed").
 export const SENTRY = { radius: 2 };
 
+// Heroes: a unit that reaches rank `minRank` (Veteran) gets a name of its own and keeps it for life
+// (also when retrained). Kills are counted per unit; named units that fall or are disbanded are kept
+// in `state.fallen`, so the end-of-game hall of fame remembers them. `hallSize` heroes per side are shown.
+export const HEROES = {
+  minRank: 1,
+  hallSize: 3,
+  names: [
+    'Aldric', 'Brenna', 'Corwin', 'Dagny', 'Edric', 'Freya', 'Gareth', 'Hilda', 'Ivo', 'Jorunn',
+    'Kestrel', 'Leofric', 'Maren', 'Nolan', 'Osric', 'Petra', 'Quill', 'Rowan', 'Sigrun', 'Tamsin',
+    'Ulric', 'Vesna', 'Wulfric', 'Yara', 'Bram', 'Cordelia', 'Dunstan', 'Elowen', 'Fenwick', 'Gwen',
+  ],
+};
+
 export const NEUTRAL_COLOR = '#e8e2d0';
 
 export const ECONOMY = {

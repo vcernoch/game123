@@ -488,6 +488,32 @@ try {
   });
   if (opts.d !== 'hard' || opts.fog !== false || opts.seed !== 4242 || opts.open) throw new Error(`new game dialog: ${JSON.stringify(opts)}`);
 
+  // heroes: a unit promoted to Veteran by a kill gets a name, shown in the unit panel and the army list
+  await page.evaluate(() => window.__game.newGame(31, { happenings: false, fog: false }));
+  await page.evaluate(() => window.__game.nextUnit());
+  const hero = await page.evaluate(async () => {
+    const g = await import('./src/game.js');
+    const { neighbors } = await import('./src/hex.js');
+    const w = window.__game;
+    const st = w.getState();
+    const u = st.units.find((x) => x.id === w.selectedId());
+    const spot = neighbors(u.q, u.r).find((n) => g.isFree(st, n.q, n.r) && !g.cityAt(st, n.q, n.r));
+    const foe = g.spawnUnit(st, 'warrior', 1, spot.q, spot.r);
+    foe.hp = 1;
+    u.xp = 2;
+    g.attack(st, u.id, foe.id);
+    g.drainEvents(st);
+    document.getElementById('army-panel').open = true;
+    w.refresh();
+    return { name: u.name, kills: u.kills, panel: document.querySelector('#info .hero')?.textContent || '',
+      army: document.getElementById('army').textContent, info: document.getElementById('info').textContent };
+  });
+  if (!hero.name || hero.kills !== 1 || hero.panel !== hero.name || !hero.army.includes(hero.name) || !hero.info.includes('1 kill')) {
+    throw new Error(`heroes: ${JSON.stringify(hero)}`);
+  }
+  await page.screenshot({ path: 'artifacts/screenshot-hero.png' });
+  await page.evaluate(() => { document.getElementById('army-panel').open = false; });
+
   // game over: small map played out by the AI for both players, then the statistics screen
   await page.evaluate(async () => {
     const g = await import('./src/game.js');
@@ -503,8 +529,9 @@ try {
     banner: !document.getElementById('banner').hidden,
     statsOpen: document.getElementById('stats-panel').open,
     charts: document.querySelectorAll('#stats svg.chart').length,
+    hall: document.querySelector('#stats .hall')?.textContent || '',
   }));
-  if (end.winner === null || !end.banner || !end.statsOpen || end.charts !== 2) {
+  if (end.winner === null || !end.banner || !end.statsOpen || end.charts !== 2 || !end.hall || end.hall.includes('Revealed')) {
     throw new Error(`game over / statistics: ${JSON.stringify(end)}`);
   }
   await page.screenshot({ path: 'artifacts/screenshot-end.png', fullPage: true });
