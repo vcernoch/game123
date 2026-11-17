@@ -221,6 +221,10 @@ export const HEROES = {
   ],
 };
 
+// Inspiration: a named hero steadies the own units standing next to it – they get +defBonus defense
+// (also when counterattacking). The hero itself doesn't profit and several heroes don't stack.
+export const INSPIRE = { defBonus: 0.1, range: 1 };
+
 export const NEUTRAL_COLOR = '#e8e2d0';
 
 export const ECONOMY = {

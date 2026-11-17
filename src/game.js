@@ -2,7 +2,7 @@
 import { key, neighbors, distance } from './hex.js';
 import { generateMap, hasRiverEdge } from './map.js';
 import {
-  TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY, VISION, DIFFICULTY, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, ROAD_COST, RIVER, FLANK, HIGH_GROUND, CHARGE,
+  TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY, VISION, DIFFICULTY, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, ROAD_COST, RIVER, FLANK, HIGH_GROUND, CHARGE, INSPIRE,
   FACTIONS, NO_FACTION, MAP_SIZES, HAPPENINGS, FORTIFY, TERRITORY, RESOURCES,
   UPGRADES, UPGRADE, DISBAND, SIGHTINGS, RUINS, EXPLORE, PILLAGE, REPAIR, ROADWORK, SENTRY, VOLLEY, ANIM_SPEEDS, HEROES,
 } from './rules.js';
@@ -1247,6 +1247,8 @@ export function unitSummary(state, unit) {
   const city = cityAt(state, unit.q, unit.r);
   if (city && city.owner === unit.owner) notes.push(hasBuilding(city, 'walls') ? 'city with walls' : 'city');
   if (unit.fortified) notes.push('fortified');
+  const muse = inspiredBy(state, unit);
+  if (muse) notes.push(`inspired by ${muse.name} +${Math.round(INSPIRE.defBonus * 100)} %`);
   return {
     name: t.name,
     hero: unit.name || null,
@@ -1269,11 +1271,35 @@ export function unitSummary(state, unit) {
   };
 }
 
+// The named own hero (other than the unit itself) that inspires the unit, or null. The highest-ranked
+// one, then the lowest id, so the answer is stable.
+export function inspiredBy(state, unit) {
+  let best = null;
+  for (const h of state.units) {
+    if (!h.name || h.id === unit.id || h.owner !== unit.owner || h.hp <= 0) continue;
+    if (distance(h, unit) > INSPIRE.range) continue;
+    if (!best || rankOf(h) > rankOf(best) || (rankOf(h) === rankOf(best) && h.id < best.id)) best = h;
+  }
+  return best;
+}
+
+// Own units a hero inspires (empty for a unit without a name).
+export function inspiredUnits(state, hero) {
+  if (!hero.name) return [];
+  return state.units.filter((u) => u.id !== hero.id && u.owner === hero.owner && distance(u, hero) <= INSPIRE.range);
+}
+
+// Defense bonus from a nearby hero (0 or INSPIRE.defBonus).
+export function inspireBonus(state, unit) {
+  return inspiredBy(state, unit) ? INSPIRE.defBonus : 0;
+}
+
 // Unit defense; attacker (optional) determines type bonuses and siege.
 export function defenseValue(state, unit, attacker = null) {
   const t = tileAt(state, unit.q, unit.r);
   let d = UNIT_TYPES[unit.type].def * rankMult(unit) * (1 + terrainDefense(state, unit, t)) * vsMult(unit, attacker);
   if (unit.fortified) d *= 1 + FORTIFY.defBonus;
+  d *= 1 + inspireBonus(state, unit);
   const city = cityAt(state, unit.q, unit.r);
   if (city && city.owner === unit.owner) {
     const siege = attacker && UNIT_TYPES[attacker.type].siege;
@@ -1306,7 +1332,8 @@ export function previewAttack(state, attacker, defender) {
     const cDef = defenseValue(state, attacker, defender);
     counter = Math.max(1, Math.round((3 * cAtk) / cDef));
   }
-  return { damage, counter, kills: defenderHp === 0, dies: attacker.hp - counter <= 0, flank, high, charge };
+  const inspired = inspireBonus(state, defender);
+  return { damage, counter, kills: defenderHp === 0, dies: attacker.hp - counter <= 0, flank, high, charge, inspired };
 }
 
 function hpFactor(unit) {

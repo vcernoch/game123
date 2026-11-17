@@ -3,7 +3,7 @@ import {
   createGame, reachable, attackTargets, moveUnit, attack, buyUnit, endTurn,
   unitAt, cityAt, getUnit, incomeOf, previewAttack, tileAt, pathTo, nextActiveUnit, cityInfo,
   cloneState, drainEvents, migrateState, logFor, turnReport, reportText, reportIsBad, isUndoableMove, canFortify, fortify, canSentry, sentry, SENTRY_TEXT, animSpeedOf, nextAnimSpeed, activeUnits, territoryOwner, cityResources, unitSummary, planRoute, setOrder, runOrders, cancelOrder, visibleTiles, exploredTiles, build, unitCost, hasBuilding,
-  rankOf, rankMult, buildingCost, unitMove, factionOf, riverDefense, flankers, zocTiles, threatTiles, exportGame, importGame, saveFileName, parseSeed, restartOptions,
+  rankOf, rankMult, buildingCost, inspiredUnits, unitMove, factionOf, riverDefense, flankers, zocTiles, threatTiles, exportGame, importGame, saveFileName, parseSeed, restartOptions,
   upgradeOptions, upgradeUnit, canDisband, disbandRefund, disbandUnit, chargeReady,
   updateSightings, lastSeen, lastSeenAt, lastSeenText, armyOverview, ARMY_STATUS, ruinBelieved,
   canExplore, setExplore, canPillage, pillage, isPillaged, pillageTurnsLeft, canRepair, repair,
@@ -19,7 +19,7 @@ import { SHORTCUTS, keyAction, recruitKey } from './keys.js';
 import { render, canvasSize, pickHex, tileCenter } from './render.js';
 import { key } from './hex.js';
 import {
-  UNIT_TYPES, TERRAIN, PLAYERS, DIFFICULTY, BUILDINGS, RANKS, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FORTIFY, TERRITORY, ECONOMY, RESOURCES, HIGH_GROUND, CHARGE, RUINS, PILLAGE, REPAIR, ROADWORK, SENTRY,
+  UNIT_TYPES, TERRAIN, PLAYERS, DIFFICULTY, BUILDINGS, RANKS, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FORTIFY, TERRITORY, ECONOMY, RESOURCES, HIGH_GROUND, CHARGE, INSPIRE, RUINS, PILLAGE, REPAIR, ROADWORK, SENTRY,
 } from './rules.js';
 
 const SAVE_KEY = 'game123-save';
@@ -111,12 +111,21 @@ function rankLine(u) {
   return `${RANKS[r].name} ${RANKS[r].symbol} · XP ${u.xp || 0}${next ? `/${next.xp}` : ''}${kills}`;
 }
 
+// "Inspires 2 units next to it (+10 % defense)" for a named hero.
+function inspireLine(u) {
+  if (!u.name) return '';
+  const n = inspiredUnits(state, u).length;
+  const who = n ? `${n} unit${n === 1 ? '' : 's'} next to it` : 'units next to it';
+  return `<p class="inspire">Inspires ${who} (+${Math.round(INSPIRE.defBonus * 100)} % defense)</p>`;
+}
+
 // "Attack", "Attack across a river", "Flanking attack +20 %" … for the attack preview.
 function attackLabel(attacker, target, preview) {
   let label = riverDefense(state, attacker, target) ? 'Attack across a river' : 'Attack';
   if (preview.flank) label = `${label.replace('Attack', 'Flanking attack')} (+${Math.round(preview.flank * 100)} %)`;
   if (preview.high) label += ` · high ground +${Math.round(preview.high * 100)} %`;
   if (preview.charge) label += ` · charge +${Math.round(preview.charge * 100)} %`;
+  if (preview.inspired) label += ` · target inspired (defense +${Math.round(preview.inspired * 100)} %)`;
   return label;
 }
 
@@ -183,6 +192,7 @@ function drawBoard() {
     targets: mine ? new Set(attackTargets(state, u).map((t) => t.id)) : null,
     hover,
     flankers: mine ? flankView(u) : null,
+    inspired: u && u.owner === 0 && !busy() ? new Set(inspiredUnits(state, u).map((o) => o.id)) : null,
     swaps: mine && swapPick === u.id ? new Set(swapPartners(state, u).map((o) => o.id)) : null,
     lossMarks: busy() ? null : lossMarks,
     ghosts: busy() ? null : lastSeen(state, 0),
@@ -208,7 +218,7 @@ function updateHud() {
     html += `<h3>${u.name ? `<span class="hero">${esc(u.name)}</span> ` : ''}${t.name} <span class="tag" style="background:${PLAYERS[u.owner].color}">${PLAYERS[u.owner].name}</span></h3>
       <p>HP ${u.hp}/${t.hp} · Attack ${fmt(t.atk * rankMult(u))} · Defense ${fmt(t.def * rankMult(u))} · Range ${t.range}</p>
       <p>Move ${fmt(u.movesLeft)}/${unitMove(state, u)}${u.fortified ? '' : u.hasAttacked ? (u.movesLeft > 0 ? ' · already attacked' : ' · done for this turn') : ''}${chargeReady(state, u) ? ` · <span class="charge">charge ready (+${Math.round(CHARGE.atkBonus * 100)} %)</span>` : ''}</p>
-      <p>${rankLine(u)}</p>${t.desc ? `<p class="hint">${t.desc}</p>` : ''}`;
+      <p>${rankLine(u)}</p>${inspireLine(u)}${t.desc ? `<p class="hint">${t.desc}</p>` : ''}`;
     if (u.goto && u.owner === 0) {
       const r = planRoute(state, u, u.goto.q, u.goto.r);
       html += `<p class="order">➜ Marching to a target${r ? ` · ${r.turns} turn${r.turns === 1 ? '' : 's'}` : ''}</p>`;

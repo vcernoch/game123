@@ -14,7 +14,7 @@ import {
   exploreTarget, canExplore, setExplore, followExplore, canPillage, pillage, isPillaged, pillageTurnsLeft, cityAt, canRepair, repair,
   rallyPath, rallyTarget, canRally, setRally, clearRally, canSwap, swapPartners, swapUnits,
   canBuildRoad, buildRoad, roadLinks, canSentry, sentry, checkSentries, SENTRY_TEXT, volleyTarget, cityVolleys, animSpeedOf, nextAnimSpeed,
-  unitTitle, heroName, hallOfFame,
+  unitTitle, heroName, hallOfFame, inspiredBy, inspireBonus, inspiredUnits,
 } from '../src/game.js';
 import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
@@ -33,7 +33,7 @@ import { distance, key, neighbors } from '../src/hex.js';
 import {
   RESOURCES, FORTIFY, TERRITORY, ECONOMY, UNIT_TYPES, TERRAIN, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FLANK, HIGH_GROUND, CHARGE, REPAIR,
   UPGRADES, UPGRADE, DISBAND, RUINS, EXPLORE, PILLAGE,
-  SIGHTINGS, ROADWORK, SENTRY, VOLLEY, ANIM_SPEEDS, HEROES,
+  SIGHTINGS, ROADWORK, SENTRY, VOLLEY, ANIM_SPEEDS, HEROES, INSPIRE,
 } from '../src/rules.js';
 
 test('map is deterministic and starting cities are connected', () => {
@@ -2820,7 +2820,7 @@ test('repair: the AI walks back to its pillaged resources and repairs them', () 
   assert.ok(!repairGoals(s, h).some((g) => g.q === tile.q && g.r === tile.r), 'recovers soon anyway');
   // real AI-vs-AI games: pillaged resources get repaired now and then, the state stays consistent
   let repairs = 0;
-  for (const seed of [2, 6, 9]) {
+  for (const seed of [2, 3, 4, 6, 9, 10]) {
     const g = createGame({ seed, happenings: false });
     for (let i = 0; i < 80 && g.winner === null; i++) {
       runAITurn(g);
@@ -3517,4 +3517,63 @@ test('heroes: hall of fame, panels, saves, migration and real AI games', () => {
     assert.ok(living <= total, `seed ${seed}: kills of living units ≤ all kills`);
     assert.equal(stateProblem(g), null);
   }
+});
+
+test('inspiration: a named hero gives adjacent own units +10 % defense, not itself, no stacking, preview and summary', () => {
+  const s = createGame({ seed: 1, fog: false });
+  for (const t of Object.values(s.tiles)) { t.terrain = 'plains'; delete t.rivers; delete t.road; }
+  s.cities = s.cities.filter((c) => distance(c, { q: 5, r: 4 }) > 4);
+  s.factions = [null, null];
+  s.current = 0;
+  const center = { q: 5, r: 4 };
+  const around = neighbors(center.q, center.r);
+  const mk = (id, owner, p, type = 'warrior', extra = {}) => ({ id, type, owner, q: p.q, r: p.r, hp: UNIT_TYPES[type].hp, movesLeft: 2, hasAttacked: false, xp: 0, ...extra });
+  const me = mk(900, 0, center);
+  const foe = mk(901, 1, around[0]);
+  s.units = [me, foe];
+  const plain = defenseValue(s, me);
+  const before = previewAttack(s, foe, me);
+  assert.equal(inspiredBy(s, me), null);
+  assert.equal(before.inspired, 0);
+  // an unnamed veteran does not inspire
+  const vet = mk(902, 0, around[3], 'archer', { xp: 4 });
+  s.units.push(vet);
+  assert.equal(inspireBonus(s, me), 0);
+  assert.deepEqual(inspiredUnits(s, vet), []);
+  // named: adjacent own unit is inspired, the hero itself is not, enemies are not
+  vet.name = 'Ivo';
+  assert.equal(inspiredBy(s, me).id, vet.id);
+  assert.equal(inspireBonus(s, me), INSPIRE.defBonus);
+  assert.equal(inspireBonus(s, vet), 0);
+  assert.equal(inspireBonus(s, foe), 0);
+  assert.deepEqual(inspiredUnits(s, vet).map((u) => u.id), [me.id]);
+  assert.ok(Math.abs(defenseValue(s, me) - plain * (1 + INSPIRE.defBonus)) < 1e-9);
+  const after = previewAttack(s, foe, me);
+  assert.equal(after.inspired, INSPIRE.defBonus);
+  assert.ok(after.damage <= before.damage);
+  // the inspired unit's counterattack defense is higher too
+  const strike = previewAttack(s, me, foe);
+  vet.name = undefined;
+  assert.ok(strike.counter <= previewAttack(s, me, foe).counter);
+  vet.name = 'Ivo';
+  // summary note and defense
+  const sum = unitSummary(s, me);
+  assert.ok(sum.notes.some((n) => n.startsWith('inspired by Ivo')), sum.notes.join(','));
+  // a second hero doesn't stack; the higher rank wins
+  const elite = mk(903, 0, around[2], 'warrior', { xp: 20, name: 'Petra' });
+  s.units.push(elite);
+  assert.equal(inspireBonus(s, me), INSPIRE.defBonus);
+  assert.equal(inspiredBy(s, me).name, rankOf(elite) > rankOf(vet) ? 'Petra' : 'Ivo');
+  // two heroes inspire each other only if adjacent
+  assert.equal(distance(elite, vet) <= INSPIRE.range, inspireBonus(s, vet) > 0);
+  // out of range: no bonus
+  vet.q = center.q + 3; elite.q = center.q - 3;
+  assert.equal(inspireBonus(s, me), 0);
+  // the real attack deals the previewed damage against an inspired defender
+  vet.q = around[3].q; vet.r = around[3].r;
+  s.current = 1;
+  const expected = previewAttack(s, foe, me).damage;
+  assert.ok(attack(s, foe.id, me.id));
+  assert.equal(getUnit(s, me.id).hp, UNIT_TYPES.warrior.hp - expected);
+  JSON.parse(JSON.stringify(s));
 });

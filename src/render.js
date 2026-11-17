@@ -37,6 +37,7 @@ function hexPath(ctx, cx, cy, size) {
 // view = { selectedId, reachable: Map, targets: Set(unitId), hover: {q,r}, path: [{q,r}],
 //          unitPos: Map(unitId -> {x,y}) for animations, floaters: [{x,y,text,color,age}],
 //          swaps: Set(unitId) of own units the selected unit can swap places with (while picking),
+//          inspired: Set(unitId) of own units inspired by the selected hero (small gold chevron badge),
 //          flankers: Set(unitId) of own units flanking the hovered target (marked with a small ⚔ badge),
 //          visible/explored: Set of keys for fog of war (missing = everything visible), viewer: player at the screen }
 export function render(ctx, state, view = {}) {
@@ -137,6 +138,7 @@ export function render(ctx, state, view = {}) {
     }
     if (view.flankers && view.flankers.has(u.id)) drawFlankBadge(ctx, c.x, c.y);
     if (view.swaps && view.swaps.has(u.id)) drawSwapRing(ctx, c.x, c.y);
+    if (view.inspired && view.inspired.has(u.id)) drawInspireBadge(ctx, c.x, c.y);
   }
 
   // where the player lost units or cities in the last enemy turn (until the player ends the turn)
@@ -229,6 +231,29 @@ function drawLossMark(ctx, x, y) {
   ctx.beginPath();
   ctx.moveTo(x - d, y - d); ctx.lineTo(x + d, y + d);
   ctx.moveTo(x + d, y - d); ctx.lineTo(x - d, y + d);
+  ctx.stroke();
+  ctx.restore();
+}
+
+// Small gold badge with an upward chevron at the bottom-left of a unit inspired by the selected hero.
+function drawInspireBadge(ctx, x, y) {
+  const bx = x - HEX_SIZE * 0.5;
+  const by = y + HEX_SIZE * 0.42;
+  const r = HEX_SIZE * 0.2;
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(bx, by, r, 0, Math.PI * 2);
+  ctx.fillStyle = '#f2c94c';
+  ctx.fill();
+  ctx.strokeStyle = '#3a2a00';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.lineWidth = 2;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  const d = r * 0.55;
+  ctx.beginPath();
+  ctx.moveTo(bx - d, by + d * 0.6); ctx.lineTo(bx, by - d * 0.6); ctx.lineTo(bx + d, by + d * 0.6);
   ctx.stroke();
   ctx.restore();
 }

@@ -2,6 +2,18 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-17 – Inspiration (v0.31.0)
+- **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.26.0–v0.31.0) is ahead of `main` (v0.25.0) – please merge it.
+- Fix first: the starting state was red – the smoke "army panel" check failed because the hero smoke test left rows in the closed panel and reopening it raced the toggle redraw. `updateArmy` now clears the list when the panel is closed (no stale rows flash on reopening either). Separate commit.
+- Phase 15 (war stories, own improvement), second task. Heroes had a name but no effect beyond their rank; now they matter on the battlefield, which rewards keeping them alive and at the front of a group.
+- `INSPIRE` in `rules.js` (`defBonus` 0.1, `range` 1). In `game.js`: `inspiredBy` (highest-ranked adjacent own named unit, not itself), `inspireBonus`, `inspiredUnits`; `defenseValue` multiplies by it, so attacks, counterattacks, previews and the AI's combat estimates all count it automatically. `previewAttack` returns `inspired`, `unitSummary` adds the note "inspired by Ivo +10 %".
+- UI: hero panel line "Inspires 2 units next to it (+10 % defense)", gold chevron badge on the units the selected hero inspires, attack label "· target inspired (defense +10 %)", tooltip note. Help text updated.
+- Balance (20 AI-vs-AI games, Medium): average game 21 turns (22 without inspiration), wins 9 : 11; no stalemates.
+- No state structure change (`state.version` stays 24).
+- Test adjusted (not weakened): "repair: the AI walks back …" needed ≥ 1 AI repair in 3 fixed seeds; with the slightly different battles none of the three repaired any more, so it now plays 6 seeds (the original 3 plus 3, 4, 10) with the same ≥ 1 requirement.
+- Tests: +1 logic (unnamed veteran doesn't inspire, hero not itself, enemies not, exact defense multiplier, preview and counter, summary note, no stacking/highest rank, range, real attack equals preview). Smoke test: a spearman next to the selected hero is inspired, panel line, tooltip (`artifacts/screenshot-inspire.png`).
+- Status: `npm run check` green (101 logic tests + smoke).
+
 ## 2026-11-17 – Heroes and hall of fame (v0.30.0)
 - **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.26.0–v0.30.0) is ahead of `main` (v0.25.0) – please merge it.
 - Phase 14 was done, so I opened phase 15 (war stories, own improvement). Veterans were just a star on a token; now a unit that survives long enough becomes a character you care about, which makes keeping wounded veterans alive (rest, swap, infirmary) feel worth it.

@@ -514,6 +514,30 @@ try {
   await page.screenshot({ path: 'artifacts/screenshot-hero.png' });
   await page.evaluate(() => { document.getElementById('army-panel').open = false; });
 
+  // inspiration: an own unit next to the selected hero gets the gold badge and the tooltip names the hero
+  const muse = await page.evaluate(async () => {
+    const g = await import('./src/game.js');
+    const { neighbors } = await import('./src/hex.js');
+    const rnd = await import('./src/render.js');
+    const w = window.__game;
+    const st = w.getState();
+    const h = st.units.find((x) => x.id === w.selectedId());
+    const spot = neighbors(h.q, h.r).find((n) => g.isFree(st, n.q, n.r) && !g.cityAt(st, n.q, n.r));
+    const pal = g.spawnUnit(st, 'spearman', 0, spot.q, spot.r);
+    w.refresh();
+    const c = rnd.tileCenter(pal.q, pal.r);
+    const rect = document.getElementById('board').getBoundingClientRect();
+    const k = rect.width / rnd.canvasSize(st).w;
+    return { inspired: g.inspiredUnits(st, h).map((x) => x.id), pal: pal.id, name: h.name, x: rect.left + c.x * k, y: rect.top + c.y * k };
+  });
+  const museInfo = await page.textContent('#info');
+  if (!/Inspires \d+ units? next to it/.test(museInfo)) throw new Error(`inspiration: panel "${museInfo}"`);
+  if (!muse.inspired.includes(muse.pal)) throw new Error(`inspiration: ${JSON.stringify(muse)}`);
+  await page.screenshot({ path: 'artifacts/screenshot-inspire.png' });
+  await page.mouse.move(muse.x, muse.y);
+  const museTip = await page.textContent('#tooltip');
+  if (!museTip.includes(`inspired by ${muse.name}`)) throw new Error(`inspiration: tooltip "${museTip}"`);
+
   // game over: small map played out by the AI for both players, then the statistics screen
   await page.evaluate(async () => {
     const g = await import('./src/game.js');
