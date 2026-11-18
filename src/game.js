@@ -4,7 +4,7 @@ import { generateMap, hasRiverEdge } from './map.js';
 import {
   TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY, VISION, DIFFICULTY, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, ROAD_COST, RIVER, FLANK, HIGH_GROUND, CHARGE, INSPIRE,
   FACTIONS, NO_FACTION, MAP_SIZES, HAPPENINGS, FORTIFY, TERRITORY, RESOURCES,
-  UPGRADES, UPGRADE, DISBAND, SIGHTINGS, RUINS, EXPLORE, PILLAGE, REPAIR, ROADWORK, SENTRY, VOLLEY, ANIM_SPEEDS, HEROES,
+  UPGRADES, UPGRADE, DISBAND, SIGHTINGS, RUINS, EXPLORE, PILLAGE, REPAIR, ROADWORK, SENTRY, VOLLEY, ANIM_SPEEDS, HEROES, MILESTONES,
 } from './rules.js';
 import { createRng } from './rng.js';
 
@@ -47,6 +47,7 @@ export function createGame({
     explored: PLAYERS.map(() => []),
     sightings: PLAYERS.map(() => []),
     fallen: [],
+    milestones: [],
   };
   starts.forEach((s, owner) => {
     spawnUnit(state, 'warrior', owner, s.q, s.r);
@@ -129,7 +130,7 @@ function countStat(state, name, player) {
   state.stats[name][player]++;
 }
 
-export const STATE_VERSION = 24;
+export const STATE_VERSION = 25;
 
 // Converts a saved state of an older version to the current one; returns null for an unknown format.
 export function migrateState(s) {
@@ -231,6 +232,11 @@ export function migrateState(s) {
     s.fallen = [];
     for (const u of [...s.units].sort((a, b) => a.id - b.id)) nameHero(s, u);
     s.version = 24;
+  }
+  if (s.version === 24) {
+    // the war timeline arrived in version 25 – it starts empty for games already in progress
+    s.milestones = [];
+    s.version = 25;
   }
   return s.version === STATE_VERSION ? s : null;
 }
@@ -1170,9 +1176,11 @@ function gainXp(state, unit, amount) {
   unit.hp = Math.min(UNIT_TYPES[unit.type].hp, unit.hp + XP.promotionHeal);
   const was = unitTitle(unit);
   const named = nameHero(state, unit);
-  addLog(state, `${PLAYERS[unit.owner].name}: ${was} promoted to ${RANKS[rankOf(unit)].name}${named ? ` – now known as ${unit.name}` : ''}`, {
-    by: unit.owner, at: [unit],
-  });
+  const where = { by: unit.owner, at: [unit] };
+  addLog(state, `${PLAYERS[unit.owner].name}: ${was} promoted to ${RANKS[rankOf(unit)].name}${named ? ` – now known as ${unit.name}` : ''}`, where);
+  // the war timeline notes only each side's first hero (veterans are common later on)
+  const first = named && ![...state.units, ...(state.fallen || [])].some((u) => u !== unit && u.owner === unit.owner && u.name);
+  if (first) addMilestone(state, 'hero', unit.owner, `${cap(whose(unit.owner))} first hero: ${was} earned the name ${unit.name}`, where);
   return true;
 }
 
@@ -1226,6 +1234,82 @@ export function hallOfFame(state, player, limit = HEROES.hallSize) {
     .sort((a, b) => b.kills - a.kills || b.xp - a.xp || (a.fate === 'alive' ? 0 : 1) - (b.fate === 'alive' ? 0 : 1))
     .slice(0, limit)
     .map((h) => ({ ...h, rank: rankOf(h) }));
+}
+
+// ---------- war timeline ----------
+// state.milestones: [{ turn, kind, player, text, seen? }] – the turning points of the game (see MILESTONES).
+// `seen` works like in the chronicle: who witnessed it (stored only with fog). Strength leads aren't
+// stored but derived from state.history (leadChanges), so they need no bookkeeping.
+
+// "your" / "the AI's" – the owner as seen by the human player.
+export function whose(player) {
+  return PLAYERS[player].isAI ? `the ${PLAYERS[player].name}'s` : 'your';
+}
+const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+
+function addMilestone(state, kind, player, text, where = null) {
+  if (!state.milestones) state.milestones = [];
+  const m = { turn: state.turn, kind, player, text };
+  if (where && state.fog) m.seen = where.seen || seenBy(state, where);
+  state.milestones.push(m);
+  if (state.milestones.length > MILESTONES.limit) {
+    // full: forget the oldest ordinary entry, the unique turning points stay
+    const i = state.milestones.findIndex((x) => !MILESTONES.keep.includes(x.kind));
+    state.milestones.splice(i < 0 ? 0 : i, 1);
+  }
+}
+
+// Milestones of a unit kill: the game's first kill and the fall of a named hero.
+function killMilestones(state, killer, victim, where) {
+  const st = state.stats || emptyStats();
+  const kills = st.kills.reduce((a, b) => a + b, 0); // counted after this call
+  const killerName = `${whose(killer.owner)} ${unitTitle(killer)}`;
+  if (kills === 0) {
+    addMilestone(state, 'firstBlood', killer.owner, `First blood: ${killerName} destroyed ${whose(victim.owner)} ${unitTitle(victim)}`, where);
+  }
+  const k = victim.kills || 0;
+  if (victim.name && k >= MILESTONES.fallKills) {
+    addMilestone(state, 'heroFell', victim.owner, `${cap(whose(victim.owner))} hero ${victim.name} (${k} kills) fell to ${killerName}`, where);
+  }
+}
+
+// Turns where the strength lead changed hands: [{ turn, kind: 'lead', player, text }]. A side leads when
+// its army power is at least MILESTONES.leadRatio times the other's (and not tiny); in between nobody does.
+export function leadChanges(history) {
+  const out = [];
+  let leader = null;
+  for (const e of history || []) {
+    if (!Array.isArray(e.power) || e.power.length !== 2) continue;
+    const [a, b] = e.power;
+    let now = null;
+    if (Math.max(a, b) >= MILESTONES.leadMin) {
+      if (a >= b * MILESTONES.leadRatio) now = 0;
+      else if (b >= a * MILESTONES.leadRatio) now = 1;
+    }
+    if (now === null || now === leader) continue;
+    leader = now;
+    const who = PLAYERS[now].isAI ? `The ${PLAYERS[now].name}'s` : 'Your';
+    out.push({ turn: e.turn, kind: 'lead', player: now, text: `${who} army pulls ahead (${e.power[now]} : ${e.power[1 - now]})` });
+  }
+  return out;
+}
+
+// The war timeline from a player's view, oldest first: stored milestones the viewer witnessed (all of
+// them once the game is over) merged with the strength leads. Same-turn entries keep their order.
+export function timelineFor(state, viewer) {
+  const over = state.winner !== null && state.winner !== undefined;
+  const stored = (state.milestones || []).filter((m) => over || !m.seen || m.seen.includes(viewer))
+    .map(({ turn, kind, player, text }) => ({ turn, kind, player, text }));
+  const leads = leadChanges(state.history);
+  const out = [];
+  // merge by turn; a lead is measured at the start of its turn, so it comes before that turn's events
+  let i = 0;
+  for (const m of stored) {
+    while (i < leads.length && leads[i].turn <= m.turn) out.push(leads[i++]);
+    out.push(m);
+  }
+  while (i < leads.length) out.push(leads[i++]);
+  return out;
 }
 
 // Unit strength multiplier against a specific opponent (spearman vs. horseman…).
@@ -1388,9 +1472,11 @@ export function moveUnit(state, unitId, q, r) {
     countStat(state, 'captures', unit.owner);
     const loot = factionOf(state, unit.owner).captureGold || 0;
     state.gold[unit.owner] += loot;
-    addLog(state, `${PLAYERS[unit.owner].name}: captured ${city.name}${loot ? ` (loot ${loot} gold)` : ''}`, {
-      by: unit.owner, at: [city], also: prev === null ? [] : [prev],
-    });
+    const where = { by: unit.owner, at: [city], also: prev === null ? [] : [prev] };
+    addLog(state, `${PLAYERS[unit.owner].name}: captured ${city.name}${loot ? ` (loot ${loot} gold)` : ''}`, where);
+    const capital = city.capital && prev !== null;
+    const what = prev === null ? `neutral ${city.name}` : capital ? `${whose(prev)} capital` : `${whose(prev)} ${city.name}`;
+    addMilestone(state, capital ? 'capital' : 'capture', unit.owner, `${cap(whose(unit.owner))} ${unitTitle(unit)} took ${what}`, where);
     if (prev !== null) checkWinner(state);
   }
   if (tileAt(state, q, r).ruin && state.winner === null) exploreRuin(state, unit);
@@ -1472,6 +1558,7 @@ export function attack(state, attackerId, defenderId) {
     a.kills = (a.kills || 0) + 1;
     rememberHero(state, d, 'fell');
     addLog(state, `${PLAYERS[a.owner].name}: ${aName} destroyed ${dName}`, fight);
+    killMilestones(state, a, d, fight);
     countStat(state, 'kills', a.owner);
     countStat(state, 'losses', d.owner);
     ev.promoted = gainXp(state, a, XP.attack + XP.kill);
@@ -1485,6 +1572,7 @@ export function attack(state, attackerId, defenderId) {
       d.kills = (d.kills || 0) + 1;
       rememberHero(state, a, 'fell');
       addLog(state, `${aName} fell in battle`, fight);
+      killMilestones(state, d, a, fight);
       countStat(state, 'kills', d.owner);
       countStat(state, 'losses', a.owner);
     } else {
@@ -2047,6 +2135,7 @@ function checkWinner(state) {
     if (!hasCity) {
       state.winner = (p + 1) % PLAYERS.length;
       addLog(state, `Game over – winner: ${PLAYERS[state.winner].name}`);
+      addMilestone(state, 'victory', state.winner, `${PLAYERS[state.winner].isAI ? `The ${PLAYERS[state.winner].name}` : 'You'} won the war`);
       recordHistory(state);
       return;
     }
@@ -2236,6 +2325,14 @@ export function stateProblem(s) {
     for (const f of s.fallen) {
       if (!f || typeof f.name !== 'string' || f.name.length > 40 || !UNIT_TYPES[f.type] || !validOwner(f.owner)
         || !isInt(f.kills) || f.kills < 0 || !isInt(f.xp) || f.xp < 0) return 'bad hall of fame';
+    }
+  }
+  if (s.milestones !== undefined) {
+    if (!Array.isArray(s.milestones) || s.milestones.length > MILESTONES.limit) return 'bad war timeline';
+    for (const m of s.milestones) {
+      if (!m || !isInt(m.turn) || m.turn < 1 || !MILESTONES.kinds[m.kind] || m.kind === 'lead' || !validOwner(m.player) || m.player === null
+        || typeof m.text !== 'string' || m.text.length > 200) return 'bad war timeline';
+      if (m.seen !== undefined && !(Array.isArray(m.seen) && m.seen.every((p) => validOwner(p) && p !== null))) return 'bad war timeline';
     }
   }
   if (s.winner !== null && s.winner !== undefined && !validOwner(s.winner)) return 'bad winner';

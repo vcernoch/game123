@@ -7,12 +7,12 @@ import {
   upgradeOptions, upgradeUnit, canDisband, disbandRefund, disbandUnit, chargeReady,
   updateSightings, lastSeen, lastSeenAt, lastSeenText, armyOverview, ARMY_STATUS, ruinBelieved,
   canExplore, setExplore, canPillage, pillage, isPillaged, pillageTurnsLeft, canRepair, repair,
-  rallyPath, setRally, clearRally, swapPartners, swapUnits, canBuildRoad, buildRoad,
+  rallyPath, setRally, clearRally, swapPartners, swapUnits, canBuildRoad, buildRoad, timelineFor,
 } from './game.js';
 import { createAnimator } from './anim.js';
 import { decideTap } from './input.js';
 import { createSound, soundFor } from './sound.js';
-import { chartSvg, summaryRows, hallOfFameHtml } from './stats.js';
+import { chartSvg, summaryRows, hallOfFameHtml, timelineHtml } from './stats.js';
 import { GAME_VERSION, GAME_DATE } from './version.js';
 import { runAITurn } from './ai.js';
 import { SHORTCUTS, keyAction, recruitKey } from './keys.js';
@@ -504,7 +504,8 @@ function updateStats() {
   if (!$('stats-panel').open) return;
   const h = state.history || [];
   const hall = hallOfFameHtml(state);
-  const key = `${h.length}:${state.winner}:${JSON.stringify(state.stats)}:${h.length ? h[h.length - 1].power : ''}:${hall}`;
+  const marks = timelineFor(state, 0);
+  const key = `${h.length}:${state.winner}:${JSON.stringify(state.stats)}:${h.length ? h[h.length - 1].power : ''}:${hall}:${marks.length}`;
   if (key === statsKey) return;
   statsKey = key;
   if (h.length < 2) {
@@ -512,10 +513,14 @@ function updateStats() {
     return;
   }
   const rows = summaryRows(state).map(([label, a, b]) => `<tr><th>${label}</th><td>${a}</td><td>${b}</td></tr>`).join('');
-  $('stats').innerHTML = '<h4>Army strength</h4>' + chartSvg(h, { title: 'Army strength over time' })
+  $('stats').innerHTML = '<h4>Army strength</h4>' + chartSvg(h, { title: 'Army strength over time', marks })
     + '<h4>Cities</h4>' + chartSvg(h, { metric: 'cities', height: 110, title: 'Cities' })
     + `<table class="stats-table"><tr><th></th><th>${PLAYERS[0].name}</th><th>${PLAYERS[1].name}</th></tr>${rows}</table>`
+    + '<h4>War timeline</h4>' + timelineHtml(state, 0)
     + '<h4>Hall of fame</h4>' + hall;
+  // the newest turning point is the interesting one – show the end of a long timeline
+  const tl = $('stats').querySelector('.timeline');
+  if (tl) tl.scrollTop = tl.scrollHeight;
 }
 
 function canvasPoint(ev) {

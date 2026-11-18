@@ -2,6 +2,17 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-18 – War timeline (v0.32.0)
+- **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.26.0–v0.32.0) is ahead of `main` (v0.25.0) – please merge it.
+- Starting state green (101 logic tests + smoke).
+- Phase 15 (war stories, own improvement), third task. The statistics showed numbers and a chart, but not *how* the war went; now they tell the story.
+- `MILESTONES` in `rules.js` (kinds with icon and name, `limit` 60, `keep`, `fallKills` 2, `leadRatio` 1.5, `leadMin` 10). In `game.js`: `addMilestone` (stores `{ turn, kind, player, text, seen }`, `seen` like chronicle entries under fog; when full, the oldest ordinary entry is dropped, first blood / first hero / capital / victory stay), `killMilestones` (first kill of the game; a named hero with 2+ kills that falls – also by a counterattack), first hero of each side in `gainXp` (later heroes are too common to list), captures in `moveUnit` (neutral / enemy city / enemy capital), victory in `checkWinner`. `leadChanges(history)` derives "army pulls ahead" entries from the history (no stored state), `timelineFor(state, viewer)` merges both and hides what the viewer didn't witness until the game ends. `whose()` gives "your" / "the AI's" for the texts. `stateProblem` validates the list.
+- UI: "War timeline" section in the statistics between the charts and the hall of fame (turn, side dot, icon, text; capital and victory bold, leads italic; scrolls to the newest entry), small coloured triangles under the strength chart with the story as tooltip (`chartSvg` option `marks`). Help text updated.
+- Tuning: in a first version every promotion and every fallen hero was listed – 30–60 entries per game; with "first hero only" and "2+ kills" a typical AI-vs-AI game has 14–19.
+- State structure: `state.version` 25 (`milestones`); old games start with an empty timeline.
+- Tests: +2 logic (first blood once, famous fallen hero vs. 1-kill hero, counter-kill, only the first hero, neutral capture, capital + victory with exact texts; leads from history incl. tiny armies, fog hiding until game over, merge order, HTML escaping and empty text, chart marks, cap keeps first blood, save/import, 7 bad values, migration, 2 real AI-vs-AI games). Smoke test: after the played-out game the timeline has first blood and ends with "won the war", the chart has markers (`artifacts/screenshot-timeline.png`).
+- Status: `npm run check` green (103 logic tests + smoke).
+
 ## 2026-11-17 – Inspiration (v0.31.0)
 - **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.26.0–v0.31.0) is ahead of `main` (v0.25.0) – please merge it.
 - Fix first: the starting state was red – the smoke "army panel" check failed because the hero smoke test left rows in the closed panel and reopening it raced the toggle redraw. `updateArmy` now clears the list when the panel is closed (no stale rows flash on reopening either). Separate commit.

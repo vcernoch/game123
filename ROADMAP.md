@@ -96,6 +96,7 @@ Check off `[x]` when done. Add new ideas to the end of the relevant phase or to 
 ## Phase 15 – war stories (own improvements)
 - [x] Heroes: a unit reaching Veteran earns a name for life, every unit counts its kills (panel, tooltip, army list, chronicle); a hall of fame in the statistics remembers each side's best units, fallen ones too (the enemy's are revealed at the end)
 - [x] Inspiration: a named hero gives own units next to it +10 % defense (also on counterattacks, heroes don't stack); shown in the tooltip, attack preview, hero panel and with gold badges when the hero is selected
+- [x] War timeline: the statistics list the game's turning points (first blood, captured cities and capitals, each side's first hero, fallen heroes with 2+ kills, strength leads, victory) with markers under the strength chart; only what you witnessed until the game ends
 
 ## Ideas (unordered)
 - Diplomacy with multiple AIs

@@ -182,5 +182,14 @@ kbd { font: 600 11px ui-monospace, monospace; background: #3c434f; color: var(--
 .hall li { margin: 2px 0; }
 .hall li.gone { opacity: 0.7; }
 .hall small { color: var(--muted); }
+.timeline { list-style: none; margin: 0 0 6px; padding: 0; font-size: 12.5px; max-height: 260px; overflow-y: auto; }
+.timeline li { display: flex; align-items: baseline; gap: 5px; padding: 2px 0; border-bottom: 1px solid #ffffff10; overflow-wrap: anywhere; }
+.timeline .ms-turn { flex: 0 0 30px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.timeline .ms-dot { flex: 0 0 8px; height: 8px; border-radius: 50%; align-self: flex-start; margin-top: 5px; }
+.timeline .ms-icon { flex: 0 0 auto; }
+.timeline .ms-text { flex: 1 1 auto; min-width: 0; }
+.timeline li.ms-victory, .timeline li.ms-capital { font-weight: 600; }
+.timeline li.ms-lead { color: var(--muted); font-style: italic; }
+svg.chart .mark { stroke: #1d2128; stroke-width: 0.8; }
 .hero { color: #e8b84a; font-weight: 700; }
 .army-row .nm small.ty { display: inline; font-size: 11px; }

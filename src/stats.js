@@ -1,11 +1,12 @@
 // Army strength over time chart as an SVG string (pure function without DOM, testable).
-import { PLAYERS, UNIT_TYPES, RANKS } from './rules.js';
-import { hallOfFame } from './game.js';
+import { PLAYERS, UNIT_TYPES, RANKS, MILESTONES } from './rules.js';
+import { hallOfFame, timelineFor } from './game.js';
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 // history: [{ turn, power: [p0, p1], ... }]; metric: 'power' | 'cities' | 'gold'
-export function chartSvg(history, { metric = 'power', width = 256, height = 150, title = 'Army strength' } = {}) {
+// marks: [{ turn, player, text }] – small triangles under the x axis (the war timeline), with a tooltip.
+export function chartSvg(history, { metric = 'power', width = 256, height = 150, title = 'Army strength', marks = [] } = {}) {
   const pad = { l: 30, r: 8, t: 22, b: 20 };
   const w = width - pad.l - pad.r;
   const h = height - pad.t - pad.b;
@@ -22,6 +23,12 @@ export function chartSvg(history, { metric = 'power', width = 256, height = 150,
   const legend = PLAYERS.map((p, i) =>
     `<rect x="${pad.l + i * 56}" y="5" width="10" height="10" fill="${p.color}"/>`
     + `<text x="${pad.l + i * 56 + 14}" y="14">${esc(p.name)}</text>`).join('');
+  const ticks = marks.filter((m) => m.turn >= t0 && m.turn <= t1).map((m) => {
+    const mx = x(m.turn).toFixed(1);
+    const my = pad.t + h;
+    const icon = MILESTONES.kinds[m.kind] ? `${MILESTONES.kinds[m.kind].icon} ` : '';
+    return `<path class="mark" d="M${mx} ${my - 1}l-3.5 6h7z" fill="${PLAYERS[m.player].color}"><title>${esc(`Turn ${m.turn}: ${icon}${m.text}`)}</title></path>`;
+  });
   return `<svg class="chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${esc(title)}">
   <title>${esc(title)}</title>
   <line x1="${pad.l}" y1="${pad.t + h}" x2="${pad.l + w}" y2="${pad.t + h}" class="axis"/>
@@ -32,6 +39,7 @@ export function chartSvg(history, { metric = 'power', width = 256, height = 150,
   <text x="${pad.l + w}" y="${height - 6}" text-anchor="end">turn ${t1}</text>
   ${legend}
   ${lines.join('\n  ')}
+  ${ticks.join('\n  ')}
 </svg>`;
 }
 
@@ -65,4 +73,15 @@ export function hallOfFameHtml(state) {
       + (rows.length ? `<ol>${rows.join('')}</ol>` : '<p class="hint">No heroes yet.</p>') + '</div>';
   });
   return `<div class="hall">${sides.join('')}</div>`;
+}
+
+// War timeline: the turning points of the game as the viewer saw them, as an HTML list (newest last).
+export function timelineHtml(state, viewer = 0) {
+  const items = timelineFor(state, viewer).map((m) => {
+    const kind = MILESTONES.kinds[m.kind];
+    return `<li class="ms-${m.kind}"><span class="ms-turn">T${m.turn}</span>`
+      + `<span class="ms-dot" style="background:${PLAYERS[m.player].color}"></span>`
+      + `<span class="ms-icon" title="${esc(kind.name)}">${kind.icon}</span><span class="ms-text">${esc(m.text)}</span></li>`;
+  });
+  return items.length ? `<ol class="timeline">${items.join('')}</ol>` : '<p class="hint">Nothing remarkable yet.</p>';
 }

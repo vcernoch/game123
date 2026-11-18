@@ -554,11 +554,19 @@ try {
     statsOpen: document.getElementById('stats-panel').open,
     charts: document.querySelectorAll('#stats svg.chart').length,
     hall: document.querySelector('#stats .hall')?.textContent || '',
+    timeline: [...document.querySelectorAll('#stats .timeline li')].map((li) => li.textContent),
+    marks: document.querySelectorAll('#stats svg.chart .mark').length,
   }));
   if (end.winner === null || !end.banner || !end.statsOpen || end.charts !== 2 || !end.hall || end.hall.includes('Revealed')) {
     throw new Error(`game over / statistics: ${JSON.stringify(end)}`);
   }
+  // war timeline: first blood and the victory are listed, the strength chart carries markers
+  if (!end.timeline.some((t) => t.includes('First blood')) || !/won the war/.test(end.timeline[end.timeline.length - 1] || '') || end.marks < 2) {
+    throw new Error(`war timeline: ${JSON.stringify({ timeline: end.timeline, marks: end.marks })}`);
+  }
   await page.screenshot({ path: 'artifacts/screenshot-end.png', fullPage: true });
+  await page.evaluate(() => document.querySelector('#stats .timeline').scrollIntoView());
+  await page.screenshot({ path: 'artifacts/screenshot-timeline.png' });
 
   // mobile width – no horizontal scroll
   await page.setViewportSize({ width: 390, height: 844 });

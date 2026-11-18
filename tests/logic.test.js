@@ -14,7 +14,7 @@ import {
   exploreTarget, canExplore, setExplore, followExplore, canPillage, pillage, isPillaged, pillageTurnsLeft, cityAt, canRepair, repair,
   rallyPath, rallyTarget, canRally, setRally, clearRally, canSwap, swapPartners, swapUnits,
   canBuildRoad, buildRoad, roadLinks, canSentry, sentry, checkSentries, SENTRY_TEXT, volleyTarget, cityVolleys, animSpeedOf, nextAnimSpeed,
-  unitTitle, heroName, hallOfFame, inspiredBy, inspireBonus, inspiredUnits,
+  unitTitle, heroName, hallOfFame, inspiredBy, inspireBonus, inspiredUnits, timelineFor, leadChanges, whose,
 } from '../src/game.js';
 import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
@@ -24,7 +24,7 @@ import {
 } from '../src/ai.js';
 import { decideTap } from '../src/input.js';
 import { SHORTCUTS, keyAction, recruitKey } from '../src/keys.js';
-import { chartSvg, summaryRows, hallOfFameHtml } from '../src/stats.js';
+import { chartSvg, summaryRows, hallOfFameHtml, timelineHtml } from '../src/stats.js';
 import { soundFor, createLimiter, createSound, SOUND_NAMES } from '../src/sound.js';
 import { readFileSync } from 'node:fs';
 import { GAME_VERSION, GAME_DATE } from '../src/version.js';
@@ -33,7 +33,7 @@ import { distance, key, neighbors } from '../src/hex.js';
 import {
   RESOURCES, FORTIFY, TERRITORY, ECONOMY, UNIT_TYPES, TERRAIN, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FLANK, HIGH_GROUND, CHARGE, REPAIR,
   UPGRADES, UPGRADE, DISBAND, RUINS, EXPLORE, PILLAGE,
-  SIGHTINGS, ROADWORK, SENTRY, VOLLEY, ANIM_SPEEDS, HEROES, INSPIRE,
+  SIGHTINGS, ROADWORK, SENTRY, VOLLEY, ANIM_SPEEDS, HEROES, INSPIRE, MILESTONES,
 } from '../src/rules.js';
 
 test('map is deterministic and starting cities are connected', () => {
@@ -3576,4 +3576,169 @@ test('inspiration: a named hero gives adjacent own units +10 % defense, not itse
   assert.ok(attack(s, foe.id, me.id));
   assert.equal(getUnit(s, me.id).hp, UNIT_TYPES.warrior.hp - expected);
   JSON.parse(JSON.stringify(s));
+});
+
+test('war timeline: first blood, first heroes, famous fallen heroes, captures, capital and victory', () => {
+  const kinds = (g) => (g.milestones || []).map((m) => m.kind);
+  // first blood only once, by the killer's side
+  const d = duel(3);
+  assert.deepEqual(d.s.milestones, []);
+  d.foe.hp = 1;
+  attack(d.s, d.me.id, d.foe.id);
+  assert.deepEqual(kinds(d.s), ['firstBlood']);
+  const fb = d.s.milestones[0];
+  assert.equal(fb.player, 0);
+  assert.equal(fb.turn, d.s.turn);
+  assert.equal(fb.text, 'First blood: your Warrior destroyed the AI\'s Warrior');
+  const again = { ...d.foe, id: 950, hp: 1, q: d.foe.q, r: d.foe.r };
+  d.s.units.push(again);
+  d.me.hasAttacked = false; d.me.movesLeft = 2;
+  attack(d.s, d.me.id, again.id);
+  assert.equal(kinds(d.s).filter((k) => k === 'firstBlood').length, 1, 'first blood is noted once');
+  // a hero with 2+ kills that falls is a milestone, one with fewer is not
+  for (const [kills, expect] of [[1, false], [2, true]]) {
+    const g = duel(3);
+    g.s.stats.kills = [1, 0]; // first blood already happened
+    Object.assign(g.foe, { hp: 1, name: 'Corwin', xp: RANKS[1].xp, kills });
+    attack(g.s, g.me.id, g.foe.id);
+    assert.equal(kinds(g.s).includes('heroFell'), expect, `${kills} kills`);
+    if (expect) {
+      const m = g.s.milestones.find((x) => x.kind === 'heroFell');
+      assert.equal(m.player, 1, 'the fallen hero\'s side');
+      assert.equal(m.text, 'The AI\'s hero Corwin (2 kills) fell to your Warrior');
+    }
+  }
+  // a counterattack that kills counts too
+  const c = duel(3);
+  c.s.stats.kills = [0, 1];
+  Object.assign(c.me, { hp: 1, name: 'Aldric', xp: RANKS[1].xp, kills: 3 });
+  attack(c.s, c.me.id, c.foe.id);
+  assert.deepEqual(kinds(c.s), ['heroFell']);
+  assert.match(c.s.milestones[0].text, /^Your hero Aldric \(3 kills\) fell to the AI's Warrior/);
+  // only each side's first named hero
+  const h = duel(3);
+  h.s.stats.kills = [5, 5];
+  h.me.xp = RANKS[1].xp - XP.attack;
+  attack(h.s, h.me.id, h.foe.id);
+  assert.ok(h.me.name);
+  assert.deepEqual(kinds(h.s), ['hero']);
+  assert.equal(h.s.milestones[0].text, `Your first hero: Warrior earned the name ${h.me.name}`);
+  const second = { ...h.me, id: 960, xp: RANKS[1].xp - XP.attack, hasAttacked: false, movesLeft: 2 };
+  delete second.name;
+  const spot = neighbors(h.foe.q, h.foe.r).find((n) => isPassable(h.s, n.q, n.r) && !unitAt(h.s, n.q, n.r));
+  Object.assign(second, spot);
+  h.s.units.push(second);
+  attack(h.s, second.id, h.foe.id);
+  assert.ok(second.name, 'second hero named');
+  assert.equal(kinds(h.s).filter((k) => k === 'hero').length, 1, 'only the first hero is a milestone');
+  // captures: neutral city, then the enemy capital which ends the game
+  const s = createGame({ seed: 4, fog: false });
+  s.units = [];
+  const neutral = s.cities.find((x) => x.owner === null);
+  const near = (city) => neighbors(city.q, city.r).find((n) => isPassable(s, n.q, n.r) && !cityAt(s, n.q, n.r));
+  const u = spawnUnit(s, 'warrior', 0, near(neutral).q, near(neutral).r);
+  u.movesLeft = 2; u.hasAttacked = false;
+  assert.ok(moveUnit(s, u.id, neutral.q, neutral.r));
+  assert.deepEqual(kinds(s), ['capture']);
+  assert.equal(s.milestones[0].text, `Your Warrior took neutral ${neutral.name}`);
+  const cap = s.cities.find((x) => x.owner === 1 && x.capital);
+  for (const x of s.cities) if (x !== cap) x.owner = 0;
+  const v = spawnUnit(s, 'horseman', 0, near(cap).q, near(cap).r);
+  v.movesLeft = 3; v.hasAttacked = false;
+  assert.ok(moveUnit(s, v.id, cap.q, cap.r));
+  assert.equal(s.winner, 0);
+  assert.deepEqual(kinds(s), ['capture', 'capital', 'victory']);
+  assert.equal(s.milestones[1].text, 'Your Horseman took the AI\'s capital');
+  assert.equal(s.milestones[2].text, 'You won the war');
+  assert.equal(whose(0), 'your');
+  assert.equal(whose(1), 'the AI\'s');
+  assert.equal(stateProblem(s), null);
+  assert.deepEqual(JSON.parse(JSON.stringify(s.milestones)), s.milestones);
+});
+
+test('war timeline: strength leads, fog, limit, HTML, chart marks, saves and migration', () => {
+  // leads come from history: a change only when one side gets 1.5× ahead (and armies aren't tiny)
+  const hist = [[1, 4, 7], [2, 30, 28], [3, 30, 50], [4, 40, 55], [5, 40, 35], [6, 80, 40], [7, 90, 30]]
+    .map(([turn, a, b]) => ({ turn, power: [a, b] }));
+  const leads = leadChanges(hist);
+  assert.deepEqual(leads.map((l) => [l.turn, l.player]), [[3, 1], [6, 0]]);
+  assert.equal(leads[0].text, 'The AI\'s army pulls ahead (50 : 30)');
+  assert.equal(leads[1].text, 'Your army pulls ahead (80 : 40)');
+  assert.deepEqual(leadChanges([{ turn: 1, power: [2, 9] }]), [], 'tiny armies don\'t lead');
+  assert.deepEqual(leadChanges(undefined), []);
+  // fog: a milestone the viewer didn't witness stays hidden until the game is over; leads merge in by turn
+  const s = createGame({ seed: 2 });
+  s.history = hist;
+  s.milestones = [
+    { turn: 2, kind: 'capture', player: 1, text: 'The AI\'s Warrior took neutral Brookby', seen: [1] },
+    { turn: 3, kind: 'firstBlood', player: 0, text: 'First blood: x', seen: [0, 1] },
+    { turn: 6, kind: 'hero', player: 0, text: 'Your first hero: y' },
+  ];
+  assert.deepEqual(timelineFor(s, 0).map((m) => [m.turn, m.kind]), [[3, 'lead'], [3, 'firstBlood'], [6, 'lead'], [6, 'hero']]);
+  assert.equal(timelineFor(s, 1).length, 5);
+  assert.ok(!timelineHtml(s, 0).includes('Brookby'));
+  s.winner = 1;
+  assert.equal(timelineFor(s, 0).length, 5, 'everything after the game');
+  assert.ok(timelineHtml(s, 0).includes('Brookby'));
+  s.winner = null;
+  // HTML: escaped, one item each, an empty game says so
+  s.milestones[2].text = '<b>hi</b>';
+  const html = timelineHtml(s, 0);
+  assert.equal((html.match(/<li/g) || []).length, 4);
+  assert.ok(html.includes('&lt;b&gt;hi&lt;/b&gt;') && !html.includes('<b>hi'));
+  assert.match(timelineHtml(createGame({ seed: 3 }), 0), /Nothing remarkable yet/);
+  // chart: one marker per milestone inside the charted turns, with the story as tooltip
+  const svg = chartSvg(hist, { marks: [...timelineFor(s, 0), { turn: 99, kind: 'lead', player: 0, text: 'out' }] });
+  assert.equal((svg.match(/class="mark"/g) || []).length, 4);
+  assert.ok(svg.includes('Turn 3: 🩸 First blood: x'));
+  assert.equal((chartSvg(hist).match(/class="mark"/g) || []).length, 0, 'no marks by default');
+  // the list is capped; the unique turning points survive, the oldest ordinary entries go
+  const g = duel(3).s;
+  g.milestones = [{ turn: 1, kind: 'firstBlood', player: 0, text: 'fb' }];
+  for (let i = 0; i < MILESTONES.limit - 1; i++) g.milestones.push({ turn: 2, kind: 'capture', player: 0, text: `c${i}` });
+  const neutral = g.cities.find((x) => x.owner === null);
+  const spot = neighbors(neutral.q, neutral.r).find((n) => isPassable(g, n.q, n.r) && !cityAt(g, n.q, n.r) && !unitAt(g, n.q, n.r));
+  const u = spawnUnit(g, 'warrior', 0, spot.q, spot.r);
+  u.movesLeft = 2;
+  assert.equal(g.milestones.length, MILESTONES.limit);
+  moveUnit(g, u.id, neutral.q, neutral.r);
+  assert.equal(g.milestones.length, MILESTONES.limit);
+  assert.equal(g.milestones[0].kind, 'firstBlood', 'first blood kept');
+  assert.equal(g.milestones[1].text, 'c1', 'oldest capture dropped');
+  assert.match(g.milestones[g.milestones.length - 1].text, new RegExp(neutral.name));
+  // saves keep the timeline, bad values are rejected
+  const back = importGame(exportGame(s, GAME_VERSION));
+  assert.equal(back.state.milestones.length, 3);
+  for (const bad of [
+    { turn: 0, kind: 'capture', player: 0, text: 'x' }, { turn: 1, kind: 'dragon', player: 0, text: 'x' },
+    { turn: 1, kind: 'lead', player: 0, text: 'x' }, { turn: 1, kind: 'capture', player: 5, text: 'x' },
+    { turn: 1, kind: 'capture', player: 0, text: 7 }, { turn: 1, kind: 'capture', player: 0, text: 'x', seen: [9] },
+  ]) {
+    const t = cloneState(s);
+    t.milestones.push(bad);
+    assert.match(stateProblem(t), /war timeline/, JSON.stringify(bad));
+  }
+  const t = cloneState(s);
+  t.milestones = 'x';
+  assert.match(stateProblem(t), /war timeline/);
+  // an old save starts with an empty timeline
+  const old = createGame({ seed: 2 });
+  delete old.milestones;
+  old.version = 24;
+  const mig = migrateState(old);
+  assert.equal(mig.version, STATE_VERSION);
+  assert.deepEqual(mig.milestones, []);
+  // real AI-vs-AI games: first blood once and first, one victory last, at most one first hero per side, valid state
+  for (const seed of [2, 5]) {
+    const r = createGame({ seed });
+    for (let i = 0; i < 300 && r.winner === null; i++) { runAITurn(r); endTurn(r); }
+    const k = r.milestones.map((m) => m.kind);
+    assert.equal(k.filter((x) => x === 'firstBlood').length, 1, `seed ${seed}`);
+    assert.equal(k[k.length - 1], 'victory', `seed ${seed}`);
+    assert.equal(r.milestones[r.milestones.length - 1].player, r.winner);
+    for (const p of [0, 1]) assert.ok(r.milestones.filter((m) => m.kind === 'hero' && m.player === p).length <= 1);
+    assert.equal(stateProblem(r), null);
+    const turns = timelineFor(r, 0).map((m) => m.turn);
+    assert.deepEqual(turns, [...turns].sort((a, b) => a - b), `seed ${seed}: in order`);
+  }
 });

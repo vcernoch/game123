@@ -225,6 +225,26 @@ export const HEROES = {
 // (also when counterattacking). The hero itself doesn't profit and several heroes don't stack.
 export const INSPIRE = { defBonus: 0.1, range: 1 };
 
+// War timeline: the turning points of a game, kept in state.milestones and shown in the statistics
+// (list + markers on the strength chart). `lead` entries aren't stored – they are derived from history
+// when one side's army becomes at least `leadRatio` times stronger than the other's.
+export const MILESTONES = {
+  limit: 60,
+  keep: ['firstBlood', 'hero', 'capital', 'victory'], // never dropped when the list is full
+  fallKills: 2, // a fallen hero is a milestone only with at least this many kills
+  leadRatio: 1.5,
+  leadMin: 10, // ignore "leads" while both armies are tiny
+  kinds: {
+    firstBlood: { icon: '🩸', name: 'First blood' },
+    capture: { icon: '🏰', name: 'City captured' },
+    capital: { icon: '👑', name: 'Capital captured' },
+    hero: { icon: '⭐', name: 'First hero' },
+    heroFell: { icon: '✝', name: 'Famous hero fell' },
+    lead: { icon: '⚖', name: 'Lead in strength' },
+    victory: { icon: '🏆', name: 'Victory' },
+  },
+};
+
 export const NEUTRAL_COLOR = '#e8e2d0';
 
 export const ECONOMY = {
