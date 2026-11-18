@@ -7,7 +7,7 @@ import {
   upgradeOptions, upgradeUnit, canDisband, disbandRefund, disbandUnit, chargeReady,
   updateSightings, lastSeen, lastSeenAt, lastSeenText, armyOverview, ARMY_STATUS, ruinBelieved,
   canExplore, setExplore, canPillage, pillage, isPillaged, pillageTurnsLeft, canRepair, repair,
-  rallyPath, setRally, clearRally, swapPartners, swapUnits, canBuildRoad, buildRoad, timelineFor,
+  rallyPath, setRally, clearRally, swapPartners, swapUnits, canBuildRoad, buildRoad, timelineFor, adviseTurn,
 } from './game.js';
 import { createAnimator } from './anim.js';
 import { decideTap } from './input.js';
@@ -388,6 +388,7 @@ function updateHud() {
   }
   updateStats();
   updateArmy();
+  updateAdvisor();
 }
 
 // Rally point part of the own city panel.
@@ -474,6 +475,46 @@ function updateArmy() {
   }).join('');
 }
 
+let advisorKey = '';
+
+// Advisor panel: hints for this turn. Recomputed only when the game changes (updateHud runs often).
+function updateAdvisor() {
+  const open = $('advisor-panel').open;
+  const k = `${open}:${busy()}:${state.turn}:${state.current}:${state.winner}:${state.gold[0]}:${JSON.stringify(state.units)}:${JSON.stringify(state.cities)}`;
+  if (k === advisorKey) return;
+  advisorKey = k;
+  const tips = busy() ? [] : adviseTurn(state, 0);
+  $('advisor-count').textContent = busy() || state.current !== 0 || state.winner !== null ? '' : tips.length ? `${tips.length} hint${tips.length === 1 ? '' : 's'}` : 'nothing urgent';
+  if (!open) { $('advisor').innerHTML = ''; return; }
+  if (!tips.length) {
+    const why = state.winner !== null ? 'The game is over.' : busy() || state.current !== 0 ? 'Waiting for your turn…' : 'Nothing urgent – carry on with your plan.';
+    $('advisor').innerHTML = `<li class="hint">${why}</li>`;
+    return;
+  }
+  $('advisor').innerHTML = tips.map((t) => `<li><button type="button" class="tip-row ${t.kind}" data-tip-q="${t.q}" data-tip-r="${t.r}"
+    ${t.unitId ? `data-tip-unit="${t.unitId}"` : ''} ${t.cityId ? `data-tip-city="${t.cityId}"` : ''}><span class="ic">${t.icon}</span><span>${esc(t.text)}</span></button></li>`).join('');
+}
+
+// A hint was clicked: select its unit or city (or just show its tile) and bring it into view.
+function selectFromTip(btn) {
+  if (busy()) return;
+  const unitId = Number(btn.dataset.tipUnit) || null;
+  const cityId = Number(btn.dataset.tipCity) || null;
+  if (unitId) { selectFromArmy(unitId); return; }
+  pending = null;
+  rallyPick = null;
+  swapPick = null;
+  const city = cityId ? state.cities.find((c) => c.id === cityId) : null;
+  const q = Number(btn.dataset.tipQ);
+  const r = Number(btn.dataset.tipR);
+  const u = unitAt(state, q, r);
+  selectedId = u && u.owner === 0 ? u.id : null;
+  selectedCityId = city ? city.id : null;
+  sound.play('click');
+  draw();
+  bringIntoView(q, r);
+}
+
 // Selects a unit from the army list and brings it into view (also inside the zoomed map on a phone).
 function selectFromArmy(id) {
   const u = getUnit(state, id);
@@ -486,9 +527,14 @@ function selectFromArmy(id) {
   selectedCityId = city ? city.id : null;
   sound.play('click');
   draw();
+  bringIntoView(u.q, u.r);
+}
+
+// Scrolls the zoomed map (phone) to a tile and the page to the map if it is off screen.
+function bringIntoView(q, r) {
   const wrap = canvas.parentElement;
   if (wrap.classList.contains('zoomed')) {
-    const c = tileCenter(u.q, u.r);
+    const c = tileCenter(q, r);
     const k = canvas.clientWidth / canvasSize(state).w;
     wrap.scrollTo({ left: c.x * k - wrap.clientWidth / 2, top: c.y * k - wrap.clientHeight / 2 });
   }
@@ -948,6 +994,15 @@ $('seed-current').addEventListener('click', () => { $('seed-input').value = Stri
 $('stats-panel').addEventListener('toggle', () => { statsKey = ''; updateStats(); });
 $('next-unit').addEventListener('click', selectNextUnit);
 $('army-panel').addEventListener('toggle', () => { armyKey = ''; updateArmy(); });
+$('advisor-panel').addEventListener('toggle', () => {
+  advisorKey = '';
+  savePrefs({ ...loadPrefs(), advisor: $('advisor-panel').open });
+  updateAdvisor();
+});
+$('advisor').addEventListener('click', (ev) => {
+  const tip = ev.target.closest('button[data-tip-q]');
+  if (tip) selectFromTip(tip);
+});
 $('army').addEventListener('click', (ev) => {
   const row = ev.target.closest('button[data-army]');
   if (row) selectFromArmy(Number(row.dataset.army));
@@ -1032,6 +1087,7 @@ function updateThreatButton() {
 $('threats').addEventListener('click', toggleThreats);
 showThreats = loadPrefs().threats === true;
 updateThreatButton();
+$('advisor-panel').open = loadPrefs().advisor !== false; // the advisor can be collapsed for good
 
 // Animation speed (A / header button): normal → fast → off; remembered in the preferences.
 function cycleAnimSpeed() {

@@ -794,6 +794,44 @@ try {
   await page.keyboard.press('Escape'); // the next sections start without a selection
   await page.click('#army-panel summary');
 
+  // advisor: an unguarded capital with an enemy close by is the first hint; clicking it selects the city;
+  // collapsing the panel is remembered
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const adv = await page.evaluate(async () => {
+    const g = await import('./src/game.js');
+    const hex = await import('./src/hex.js');
+    window.__game.newGame(54321);
+    const st = window.__game.getState();
+    const cap = st.cities.find((c) => c.owner === 0 && c.capital);
+    const taken = (t) => st.units.some((u) => u.q === t.q && u.r === t.r) || st.cities.some((c) => c.q === t.q && c.r === t.r);
+    const spots = Object.values(st.tiles).filter((t) => g.isPassable(st, t.q, t.r) && !taken(t));
+    for (const u of st.units.filter((x) => x.owner === 0 && x.q === cap.q && x.r === cap.r)) {
+      const t = spots.find((x) => hex.distance(x, cap) === 1 && !taken(x));
+      u.q = t.q; u.r = t.r;
+    }
+    const e = spots.find((x) => hex.distance(x, cap) === 2 && !taken(x));
+    g.spawnUnit(st, 'horseman', 1, e.q, e.r);
+    st.gold[0] = 30;
+    window.__game.refresh();
+    const rows = [...document.querySelectorAll('#advisor .tip-row')];
+    return { name: cap.name, open: document.getElementById('advisor-panel').open, texts: rows.map((b) => b.textContent),
+      first: rows[0]?.className, count: document.getElementById('advisor-count').textContent };
+  });
+  if (!adv.open || !/^tip-row undefended/.test(adv.first) || !adv.texts[0].includes(`${adv.name} is unguarded – an enemy Horseman is 2 tiles away.`)
+    || !adv.texts.some((t) => t.includes('recruit a unit in')) || adv.texts.length > 3 || !/^[1-3] hints?$/.test(adv.count)) {
+    throw new Error(`advisor: ${JSON.stringify(adv)}`);
+  }
+  await page.click('#advisor .tip-row.undefended');
+  const advInfo = await page.textContent('#info');
+  if (!advInfo.includes(adv.name)) throw new Error(`advisor: click did not select the city (${advInfo.slice(0, 120)})`);
+  await page.screenshot({ path: 'artifacts/screenshot-advisor.png' });
+  await page.click('#advisor-panel summary');
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem('game123-prefs') || '{}').advisor === false);
+  if (await page.evaluate(() => document.querySelectorAll('#advisor li').length)) throw new Error('advisor: a closed panel keeps rows');
+  await page.click('#advisor-panel summary');
+  await page.waitForSelector('#advisor .tip-row');
+  await page.keyboard.press('Escape');
+
   // ancient ruins: drawn on the map, described in the panel, a unit stepping on one loots it
   await page.setViewportSize({ width: 1280, height: 800 });
   const ruin = await page.evaluate(async () => {
@@ -931,6 +969,15 @@ try {
   if (!(await page.textContent('#info')).includes('Set rally point')) throw new Error('rally: no button in the city panel');
   await page.click('#info button[data-rally]');
   if ((await page.evaluate(() => window.__game.rallyPicking())) === null) throw new Error('rally: picking did not start');
+  // clicking the panel button may have scrolled the page (the side panel is long): scroll back, measure the flag tile again
+  Object.assign(rally.spot, await page.evaluate(async (p) => {
+    window.scrollTo(0, 0);
+    const rnd = await import('./src/render.js');
+    const rect = document.getElementById('board').getBoundingClientRect();
+    const k = rect.width / rnd.canvasSize(window.__game.getState()).w;
+    const c = rnd.tileCenter(p.q, p.r);
+    return { x: rect.left + c.x * k, y: rect.top + c.y * k };
+  }, rally.spot));
   await page.mouse.move(rally.spot.x, rally.spot.y);
   await page.mouse.click(rally.spot.x, rally.spot.y);
   const flagged = await page.evaluate((r) => {

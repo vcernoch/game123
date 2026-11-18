@@ -4,7 +4,7 @@ import { generateMap, hasRiverEdge } from './map.js';
 import {
   TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY, VISION, DIFFICULTY, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, ROAD_COST, RIVER, FLANK, HIGH_GROUND, CHARGE, INSPIRE,
   FACTIONS, NO_FACTION, MAP_SIZES, HAPPENINGS, FORTIFY, TERRITORY, RESOURCES,
-  UPGRADES, UPGRADE, DISBAND, SIGHTINGS, RUINS, EXPLORE, PILLAGE, REPAIR, ROADWORK, SENTRY, VOLLEY, ANIM_SPEEDS, HEROES, MILESTONES,
+  UPGRADES, UPGRADE, DISBAND, SIGHTINGS, RUINS, EXPLORE, PILLAGE, REPAIR, ROADWORK, SENTRY, VOLLEY, ANIM_SPEEDS, HEROES, MILESTONES, ADVISOR,
 } from './rules.js';
 import { createRng } from './rng.js';
 
@@ -2247,6 +2247,125 @@ export function reportText(rep) {
 // Whether the report contains a loss (the banner turns red).
 export function reportIsBad(rep) {
   return Object.keys(rep.lost).length > 0 || rep.citiesLost.length > 0 || rep.wounded > 0 || (rep.pillaged || 0) > 0;
+}
+
+// ---------- advisor ----------
+// A short list of hints for the player's turn – one per kind, most urgent first (ADVISOR in rules.js).
+// Uses only what the player knows: visible enemy units, explored cities and ruins. Each hint is
+// { kind, icon, text, q, r, unitId?, cityId? } – (q, r) is the tile to look at, unitId / cityId what to select.
+// Nothing for the other player's turn or after the game ends.
+
+export function adviseTurn(state, player) {
+  if (state.winner !== null || state.current !== player) return [];
+  const visible = visibleTiles(state, player);
+  const explored = exploredTiles(state, player);
+  const enemies = state.units.filter((u) => u.owner !== player && visible.has(key(u.q, u.r)));
+  const mine = state.units.filter((u) => u.owner === player).sort((a, b) => a.id - b.id);
+  const cities = state.cities.filter((c) => c.owner === player).sort((a, b) => (b.capital ? 1 : 0) - (a.capital ? 1 : 0) || a.id - b.id);
+  const gold = state.gold[player];
+  const moves = new Map(mine.filter((u) => u.movesLeft > 0).map((u) => [u.id, reachable(state, u)]));
+  const tips = [];
+  const add = (kind, text, at, extra = {}) => tips.push({ kind, icon: ADVISOR.kinds[kind].icon, text, q: at.q, r: at.r, ...extra });
+
+  // an own city with nobody in it and a visible enemy close by
+  let worst = null;
+  for (const c of cities) {
+    const guard = unitAt(state, c.q, c.r);
+    if (guard && guard.owner === player) continue;
+    for (const e of enemies) {
+      const d = distance(c, e);
+      if (d <= ADVISOR.dangerRange && (!worst || d < worst.d)) worst = { c, e, d };
+    }
+  }
+  if (worst) {
+    add('undefended', `${worst.c.name} is unguarded – an enemy ${UNIT_TYPES[worst.e.type].name} is ${worst.d} tile${worst.d === 1 ? '' : 's'} away.`,
+      worst.c, { cityId: worst.c.id });
+  }
+
+  // a sure kill without losing the attacker (weakest target first)
+  let kill = null;
+  for (const u of mine) {
+    for (const t of attackTargets(state, u)) {
+      if (!visible.has(key(t.q, t.r))) continue;
+      const p = previewAttack(state, u, t);
+      if (p.kills && !p.dies && (!kill || t.hp < kill.t.hp)) kill = { u, t };
+    }
+  }
+  if (kill) {
+    add('finish', `${unitTitle(kill.u)} can finish off the enemy ${UNIT_TYPES[kill.t.type].name} (${kill.t.hp} HP).`, kill.u, { unitId: kill.u.id });
+  }
+
+  // a badly wounded unit that enemies can reach next turn (in an own city it heals anyway)
+  const threats = enemies.length ? threatTiles(state, player) : new Map();
+  const hurt = mine.find((u) => {
+    const city = cityAt(state, u.q, u.r);
+    return u.movesLeft > 0 && !u.hasAttacked && u.hp <= UNIT_TYPES[u.type].hp * ADVISOR.woundedShare
+      && threats.has(key(u.q, u.r)) && !(city && city.owner === player);
+  });
+  if (hurt) {
+    add('wounded', `${unitTitle(hurt)} is badly wounded (${hurt.hp}/${UNIT_TYPES[hurt.type].hp} HP) and within enemy reach – pull it back to rest.`,
+      hurt, { unitId: hurt.id });
+  }
+
+  // a known foreign city a unit can walk into this turn (enemy capitals, then enemy cities, then neutral ones)
+  const targets = state.cities.filter((c) => c.owner !== player && explored.has(key(c.q, c.r)))
+    .sort((a, b) => (a.owner === null) - (b.owner === null) || (b.capital ? 1 : 0) - (a.capital ? 1 : 0) || a.id - b.id);
+  capture: for (const c of targets) {
+    for (const u of mine) {
+      if (moves.has(u.id) && moves.get(u.id).has(key(c.q, c.r))) {
+        add('capture', `${unitTitle(u)} can capture ${c.name} this turn.`, u, { unitId: u.id });
+        break capture;
+      }
+    }
+  }
+
+  // a known ruin within reach
+  ruin: for (const u of mine) {
+    for (const k of moves.get(u.id)?.keys() || []) {
+      const [q, r] = k.split(',').map(Number);
+      if (explored.has(k) && ruinBelieved(state, q, r, player)) {
+        add('ruin', `${unitTitle(u)} can explore the ruins this turn.`, u, { unitId: u.id });
+        break ruin;
+      }
+    }
+  }
+
+  // an own pillaged resource that can be repaired
+  if (gold >= REPAIR.gold) {
+    const terr = territoryMap(state);
+    const tile = Object.values(state.tiles).find((t) => t.resource && isPillaged(state, t)
+      && territoryOwner(state, t.q, t.r) === player);
+    if (tile) {
+      const city = state.cities.find((c) => c.id === terr.get(key(tile.q, tile.r)));
+      const on = unitAt(state, tile.q, tile.r);
+      const now = on && canRepair(state, on);
+      add('repair', now
+        ? `${unitTitle(on)} can repair the ${RESOURCES[tile.resource].name.toLowerCase()} near ${city.name} (${REPAIR.gold} gold).`
+        : `The ${RESOURCES[tile.resource].name.toLowerCase()} near ${city.name} is pillaged – a unit standing on it can repair it (${REPAIR.gold} gold).`,
+      tile, now ? { unitId: on.id } : {});
+    }
+  }
+
+  // gold to spend: recruit in a free city, otherwise build (keeping enough for a recruit later)
+  const free = cities.find((c) => !unitAt(state, c.q, c.r)
+    && Object.keys(UNIT_TYPES).some((type) => unitCost(state, c, type) <= gold));
+  if (free) {
+    add('recruit', `You have ${gold} gold – recruit a unit in ${free.name}.`, free, { cityId: free.id });
+  } else {
+    build: for (const b of ADVISOR.buildOrder) {
+      for (const c of cities) {
+        const cost = buildingCost(state, player, b);
+        if (!hasBuilding(c, b) && cost + ADVISOR.buildReserve <= gold) {
+          const name = BUILDINGS[b].name.toLowerCase();
+          const what = name.endsWith('s') ? name : `a ${name}`; // "walls", "barracks" take no article
+          add('build', `You have ${gold} gold – build ${what} in ${c.name} (${cost} gold).`, c, { cityId: c.id });
+          break build;
+        }
+      }
+    }
+  }
+
+  return tips.sort((a, b) => ADVISOR.kinds[a.kind].order - ADVISOR.kinds[b.kind].order).slice(0, ADVISOR.limit);
 }
 
 // ---------- save files ----------

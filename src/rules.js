@@ -245,6 +245,29 @@ export const MILESTONES = {
   },
 };
 
+// Advisor: a few hints for the player's turn, most urgent first (see adviseTurn in game.js).
+// Only what the player can see is used. `dangerRange` = how close a visible enemy must be to an
+// unguarded own city, `woundedShare` = HP share counted as badly wounded, `buildOrder` = which
+// building to suggest first when there is gold to spare and no free city to recruit in;
+// `buildReserve` = gold that should stay after building.
+export const ADVISOR = {
+  limit: 3,
+  dangerRange: 3,
+  woundedShare: 0.4,
+  buildReserve: 10,
+  buildOrder: ['market', 'walls', 'barracks', 'temple', 'infirmary', 'watchtower', 'academy'],
+  kinds: {
+    undefended: { icon: '🛡', order: 0 },
+    finish:     { icon: '⚔', order: 1 },
+    wounded:    { icon: '✚', order: 2 },
+    capture:    { icon: '🏰', order: 3 },
+    ruin:       { icon: '🏛', order: 4 },
+    repair:     { icon: '🔧', order: 5 },
+    recruit:    { icon: '⚑', order: 6 },
+    build:      { icon: '🔨', order: 7 },
+  },
+};
+
 export const NEUTRAL_COLOR = '#e8e2d0';
 
 export const ECONOMY = {

@@ -2,6 +2,16 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-18 – Advisor (v0.33.0)
+- **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.26.0–v0.33.0) is ahead of `main` (v0.25.0) – please merge it.
+- Starting state green (103 logic tests + smoke).
+- Phase 15 was done, so I opened phase 16 (guidance, own improvement). The game has grown many mechanics and the "How to play" text is a wall; a newer player easily misses an unguarded city or a free kill. Now an advisor points at what matters this turn.
+- `ADVISOR` in `rules.js` (`limit` 3, `dangerRange` 3, `woundedShare` 0.4, `buildReserve` 10, `buildOrder`, kinds with icon and order). In `game.js`: `adviseTurn(state, player)` – one hint per kind, sorted by urgency: `undefended` (own city without garrison, nearest visible enemy ≤ 3 tiles), `finish` (preview says the target dies and the attacker survives; weakest target), `wounded` (≤ 40 % HP, can still move, on a tile `threatTiles` marks, not in an own city), `capture` (a known foreign city reachable this turn – enemy capital first; scouts excluded by the normal movement rules), `ruin` (a ruin the player believes in, reachable), `repair` (own pillaged resource, enough gold; names the unit if one stands on it), `recruit` (free own city and enough gold) or else `build` (first affordable building in `buildOrder` that still leaves 10 gold). Fog-safe: only visible enemies, explored cities/ruins. Pure, changes nothing; nothing on the AI's turn or after the game. Max ~8 ms on a large map.
+- UI: a collapsible "💡 Advisor" panel under the army list (count in the summary, red/gold borders for urgent hints); a click selects the unit (scrolls the zoomed map like the army list – shared `bringIntoView`) or the city; the open/closed state is a viewer preference in localStorage. Help text updated. No state structure change (`state.version` stays 25).
+- Test adjusted (not weakened): the smoke rally-point check computed the flag tile's screen position before clicking the panel button; with the advisor above the city panel the click now scrolls the page, so the test scrolls back and measures the tile again before clicking it.
+- Tests: +2 logic (recruit / build with reserve and order / nothing left to build; undefended with garrison, range and fog; sure kill vs healthy enemy and already attacked; wounded thresholds and no enemy; capture by horseman not scout, out of reach; ruin; repair walk-there vs now and no gold; limit and order, AI turn, game over, no side effects, 3 real AI-vs-AI games with well-formed hints). Smoke test: unguarded capital hint first, click selects the city (`artifacts/screenshot-advisor.png`), collapsing is saved and empties the list.
+- Status: `npm run check` green (105 logic tests + smoke).
+
 ## 2026-11-18 – War timeline (v0.32.0)
 - **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.26.0–v0.32.0) is ahead of `main` (v0.25.0) – please merge it.
 - Starting state green (101 logic tests + smoke).

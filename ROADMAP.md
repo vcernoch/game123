@@ -98,5 +98,8 @@ Check off `[x]` when done. Add new ideas to the end of the relevant phase or to 
 - [x] Inspiration: a named hero gives own units next to it +10 % defense (also on counterattacks, heroes don't stack); shown in the tooltip, attack preview, hero panel and with gold badges when the hero is selected
 - [x] War timeline: the statistics list the game's turning points (first blood, captured cities and capitals, each side's first hero, fallen heroes with 2+ kills, strength leads, victory) with markers under the strength chart; only what you witnessed until the game ends
 
+## Phase 16 – guidance (own improvements)
+- [x] Advisor (💡 panel): up to three hints for the turn, most urgent first – an unguarded city with a visible enemy within 3 tiles, a sure kill, a badly wounded unit within enemy reach, a city or ruin reachable now, a pillaged resource to repair, gold to recruit or build with; only what the player can see; a click selects the unit or city; collapsing is remembered
+
 ## Ideas (unordered)
 - Diplomacy with multiple AIs

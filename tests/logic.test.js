@@ -14,7 +14,7 @@ import {
   exploreTarget, canExplore, setExplore, followExplore, canPillage, pillage, isPillaged, pillageTurnsLeft, cityAt, canRepair, repair,
   rallyPath, rallyTarget, canRally, setRally, clearRally, canSwap, swapPartners, swapUnits,
   canBuildRoad, buildRoad, roadLinks, canSentry, sentry, checkSentries, SENTRY_TEXT, volleyTarget, cityVolleys, animSpeedOf, nextAnimSpeed,
-  unitTitle, heroName, hallOfFame, inspiredBy, inspireBonus, inspiredUnits, timelineFor, leadChanges, whose,
+  unitTitle, heroName, hallOfFame, inspiredBy, inspireBonus, inspiredUnits, timelineFor, leadChanges, whose, adviseTurn,
 } from '../src/game.js';
 import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
@@ -33,7 +33,7 @@ import { distance, key, neighbors } from '../src/hex.js';
 import {
   RESOURCES, FORTIFY, TERRITORY, ECONOMY, UNIT_TYPES, TERRAIN, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FLANK, HIGH_GROUND, CHARGE, REPAIR,
   UPGRADES, UPGRADE, DISBAND, RUINS, EXPLORE, PILLAGE,
-  SIGHTINGS, ROADWORK, SENTRY, VOLLEY, ANIM_SPEEDS, HEROES, INSPIRE, MILESTONES,
+  SIGHTINGS, ROADWORK, SENTRY, VOLLEY, ANIM_SPEEDS, HEROES, INSPIRE, MILESTONES, ADVISOR,
 } from '../src/rules.js';
 
 test('map is deterministic and starting cities are connected', () => {
@@ -3740,5 +3740,171 @@ test('war timeline: strength leads, fog, limit, HTML, chart marks, saves and mig
     assert.equal(stateProblem(r), null);
     const turns = timelineFor(r, 0).map((m) => m.turn);
     assert.deepEqual(turns, [...turns].sort((a, b) => a - b), `seed ${seed}: in order`);
+  }
+});
+
+// A flat sandbox: own capital, one neutral city (Brookby, 6,4) and the enemy capital, no units, no gold.
+function advisorSetup({ fog = false } = {}) {
+  const s = createGame({ seed: 1, fog });
+  for (const t of Object.values(s.tiles)) {
+    if (t.terrain !== 'water') t.terrain = 'plains';
+    delete t.rivers; delete t.road; delete t.resource; delete t.ruin; delete t.ruinGone;
+  }
+  s.cities = s.cities.filter((c) => [1, 2, 4].includes(c.id));
+  s.factions = [null, null];
+  s.units = [];
+  s.gold = [0, 0];
+  s.current = 0;
+  const mk = (id, owner, q, r, type = 'warrior', extra = {}) => {
+    const u = { id, type, owner, q, r, hp: UNIT_TYPES[type].hp, movesLeft: UNIT_TYPES[type].move, hasAttacked: false, xp: 0, ...extra };
+    s.units.push(u);
+    return u;
+  };
+  return { s, mk, capital: s.cities.find((c) => c.id === 1), brookby: s.cities.find((c) => c.id === 4) };
+}
+
+test('advisor: gold, guarding, sure kills, wounded units, reachable cities, ruins and repairs', () => {
+  let { s, mk, capital, brookby } = advisorSetup();
+  assert.deepEqual(adviseTurn(s, 0), [], 'nothing to say without units and gold');
+  // gold and a free city → recruit; the city is the thing to select
+  s.gold[0] = 30;
+  let tips = adviseTurn(s, 0);
+  assert.equal(tips.length, 1);
+  assert.deepEqual(tips[0], { kind: 'recruit', icon: ADVISOR.kinds.recruit.icon, text: 'You have 30 gold – recruit a unit in Your Capital.', q: capital.q, r: capital.r, cityId: 1 });
+  // no free city → build, keeping a reserve for a recruit: 30 gold = walls (20 + 10), 40 gold = a market (25 + 10)
+  mk(1, 0, capital.q, capital.r);
+  s.units[0].movesLeft = 0;
+  assert.deepEqual(adviseTurn(s, 0).map((t) => t.text), ['You have 30 gold – build walls in Your Capital (20 gold).']);
+  s.gold[0] = 40;
+  assert.deepEqual(adviseTurn(s, 0).map((t) => t.text), ['You have 40 gold – build a market in Your Capital (25 gold).']);
+  s.gold[0] = 29;
+  assert.deepEqual(adviseTurn(s, 0).map((t) => t.text), ['You have 29 gold – build a watchtower in Your Capital (15 gold).'], 'the order skips what is too dear');
+  s.gold[0] = 24;
+  assert.deepEqual(adviseTurn(s, 0), [], 'no building leaves the reserve');
+  capital.buildings = Object.keys(BUILDINGS);
+  s.gold[0] = 100;
+  assert.deepEqual(adviseTurn(s, 0), [], 'everything is built');
+  capital.buildings = [];
+
+  // an unguarded city with a visible enemy within 3 tiles comes first
+  ({ s, mk, capital, brookby } = advisorSetup());
+  s.gold[0] = 30;
+  const far = Object.values(s.tiles).find((t) => isPassable(s, t.q, t.r) && distance(t, capital) === 2);
+  const foe = mk(50, 1, far.q, far.r, 'horseman');
+  tips = adviseTurn(s, 0);
+  assert.deepEqual(tips.map((t) => t.kind), ['undefended', 'recruit']);
+  assert.equal(tips[0].text, 'Your Capital is unguarded – an enemy Horseman is 2 tiles away.');
+  assert.equal(tips[0].cityId, capital.id);
+  const guard = mk(2, 0, capital.q, capital.r, 'spearman', { movesLeft: 0 });
+  assert.ok(!adviseTurn(s, 0).some((t) => t.kind === 'undefended'), 'a garrison is enough');
+  s.units = s.units.filter((u) => u !== guard);
+  const away = Object.values(s.tiles).find((t) => isPassable(s, t.q, t.r) && distance(t, capital) === ADVISOR.dangerRange + 1 && distance(t, brookby) > 3);
+  foe.q = away.q; foe.r = away.r;
+  assert.ok(!adviseTurn(s, 0).some((t) => t.kind === 'undefended'), 'too far');
+  // with fog an enemy nobody sees is not mentioned
+  ({ s, mk, capital } = advisorSetup({ fog: true }));
+  const hidden = Object.values(s.tiles).find((t) => isPassable(s, t.q, t.r) && distance(t, capital) === 3);
+  mk(50, 1, hidden.q, hidden.r);
+  assert.ok(!visibleTiles(s, 0).has(key(hidden.q, hidden.r)));
+  assert.deepEqual(adviseTurn(s, 0), []);
+
+  // a sure kill: the weakest target that dies without killing the attacker
+  ({ s, mk, capital, brookby } = advisorSetup());
+  const spot = { q: 3, r: 6 };
+  const hero = mk(3, 0, spot.q, spot.r, 'warrior', { name: 'Ivo', xp: 4 });
+  const [n1, n2] = neighbors(spot.q, spot.r).filter((n) => isPassable(s, n.q, n.r));
+  const strong = mk(60, 1, n1.q, n1.r);
+  assert.ok(!adviseTurn(s, 0).some((t) => t.kind === 'finish'), 'a healthy enemy is no sure kill');
+  const weak = mk(61, 1, n2.q, n2.r, 'archer', { hp: 1 });
+  assert.ok(previewAttack(s, hero, weak).kills);
+  tips = adviseTurn(s, 0);
+  const fin = tips.find((t) => t.kind === 'finish');
+  assert.equal(fin.text, 'Ivo (Warrior) can finish off the enemy Archer (1 HP).');
+  assert.equal(fin.unitId, hero.id);
+  assert.deepEqual([fin.q, fin.r], [hero.q, hero.r]);
+  hero.hasAttacked = true;
+  assert.ok(!adviseTurn(s, 0).some((t) => t.kind === 'finish'), 'already attacked');
+  hero.hasAttacked = false;
+  // a badly wounded unit within enemy reach should retreat – not when healthy, not in an own city
+  hero.hp = 4;
+  tips = adviseTurn(s, 0);
+  assert.ok(tips.some((t) => t.kind === 'wounded' && t.unitId === hero.id
+    && t.text === 'Ivo (Warrior) is badly wounded (4/10 HP) and within enemy reach – pull it back to rest.'));
+  assert.deepEqual(tips.map((t) => ADVISOR.kinds[t.kind].order), [...tips.map((t) => ADVISOR.kinds[t.kind].order)].sort((a, b) => a - b), 'urgent first');
+  hero.hp = 5;
+  assert.ok(!adviseTurn(s, 0).some((t) => t.kind === 'wounded'), '5/10 is not badly wounded');
+  s.units = s.units.filter((u) => u !== strong && u !== weak);
+  hero.hp = 2;
+  assert.ok(!adviseTurn(s, 0).some((t) => t.kind === 'wounded'), 'no enemy in reach');
+
+  // a known city within reach this turn – a scout can't capture, a horseman can
+  ({ s, mk, capital, brookby } = advisorSetup());
+  const near = Object.values(s.tiles).find((t) => isPassable(s, t.q, t.r) && distance(t, brookby) === 3 && distance(t, capital) > 3);
+  const scout = mk(4, 0, near.q, near.r, 'scout');
+  assert.ok(!adviseTurn(s, 0).some((t) => t.kind === 'capture'));
+  scout.q = capital.q; scout.r = capital.r; // the scout guards the capital, a horseman takes its place
+  const rider = mk(5, 0, near.q, near.r, 'horseman');
+  tips = adviseTurn(s, 0);
+  assert.ok(tips.some((t) => t.kind === 'capture' && t.unitId === rider.id && t.text === 'Horseman can capture Brookby this turn.'), JSON.stringify(tips));
+  rider.movesLeft = 1;
+  assert.ok(!adviseTurn(s, 0).some((t) => t.kind === 'capture'), 'out of reach');
+  // a known ruin within reach
+  const ruinAt = neighbors(rider.q, rider.r).find((n) => isPassable(s, n.q, n.r) && !cityAt(s, n.q, n.r));
+  const ruinTile = tileAt(s, ruinAt.q, ruinAt.r);
+  ruinTile.ruin = true;
+  assert.ok(adviseTurn(s, 0).some((t) => t.kind === 'ruin' && t.unitId === rider.id && t.text === 'Horseman can explore the ruins this turn.'));
+  rider.movesLeft = 0;
+  assert.ok(!adviseTurn(s, 0).some((t) => t.kind === 'ruin'));
+
+  // a pillaged resource of ours: walk there, or repair now if someone stands on it
+  ({ s, mk, capital } = advisorSetup());
+  const field = neighbors(capital.q, capital.r).map((n) => tileAt(s, n.q, n.r)).find((t) => t && isPassable(s, t.q, t.r));
+  field.resource = 'gold';
+  field.pillagedUntil = s.turn + 3;
+  mk(6, 0, capital.q, capital.r, 'warrior', { movesLeft: 0 });
+  s.gold[0] = REPAIR.gold;
+  assert.deepEqual(adviseTurn(s, 0).map((t) => t.text), [`The gold mine near Your Capital is pillaged – a unit standing on it can repair it (${REPAIR.gold} gold).`]);
+  const fixer = mk(7, 0, field.q, field.r);
+  tips = adviseTurn(s, 0);
+  assert.equal(tips[0].text, `Warrior can repair the gold mine near Your Capital (${REPAIR.gold} gold).`);
+  assert.equal(tips[0].unitId, fixer.id);
+  s.gold[0] = REPAIR.gold - 1;
+  assert.ok(!adviseTurn(s, 0).some((t) => t.kind === 'repair'), 'no gold');
+});
+
+test('advisor: limit, other turn, game over, no side effects and real games', () => {
+  const { s, mk, capital } = advisorSetup();
+  s.gold[0] = 100;
+  const far = Object.values(s.tiles).find((t) => isPassable(s, t.q, t.r) && distance(t, capital) === 2);
+  mk(50, 1, far.q, far.r, 'warrior', { hp: 1 });
+  const n = neighbors(far.q, far.r).find((x) => isPassable(s, x.q, x.r) && !cityAt(s, x.q, x.r));
+  mk(1, 0, n.q, n.r, 'warrior', { hp: 3 });
+  const before = JSON.stringify(s);
+  const tips = adviseTurn(s, 0);
+  assert.equal(JSON.stringify(s), before, 'advice changes nothing');
+  assert.equal(tips.length, ADVISOR.limit);
+  assert.deepEqual(tips.map((t) => t.kind), ['undefended', 'finish', 'wounded']);
+  assert.deepEqual(adviseTurn(s, 1), [], 'not the AI turn');
+  s.winner = 0;
+  assert.deepEqual(adviseTurn(s, 0), [], 'game over');
+  // real AI-vs-AI games: every hint is well formed and about the current player's own things
+  for (const seed of [2, 5, 8]) {
+    const g = createGame({ seed });
+    let hints = 0;
+    for (let i = 0; i < 40 && g.winner === null; i++) {
+      const p = g.current;
+      const vis = visibleTiles(g, p);
+      for (const t of adviseTurn(g, p)) {
+        hints++;
+        assert.ok(ADVISOR.kinds[t.kind] && t.icon === ADVISOR.kinds[t.kind].icon && t.text.length > 10);
+        assert.ok(tileAt(g, t.q, t.r));
+        if (t.unitId) assert.equal(getUnit(g, t.unitId).owner, p);
+        if (t.cityId) assert.ok(g.cities.some((c) => c.id === t.cityId));
+        if (t.kind === 'undefended' || t.kind === 'finish') assert.ok(g.units.some((u) => u.owner !== p && vis.has(key(u.q, u.r))));
+      }
+      runAITurn(g);
+      endTurn(g);
+    }
+    assert.ok(hints > 0, `seed ${seed}`);
   }
 });
