@@ -14,7 +14,7 @@ import {
   exploreTarget, canExplore, setExplore, followExplore, canPillage, pillage, isPillaged, pillageTurnsLeft, cityAt, canRepair, repair,
   rallyPath, rallyTarget, canRally, setRally, clearRally, canSwap, swapPartners, swapUnits,
   canBuildRoad, buildRoad, roadLinks, canSentry, sentry, checkSentries, SENTRY_TEXT, volleyTarget, cityVolleys, animSpeedOf, nextAnimSpeed,
-  unitTitle, heroName, hallOfFame, inspiredBy, inspireBonus, inspiredUnits, timelineFor, leadChanges, whose, adviseTurn,
+  unitTitle, heroName, hallOfFame, inspiredBy, inspireBonus, inspiredUnits, timelineFor, leadChanges, whose, adviseTurn, suggestRecruit,
 } from '../src/game.js';
 import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
@@ -3770,7 +3770,7 @@ test('advisor: gold, guarding, sure kills, wounded units, reachable cities, ruin
   s.gold[0] = 30;
   let tips = adviseTurn(s, 0);
   assert.equal(tips.length, 1);
-  assert.deepEqual(tips[0], { kind: 'recruit', icon: ADVISOR.kinds.recruit.icon, text: 'You have 30 gold – recruit a unit in Your Capital.', q: capital.q, r: capital.r, cityId: 1 });
+  assert.deepEqual(tips[0], { kind: 'recruit', icon: ADVISOR.kinds.recruit.icon, text: 'You have 30 gold – recruit a Horseman in Your Capital (fast enough to take Brookby).', q: capital.q, r: capital.r, cityId: 1, unitType: 'horseman' });
   // no free city → build, keeping a reserve for a recruit: 30 gold = walls (20 + 10), 40 gold = a market (25 + 10)
   mk(1, 0, capital.q, capital.r);
   s.units[0].movesLeft = 0;
@@ -3907,4 +3907,86 @@ test('advisor: limit, other turn, game over, no side effects and real games', ()
     }
     assert.ok(hints > 0, `seed ${seed}`);
   }
+});
+
+test('recruit suggestion: counters horsemen, siege, archers, scouts, fast horsemen, affordability and fog', () => {
+  let { s, mk, capital, brookby } = advisorSetup();
+  const ring = (d) => Object.values(s.tiles).filter((t) => isPassable(s, t.q, t.r) && distance(t, capital) === d && !s.units.some((u) => u.q === t.q && u.r === t.r));
+  assert.equal(suggestRecruit(s, 0, capital), null, 'no gold');
+  s.gold[0] = 30;
+  assert.deepEqual(suggestRecruit(s, 0, capital), { type: 'horseman', reason: 'fast enough to take Brookby' });
+  assert.equal(suggestRecruit(s, 0, s.cities.find((c) => c.id === 2)), null, 'not an own city');
+  s.gold[0] = 12;
+  assert.deepEqual(suggestRecruit(s, 0, capital), { type: 'warrior', reason: 'the cheapest all-round unit' }, 'a horseman is too dear');
+  s.gold[0] = 8;
+  assert.deepEqual(suggestRecruit(s, 0, capital), { type: 'scout', reason: 'the best you can afford now' });
+  s.gold[0] = 30;
+  const occ = mk(1, 0, capital.q, capital.r);
+  assert.equal(suggestRecruit(s, 0, capital), null, 'occupied city');
+  s.units = s.units.filter((u) => u !== occ);
+
+  // enemy horsemen nearby → spearman; a mixed crowd → warrior; far horsemen don't count
+  let [a, b, c] = ring(4);
+  mk(50, 1, a.q, a.r, 'horseman');
+  mk(51, 1, b.q, b.r, 'horseman');
+  assert.deepEqual(suggestRecruit(s, 0, capital), { type: 'spearman', reason: 'counters the 2 enemy horsemen nearby' });
+  s.units.pop();
+  assert.equal(suggestRecruit(s, 0, capital).reason, 'counters the 1 enemy horseman nearby');
+  mk(52, 1, b.q, b.r, 'warrior');
+  mk(53, 1, c.q, c.r, 'archer');
+  assert.deepEqual(suggestRecruit(s, 0, capital), { type: 'warrior', reason: 'a solid defender against the 3 enemies nearby' }, 'horsemen are a minority');
+  // two melee units of ours and no archers → an archer to back them up
+  const [m1, m2] = ring(1);
+  mk(2, 0, m1.q, m1.r); mk(3, 0, m2.q, m2.r, 'spearman');
+  assert.deepEqual(suggestRecruit(s, 0, capital), { type: 'archer', reason: 'supports your front line from 2 tiles away' });
+  mk(4, 0, ring(1)[0].q, ring(1)[0].r, 'archer');
+  assert.equal(suggestRecruit(s, 0, capital).type, 'warrior', 'enough archers already');
+  s.units = [];
+  const far = ring(7)[0];
+  mk(54, 1, far.q, far.r, 'horseman');
+  assert.equal(suggestRecruit(s, 0, capital).type, 'horseman', 'a horseman 7 tiles away is not nearby');
+
+  // a known enemy city within 5 tiles → catapult (walls named), not with a catapult in the army or crowds around
+  s.units = [];
+  const spot = ring(4)[0];
+  brookby.q = spot.q; brookby.r = spot.r; brookby.owner = 1;
+  assert.deepEqual(suggestRecruit(s, 0, capital), { type: 'catapult', reason: 'strong against the garrison of Brookby' });
+  brookby.buildings = ['walls'];
+  assert.deepEqual(suggestRecruit(s, 0, capital), { type: 'catapult', reason: 'ignores the walls of Brookby' });
+  s.gold[0] = 15;
+  assert.equal(suggestRecruit(s, 0, capital).type, 'warrior', 'a catapult is too dear, no neutral city left for a horseman');
+  s.gold[0] = 30;
+  const cat = mk(5, 0, far.q, far.r, 'catapult');
+  assert.equal(suggestRecruit(s, 0, capital).type, 'warrior', 'one catapult is enough');
+  s.units = s.units.filter((u) => u !== cat);
+  [a, b] = ring(3);
+  mk(55, 1, a.q, a.r, 'warrior'); mk(56, 1, b.q, b.r, 'warrior');
+  assert.equal(suggestRecruit(s, 0, capital).type, 'warrior', 'two enemies at the gates beat a siege');
+
+  // fog: a scout while most of the map is unknown (not with a scout already); hidden enemies and unexplored cities don't count
+  ({ s, mk, capital, brookby } = advisorSetup({ fog: true }));
+  s.gold[0] = 30;
+  updateExplored(s);
+  const pick = suggestRecruit(s, 0, capital);
+  assert.equal(pick.type, 'scout');
+  assert.match(pick.reason, /^\d+ % of the map is still unexplored$/);
+  const hidden = Object.values(s.tiles).find((t) => isPassable(s, t.q, t.r) && distance(t, capital) === 5);
+  mk(57, 1, hidden.q, hidden.r, 'horseman');
+  assert.equal(suggestRecruit(s, 0, capital).type, 'scout', 'a horseman in the fog is unknown');
+  mk(6, 0, ring(1)[0].q, ring(1)[0].r, 'scout');
+  updateExplored(s);
+  const again = suggestRecruit(s, 0, capital);
+  assert.notEqual(again.type, 'scout', 'already has a scout');
+  assert.ok(!again.reason.includes('Brookby') || exploredTiles(s, 0).has(key(brookby.q, brookby.r)), 'an unexplored city is never named');
+
+  // the advisor names the suggestion, and the state is untouched
+  const before = JSON.stringify(s);
+  const tip = adviseTurn(s, 0).find((t) => t.kind === 'recruit');
+  assert.equal(tip.unitType, again.type);
+  assert.ok(tip.text.endsWith(`in Your Capital (${again.reason}).`), tip.text);
+  assert.match(tip.text, / recruit an? [A-Z]/);
+  assert.equal(JSON.stringify(s), before);
+  assert.equal(suggestRecruit(createGame({ seed: 3 }), 1, null), null);
+  s.winner = 0;
+  assert.equal(suggestRecruit(s, 0, capital), null, 'nothing after the game');
 });

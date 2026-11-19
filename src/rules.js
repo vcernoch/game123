@@ -266,6 +266,10 @@ export const ADVISOR = {
     recruit:    { icon: '⚑', order: 6 },
     build:      { icon: '🔨', order: 7 },
   },
+  // recruit suggestion: which unit type fits the situation around a city
+  // range: visible enemies this close to the city count; siegeRange: a known enemy city this close
+  // asks for a catapult; unknownShare: with this much of the map unexplored and no scout, a scout helps
+  recruit: { range: 6, siegeRange: 5, unknownShare: 0.4 },
 };
 
 export const NEUTRAL_COLOR = '#e8e2d0';

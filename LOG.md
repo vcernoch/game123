@@ -2,6 +2,16 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-19 – Recruit suggestion (v0.34.0)
+- **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.26.0–v0.34.0) is ahead of `main` (v0.25.0) – please merge it.
+- Starting state green (105 logic tests + smoke).
+- Phase 16 (guidance, own improvement), second task. The advisor said "recruit a unit" but not which one; with six types and counters (spearmen vs horsemen, catapults vs garrisons) a newer player had to know the rules by heart.
+- `ADVISOR.recruit` in `rules.js` (`range` 6, `siegeRange` 5, `unknownShare` 0.4). `suggestRecruit(state, player, city)` in `game.js` (pure, fog-safe – only visible enemies and explored cities): returns `{ type, reason }` or null (not own, occupied, game over, no gold). In order: Spearman when visible enemy horsemen within 6 tiles are at least half of the enemies there; Catapult for a known enemy city within 5 tiles when the army has no siege unit and fewer than 2 enemies are near (reason names the walls if any); with enemies near an Archer when ≥ 2 melee units and fewer than half as many ranged, else a Warrior; with none near a Scout when ≥ 40 % of the map is unexplored and there is no scout, a Horseman for the nearest known neutral city; else a Warrior. Unaffordable picks are skipped; last resort is the cheapest affordable type.
+- UI: the suggested recruit button gets a light outline and ★, a "★ Suggested: Spearman – counters the 1 enemy horseman nearby." line under the buttons. The advisor's recruit hint now names it ("recruit a Spearman in Your Capital (counters …)") and carries `unitType`. Help text updated. No state structure change (`state.version` stays 25).
+- Tests adjusted (not weakened): the advisor test's exact recruit text now includes the type and reason; the smoke advisor check matched "recruit a unit in" and now matches "recruit a/an <Type> in <city> (<reason>)."
+- Tests: +1 logic (every branch incl. thresholds, plurals, walls, affordability fallbacks, occupied/foreign city, game over, fog: hidden horseman ignored, scout only without a scout, advisor text and `unitType`, no side effects). Smoke test: after the advisor click exactly one suggested button and the suggestion matches the hint (`artifacts/screenshot-advisor.png`).
+- Status: `npm run check` green (106 logic tests + smoke).
+
 ## 2026-11-18 – Advisor (v0.33.0)
 - **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.26.0–v0.33.0) is ahead of `main` (v0.25.0) – please merge it.
 - Starting state green (103 logic tests + smoke).

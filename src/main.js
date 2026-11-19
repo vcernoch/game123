@@ -7,7 +7,7 @@ import {
   upgradeOptions, upgradeUnit, canDisband, disbandRefund, disbandUnit, chargeReady,
   updateSightings, lastSeen, lastSeenAt, lastSeenText, armyOverview, ARMY_STATUS, ruinBelieved,
   canExplore, setExplore, canPillage, pillage, isPillaged, pillageTurnsLeft, canRepair, repair,
-  rallyPath, setRally, clearRally, swapPartners, swapUnits, canBuildRoad, buildRoad, timelineFor, adviseTurn,
+  rallyPath, setRally, clearRally, swapPartners, swapUnits, canBuildRoad, buildRoad, timelineFor, adviseTurn, suggestRecruit,
 } from './game.js';
 import { createAnimator } from './anim.js';
 import { decideTap } from './input.js';
@@ -290,13 +290,16 @@ function updateHud() {
     if (built.length) html += `<p>${built.join(' ')}</p>`;
     if (city.owner === 0 && state.current === 0 && !busy()) {
       const blocked = !!unitAt(state, city.q, city.r);
+      const pick = suggestRecruit(state, 0, city);
       html += '<h4>Recruit</h4><div class="buy">';
       for (const [type, t] of Object.entries(UNIT_TYPES)) {
         const cost = unitCost(state, city, type);
         const dis = blocked || state.gold[0] < cost ? 'disabled' : '';
-        html += `<button data-buy="${type}" ${dis} title="${t.desc ? `${t.desc} · ` : ''}key ${recruitKey(type)}"><span><kbd class="hotkey">${recruitKey(type)}</kbd> ${t.name}</span> <small>${cost} gold</small></button>`;
+        const star = pick && pick.type === type;
+        html += `<button data-buy="${type}" ${dis}${star ? ' class="suggested"' : ''} title="${t.desc ? `${t.desc} · ` : ''}key ${recruitKey(type)}"><span><kbd class="hotkey">${recruitKey(type)}</kbd> ${t.name}${star ? ' <b class="star">★</b>' : ''}</span> <small>${cost} gold</small></button>`;
       }
       html += '</div>';
+      if (pick) html += `<p class="hint suggest">★ Suggested: ${UNIT_TYPES[pick.type].name} – ${pick.reason}.</p>`;
       if (blocked) html += '<p class="hint">The city is occupied – move the unit out first.</p>';
       html += rallyPanel(city);
       const todo = Object.entries(BUILDINGS).filter(([b]) => !hasBuilding(city, b));

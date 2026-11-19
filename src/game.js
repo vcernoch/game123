@@ -2346,11 +2346,14 @@ export function adviseTurn(state, player) {
     }
   }
 
-  // gold to spend: recruit in a free city, otherwise build (keeping enough for a recruit later)
+  // gold to spend: recruit in a free city (naming the suggested type), otherwise build
+  // (keeping enough for a recruit later)
   const free = cities.find((c) => !unitAt(state, c.q, c.r)
     && Object.keys(UNIT_TYPES).some((type) => unitCost(state, c, type) <= gold));
   if (free) {
-    add('recruit', `You have ${gold} gold – recruit a unit in ${free.name}.`, free, { cityId: free.id });
+    const pick = suggestRecruit(state, player, free);
+    add('recruit', `You have ${gold} gold – recruit ${withArticle(UNIT_TYPES[pick.type].name)} in ${free.name} (${pick.reason}).`,
+      free, { cityId: free.id, unitType: pick.type });
   } else {
     build: for (const b of ADVISOR.buildOrder) {
       for (const c of cities) {
@@ -2366,6 +2369,69 @@ export function adviseTurn(state, player) {
   }
 
   return tips.sort((a, b) => ADVISOR.kinds[a.kind].order - ADVISOR.kinds[b.kind].order).slice(0, ADVISOR.limit);
+}
+
+// "an Archer", "a Spearman"
+function withArticle(word) {
+  return `${/^[AEIOU]/i.test(word) ? 'an' : 'a'} ${word}`;
+}
+
+// "1 enemy horseman", "3 enemy horsemen"
+function enemyCount(n, type) {
+  const name = UNIT_TYPES[type].name.toLowerCase();
+  return `${n} enemy ${n === 1 ? name : (/man$/.test(name) ? name.replace(/man$/, 'men') : `${name}s`)}`;
+}
+
+// Recruit suggestion for an own free city: { type, reason } or null (not own, occupied, no gold).
+// Pure and fog-safe – it only looks at visible enemies and explored cities. In order:
+// spearmen against enemy horsemen nearby, a catapult for a near known enemy city (when the army has
+// none and few enemies are around), archers behind a melee line / warriors when enemies are near,
+// a scout when much of the fog is unexplored, a horseman to grab a known neutral city, else a warrior.
+// A type the player can't afford is skipped; the fallback is the cheapest affordable type.
+export function suggestRecruit(state, player, city) {
+  if (!city || state.winner !== null || city.owner !== player || unitAt(state, city.q, city.r)) return null;
+  const gold = state.gold[player];
+  const can = (type) => unitCost(state, city, type) <= gold;
+  const affordable = Object.keys(UNIT_TYPES).filter(can);
+  if (!affordable.length) return null;
+  const cfg = ADVISOR.recruit;
+  const visible = visibleTiles(state, player);
+  const explored = exploredTiles(state, player);
+  const near = state.units.filter((u) => u.owner !== player && visible.has(key(u.q, u.r)) && distance(u, city) <= cfg.range);
+  const mine = state.units.filter((u) => u.owner === player);
+  const picks = [];
+
+  const horses = near.filter((u) => u.type === 'horseman').length;
+  if (horses && horses * 2 >= near.length) picks.push(['spearman', `counters the ${enemyCount(horses, 'horseman')} nearby`]);
+
+  const siege = state.cities
+    .filter((c) => c.owner !== null && c.owner !== player && explored.has(key(c.q, c.r)) && distance(c, city) <= cfg.siegeRange)
+    .sort((a, b) => distance(a, city) - distance(b, city) || a.id - b.id)[0];
+  if (siege && near.length < 2 && !mine.some((u) => UNIT_TYPES[u.type].siege)) {
+    picks.push(['catapult', hasBuilding(siege, 'walls') ? `ignores the walls of ${siege.name}` : `strong against the garrison of ${siege.name}`]);
+  }
+
+  if (near.length) {
+    const ranged = mine.filter((u) => UNIT_TYPES[u.type].range > 1).length;
+    const melee = mine.length - ranged;
+    if (melee >= 2 && ranged * 2 < melee) picks.push(['archer', 'supports your front line from 2 tiles away']);
+    picks.push(['warrior', `a solid defender against the ${near.length} enem${near.length === 1 ? 'y' : 'ies'} nearby`]);
+  } else {
+    const unknown = 1 - explored.size / Object.keys(state.tiles).length;
+    if (state.fog !== false && unknown >= cfg.unknownShare && !mine.some((u) => u.type === 'scout')) {
+      picks.push(['scout', `${Math.round(unknown * 100)} % of the map is still unexplored`]);
+    }
+    const neutral = state.cities
+      .filter((c) => c.owner === null && explored.has(key(c.q, c.r)))
+      .sort((a, b) => distance(a, city) - distance(b, city) || a.id - b.id)[0];
+    if (neutral) picks.push(['horseman', `fast enough to take ${neutral.name}`]);
+  }
+  picks.push(['warrior', 'the cheapest all-round unit']);
+
+  const hit = picks.find(([type]) => can(type));
+  if (hit) return { type: hit[0], reason: hit[1] };
+  const cheapest = affordable.sort((a, b) => unitCost(state, city, a) - unitCost(state, city, b) || a.localeCompare(b))[0];
+  return { type: cheapest, reason: 'the best you can afford now' };
 }
 
 // ---------- save files ----------

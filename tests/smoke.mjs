@@ -818,12 +818,17 @@ try {
       first: rows[0]?.className, count: document.getElementById('advisor-count').textContent };
   });
   if (!adv.open || !/^tip-row undefended/.test(adv.first) || !adv.texts[0].includes(`${adv.name} is unguarded – an enemy Horseman is 2 tiles away.`)
-    || !adv.texts.some((t) => t.includes('recruit a unit in')) || adv.texts.length > 3 || !/^[1-3] hints?$/.test(adv.count)) {
+    || !adv.texts.some((t) => / recruit an? [A-Z][a-z]+ in .+ \(.+\)\./.test(t)) || adv.texts.length > 3 || !/^[1-3] hints?$/.test(adv.count)) {
     throw new Error(`advisor: ${JSON.stringify(adv)}`);
   }
   await page.click('#advisor .tip-row.undefended');
   const advInfo = await page.textContent('#info');
   if (!advInfo.includes(adv.name)) throw new Error(`advisor: click did not select the city (${advInfo.slice(0, 120)})`);
+  const sug = await page.evaluate(() => ({ btn: [...document.querySelectorAll('#info .buy button.suggested')].map((b) => b.dataset.buy),
+    text: document.querySelector('#info .suggest')?.textContent || '' }));
+  if (sug.btn.length !== 1 || !sug.text.startsWith('★ Suggested: ') || !adv.texts.some((t) => t.includes(sug.text.slice(13).split(' – ')[0]))) {
+    throw new Error(`recruit suggestion: ${JSON.stringify(sug)}`);
+  }
   await page.screenshot({ path: 'artifacts/screenshot-advisor.png' });
   await page.click('#advisor-panel summary');
   await page.waitForFunction(() => JSON.parse(localStorage.getItem('game123-prefs') || '{}').advisor === false);
