@@ -102,5 +102,8 @@ Check off `[x]` when done. Add new ideas to the end of the relevant phase or to 
 - [x] Advisor (💡 panel): up to three hints for the turn, most urgent first – an unguarded city with a visible enemy within 3 tiles, a sure kill, a badly wounded unit within enemy reach, a city or ruin reachable now, a pillaged resource to repair, gold to recruit or build with; only what the player can see; a click selects the unit or city; collapsing is remembered
 - [x] Recruit suggestion: the city panel marks a unit type that fits the situation (★) with a reason – spearmen against nearby horsemen, a catapult for a close enemy city, archers behind a melee line, a scout while the map is mostly unknown, a horseman for a neutral city; the advisor's recruit hint names it
 
+## Phase 17 – living cities (own improvements)
+- [x] City growth: a held city grows to size 2 after 5 of its owner's turns and to size 3 after 7 more (+1 gold per size above 1, dots on the tile); an enemy next to the city halts growth, a captured city loses a size; neutral cities don't grow; the AI values grown cities a bit more
+
 ## Ideas (unordered)
 - Diplomacy with multiple AIs

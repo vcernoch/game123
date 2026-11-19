@@ -1,7 +1,7 @@
 // Canvas rendering. No game logic, only drawing the state.
 import { hexToPixel, hexCorners, pixelToHex, key, neighbors, DIRS } from './hex.js';
-import { TERRAIN, UNIT_TYPES, PLAYERS, NEUTRAL_COLOR, RANKS } from './rules.js';
-import { territoryMap, ruinBelieved, isPillaged } from './game.js';
+import { TERRAIN, UNIT_TYPES, PLAYERS, NEUTRAL_COLOR, RANKS, GROWTH } from './rules.js';
+import { territoryMap, ruinBelieved, isPillaged, citySize } from './game.js';
 
 export const HEX_SIZE = 32;
 const PAD = 8;
@@ -733,7 +733,23 @@ function drawCity(ctx, city) {
     ctx.stroke();
   }
   drawBuildings(ctx, city, c.x, c.y);
+  drawSize(ctx, city, c.x, c.y);
   ctx.restore();
+}
+
+// City size: one small dot per size along the bottom edge (filled = reached, hollow = still to grow).
+function drawSize(ctx, city, x, y) {
+  const size = citySize(city);
+  const color = city.owner === null ? NEUTRAL_COLOR : PLAYERS[city.owner].color;
+  ctx.lineWidth = 1;
+  for (let i = 0; i < GROWTH.maxSize; i++) {
+    ctx.beginPath();
+    ctx.arc(x + (i - (GROWTH.maxSize - 1) / 2) * 6, y + 26, 2.2, 0, Math.PI * 2);
+    ctx.fillStyle = i < size ? '#fff6d8' : 'rgba(0,0,0,0.35)';
+    ctx.strokeStyle = i < size ? 'rgba(0,0,0,0.7)' : color;
+    ctx.fill();
+    ctx.stroke();
+  }
 }
 
 // Small building markers: walls = stone rim, market = coin, barracks = flag, watchtower = tower,

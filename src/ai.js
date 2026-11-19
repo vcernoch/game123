@@ -4,9 +4,9 @@ import {
   reachable, attackTargets, previewAttack, moveUnit, attack, buyUnit,
   unitAt, getUnit, tileAt, fortify, difficultyOf, visibleTiles, exploredTiles, build, hasBuilding, unitCost, buildingCost, factionOf,
   threatTiles, cityAt, upgradeOptions, upgradeUnit, ruinBelieved, canPillage, pillage, isPillaged, repair, pillageTurnsLeft, territoryOwner,
-  swapPartners, swapUnits, canBuildRoad, buildRoad, roadLinks,
+  swapPartners, swapUnits, canBuildRoad, buildRoad, roadLinks, citySize,
 } from './game.js';
-import { UNIT_TYPES, TERRAIN, ROADWORK } from './rules.js';
+import { UNIT_TYPES, TERRAIN, ROADWORK, GROWTH } from './rules.js';
 
 // What the AI knows about the map. On hard it sees everything, otherwise only what it has explored and sees.
 export function aiKnowledge(state, me) {
@@ -353,7 +353,7 @@ export function goalsFor(state, unit, know = aiKnowledge(state, unit.owner)) {
   if (UNIT_TYPES[unit.type].noCapture) return [...goals, ...exploreGoals(state, know)];
   goals.push(...pillageGoals(state, unit, know));
   for (const c of state.cities) {
-    if (c.owner !== unit.owner && know.knows(c.q, c.r)) goals.push({ q: c.q, r: c.r, w: c.owner === null ? 1 : 1.3 });
+    if (c.owner !== unit.owner && know.knows(c.q, c.r)) goals.push({ q: c.q, r: c.r, w: (c.owner === null ? 1 : 1.3) + (citySize(c) - 1) * GROWTH.aiGoalBonus });
   }
   for (const u of state.units) if (u.owner !== unit.owner && know.sees(u.q, u.r)) goals.push({ q: u.q, r: u.r, w: 1.1, enemy: true });
   return goals.some((g) => !g.ruin && !g.pillage && !g.repair) ? goals : [...goals, ...exploreGoals(state, know)];

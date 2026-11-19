@@ -100,6 +100,7 @@ try {
   await page.mouse.move(cityPt.x, cityPt.y);
   const tipText = await page.evaluate(() => !document.getElementById('tooltip').hidden && document.getElementById('tooltip').textContent);
   if (!tipText || !tipText.includes('gold/turn')) throw new Error(`city tooltip missing: ${tipText}`);
+  if (!/Size [1-3]\/3/.test(tipText)) throw new Error(`city tooltip has no size: ${tipText}`);
   // hovering a unit shows its stats
   const unitPt = await page.evaluate(async () => {
     const rnd = await import('./src/render.js');
@@ -366,6 +367,8 @@ try {
   await marketBtn.click();
   const hasMarket = await page.evaluate(() => window.__game.getState().cities.find((c) => c.owner === 0 && c.capital).buildings.includes('market'));
   if (!hasMarket) throw new Error('market was not built');
+  const growth = await page.locator('.growth').first().textContent();
+  if (!/^Size 1\/3 · grows in 5 turns$/.test(growth.trim())) throw new Error(`city panel growth line wrong: ${growth}`);
   await page.screenshot({ path: 'artifacts/screenshot-city-panel.png' });
 
   // number key recruits in the selected city (the capital must be empty first)

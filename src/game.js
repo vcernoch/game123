@@ -4,7 +4,7 @@ import { generateMap, hasRiverEdge } from './map.js';
 import {
   TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY, VISION, DIFFICULTY, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, ROAD_COST, RIVER, FLANK, HIGH_GROUND, CHARGE, INSPIRE,
   FACTIONS, NO_FACTION, MAP_SIZES, HAPPENINGS, FORTIFY, TERRITORY, RESOURCES,
-  UPGRADES, UPGRADE, DISBAND, SIGHTINGS, RUINS, EXPLORE, PILLAGE, REPAIR, ROADWORK, SENTRY, VOLLEY, ANIM_SPEEDS, HEROES, MILESTONES, ADVISOR,
+  UPGRADES, UPGRADE, DISBAND, SIGHTINGS, RUINS, EXPLORE, PILLAGE, REPAIR, ROADWORK, SENTRY, VOLLEY, ANIM_SPEEDS, HEROES, MILESTONES, ADVISOR, GROWTH,
 } from './rules.js';
 import { createRng } from './rng.js';
 
@@ -21,7 +21,7 @@ export function createGame({
     aiFaction = others[Math.abs(seed) % others.length];
   }
   const { tiles, cities, starts } = generateMap(seed, cols, rows, neutralCities);
-  for (const c of cities) c.buildings = [];
+  for (const c of cities) { c.buildings = []; c.size = 1; c.growth = 0; }
   const state = {
     version: STATE_VERSION,
     seed,
@@ -130,7 +130,7 @@ function countStat(state, name, player) {
   state.stats[name][player]++;
 }
 
-export const STATE_VERSION = 25;
+export const STATE_VERSION = 26;
 
 // Converts a saved state of an older version to the current one; returns null for an unknown format.
 export function migrateState(s) {
@@ -237,6 +237,11 @@ export function migrateState(s) {
     // the war timeline arrived in version 25 – it starts empty for games already in progress
     s.milestones = [];
     s.version = 25;
+  }
+  if (s.version === 25) {
+    // city growth arrived in version 26 – every city starts at size 1
+    for (const c of s.cities) { c.size = 1; c.growth = 0; }
+    s.version = 26;
   }
   return s.version === STATE_VERSION ? s : null;
 }
@@ -420,7 +425,10 @@ export function applyEvent(state, ev) {
     state.units.push({ ...ev.unit });
   } else if (ev.type === 'capture') {
     const c = state.cities.find((x) => x.id === ev.cityId);
-    if (c) { c.owner = ev.owner; delete c.rally; }
+    if (c) { c.owner = ev.owner; delete c.rally; if (ev.size) { c.size = ev.size; c.growth = 0; } }
+  } else if (ev.type === 'grow') {
+    const c = state.cities.find((x) => x.id === ev.cityId);
+    if (c) { c.size = ev.size; c.growth = 0; }
   } else if (ev.type === 'happening') {
     if (ev.gold) state.gold[ev.player] += ev.gold;
     for (const h of ev.hits || []) {
@@ -526,7 +534,60 @@ export function cityIncome(city, state = null) {
   const market = hasBuilding(city, 'market') ? BUILDING_EFFECTS.marketIncome : 0;
   const temple = hasBuilding(city, 'temple') ? BUILDING_EFFECTS.templeIncome : 0;
   const mines = state ? cityResources(state, city).filter((t) => t.resource === 'gold' && !isPillaged(state, t)).length * RESOURCES.gold.income : 0;
-  return base + faction + market + temple + mines;
+  return base + faction + market + temple + mines + (citySize(city) - 1) * GROWTH.income;
+}
+
+// ---------- city growth ----------
+
+// City size 1..GROWTH.maxSize (a missing size counts as 1).
+export function citySize(city) {
+  return Number.isInteger(city.size) ? Math.min(GROWTH.maxSize, Math.max(1, city.size)) : 1;
+}
+
+// Owner's turns still needed to reach the next size (null at the largest size or for a neutral city).
+export function growthLeft(city) {
+  const size = citySize(city);
+  if (city.owner === null || size >= GROWTH.maxSize) return null;
+  return Math.max(1, GROWTH.turns[size - 1] - (city.growth || 0));
+}
+
+// An enemy unit next to the city halts its growth (a siege).
+export function citySieged(state, city) {
+  if (city.owner === null) return false;
+  return neighbors(city.q, city.r).some((n) => {
+    const u = unitAt(state, n.q, n.r);
+    return u && u.owner !== city.owner;
+  });
+}
+
+// Growth text for panels and tooltips.
+export function growthText(state, city) {
+  const size = citySize(city);
+  const base = `Size ${size}/${GROWTH.maxSize}`;
+  if (city.owner === null) return `${base} · neutral cities don't grow`;
+  if (size >= GROWTH.maxSize) return `${base} · fully grown`;
+  if (citySieged(state, city)) return `${base} · growth halted: enemy at the gates`;
+  const left = growthLeft(city);
+  return `${base} · grows in ${left} turn${left === 1 ? '' : 's'}`;
+}
+
+// At the start of a player's turn their cities grow (before income, so a new size pays at once).
+// Returns the cities that grew.
+export function growCities(state, player) {
+  if (state.winner !== null) return [];
+  const grown = [];
+  for (const city of state.cities.filter((c) => c.owner === player)) {
+    const size = citySize(city);
+    if (size >= GROWTH.maxSize || citySieged(state, city)) continue;
+    city.growth = (city.growth || 0) + 1;
+    if (city.growth < GROWTH.turns[size - 1]) continue;
+    city.size = size + 1;
+    city.growth = 0;
+    grown.push(city);
+    emit(state, { type: 'grow', cityId: city.id, player, size: city.size });
+    addLog(state, `${PLAYERS[player].name}: ${city.name} grew to size ${city.size}`, { by: player, at: [city] });
+  }
+  return grown;
 }
 
 // Resource tiles in the city's territory.
@@ -581,6 +642,7 @@ export function cityInfo(state, city) {
     defensePct: Math.round((defMult - 1) * 100),
     heal: cityHeal(city),
     garrison: garrison && garrison.owner === city.owner ? garrison : null,
+    size: citySize(city),
   };
 }
 
@@ -1468,7 +1530,9 @@ export function moveUnit(state, unitId, q, r) {
     const prev = city.owner;
     city.owner = unit.owner;
     delete city.rally; // the old owner's rally point means nothing to the new one
-    emit(state, { type: 'capture', cityId: city.id, owner: unit.owner });
+    city.size = Math.max(1, citySize(city) - GROWTH.captureLoss); // a conquered city shrinks …
+    city.growth = 0; // … and starts growing anew
+    emit(state, { type: 'capture', cityId: city.id, owner: unit.owner, size: city.size });
     countStat(state, 'captures', unit.owner);
     const loot = factionOf(state, unit.owner).captureGold || 0;
     state.gold[unit.owner] += loot;
@@ -1798,6 +1862,7 @@ export function endTurn(state) {
     recoverPillaged(state);
     recordHistory(state);
   }
+  growCities(state, state.current);
   state.gold[state.current] += incomeOf(state, state.current);
   for (const u of state.units.filter((x) => x.owner === state.current)) {
     u.movesLeft = unitMove(state, u);
@@ -2492,6 +2557,8 @@ export function stateProblem(s) {
   for (const c of s.cities) {
     if (!c || !s.tiles[key(c.q, c.r)] || !validOwner(c.owner)) return `bad city ${c && c.name}`;
     if (c.rally !== undefined && !(c.rally && s.tiles[key(c.rally.q, c.rally.r)])) return `bad rally point of ${c.name}`;
+    if (c.size !== undefined && !(isInt(c.size) && c.size >= 1 && c.size <= GROWTH.maxSize)) return `bad size of ${c.name}`;
+    if (c.growth !== undefined && !(isInt(c.growth) && c.growth >= 0 && c.growth < 100)) return `bad growth of ${c.name}`;
   }
   const taken = new Set();
   for (const u of s.units) {

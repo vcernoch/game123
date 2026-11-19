@@ -7,7 +7,7 @@ import {
   upgradeOptions, upgradeUnit, canDisband, disbandRefund, disbandUnit, chargeReady,
   updateSightings, lastSeen, lastSeenAt, lastSeenText, armyOverview, ARMY_STATUS, ruinBelieved,
   canExplore, setExplore, canPillage, pillage, isPillaged, pillageTurnsLeft, canRepair, repair,
-  rallyPath, setRally, clearRally, swapPartners, swapUnits, canBuildRoad, buildRoad, timelineFor, adviseTurn, suggestRecruit,
+  rallyPath, setRally, clearRally, swapPartners, swapUnits, canBuildRoad, buildRoad, timelineFor, adviseTurn, suggestRecruit, growthText,
 } from './game.js';
 import { createAnimator } from './anim.js';
 import { decideTap } from './input.js';
@@ -283,7 +283,8 @@ function updateHud() {
     const owner = city.owner === null ? 'neutral' : PLAYERS[city.owner].name;
     const ci = cityInfo(state, city);
     html += `<h3>${city.name}</h3><p>Owner: ${owner}${city.capital ? ' · capital' : ''}</p>
-      <p>Income +${ci.income} gold/turn · Garrison defense +${ci.defensePct} % · Healing +${ci.heal}</p>`;
+      <p>Income +${ci.income} gold/turn · Garrison defense +${ci.defensePct} % · Healing +${ci.heal}</p>
+      <p class="growth">${sizeText(city)}</p>`;
     const res = cityResources(state, city).filter((t) => exploredTiles(state, 0).has(key(t.q, t.r)));
     if (res.length) html += `<p class="resource">Resources: ${res.map((t) => RESOURCES[t.resource].name + (isPillaged(state, t) ? ` (🔥 pillaged, ${pillageTurnsLeft(state, t)} more)` : '')).join(', ')}</p>`;
     const built = (city.buildings || []).map((b) => `<span class="building">${BUILDINGS[b].symbol} ${BUILDINGS[b].name}</span>`);
@@ -341,7 +342,7 @@ function updateHud() {
     const hc = cityAt(state, hover.q, hover.r);
     if (hc) {
       const ci = cityInfo(state, hc);
-      html = `<h3>${hc.name}</h3><p>Income +${ci.income} gold/turn · Garrison defense +${ci.defensePct} %</p>` + html;
+      html = `<h3>${hc.name}</h3><p>Income +${ci.income} gold/turn · Garrison defense +${ci.defensePct} % · ${sizeText(hc)}</p>` + html;
     }
   }
   const ghost = !u && !city && hover && lastSeenAt(state, 0, hover.q, hover.r);
@@ -709,7 +710,13 @@ function cityTipText(city) {
   const owner = city.owner === null ? 'neutral' : PLAYERS[city.owner].name;
   const gar = ci.garrison ? UNIT_TYPES[ci.garrison.type].name : 'no garrison';
   const bs = (city.buildings || []).map((b) => BUILDINGS[b].name).join(', ');
-  return `${city.name} (${owner}): +${ci.income} gold/turn · defense +${ci.defensePct} % · ${gar}${bs ? ` · ${bs}` : ''}`;
+  return `${city.name} (${owner}): +${ci.income} gold/turn · defense +${ci.defensePct} % · ${gar}${bs ? ` · ${bs}` : ''}\n${sizeText(city)}`;
+}
+
+// City size line: own cities also show their growth progress; for others (the AI's progress is
+// hidden in the fog) only the size is shown.
+function sizeText(city) {
+  return city.owner === 0 ? growthText(state, city) : growthText(state, city).split(' · ')[0];
 }
 
 // After a player action: save and replay what happened (before = state before the action).
@@ -779,6 +786,8 @@ function doEndTurn(force = false) {
     if (state.winner === null) endTurn(state);
     const ended = drainEvents(state);
     const happened = ended.filter((e) => e.type === 'happening' && e.player === 0);
+    const grew = ended.filter((e) => e.type === 'grow' && e.player === 0)
+      .map((e) => `${state.cities.find((c) => c.id === e.cityId).name} grew to size ${e.size} (+1 gold).`);
     events.push(...ended.filter((e) => e.type === 'volley')); // the AI's walls shoot at the end of its turn
     // the report must be made before the animation, which plays the events on top of `before`
     const report = state.winner === null ? turnReport(before, events, 0) : null;
@@ -795,7 +804,7 @@ function doEndTurn(force = false) {
     aiRunning = false;
     const stopped = orders.filter((o) => ['interrupted', 'blocked', 'done', 'alert', 'healed'].includes(o.result))
       .map((o) => orderText(getUnit(state, o.unitId), o.result));
-    showNotice(happened, stopped, report);
+    showNotice(happened, [...grew, ...stopped], report);
     draw();
   }, 250);
 }

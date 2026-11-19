@@ -2,6 +2,18 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-19 – City growth (v0.35.0)
+- **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.26.0–v0.35.0) is ahead of `main` (v0.25.0) – please merge it.
+- Starting state green (106 logic tests + smoke).
+- Phase 16 was done, so I opened phase 17 (living cities, own improvement). A city gave the same income from the turn it was taken to the end of the game, so holding one longer meant nothing and a siege only mattered at the moment of capture. Now cities grow, sieges hurt and a long-held city is worth more.
+- `GROWTH` in `rules.js` (`maxSize` 3, `turns` [5, 7], `income` 1, `captureLoss` 1, `aiGoalBonus` 0.1). In `game.js`: `citySize`, `growthLeft`, `citySieged` (any enemy unit on a neighbouring tile), `growthText`, `growCities` – called in `endTurn` for the player whose turn starts, before income, so a new size pays at once. `cityIncome` adds +1 per size above 1. A captured city drops one size (never below 1) and its progress resets; the `capture` event carries the new size, a new `grow` event (replayable, `boon` sound) and a chronicle entry announce growth. Neutral cities stay at size 1.
+- AI: city goals weigh +0.1 per size above 1 (`goalsFor`). No other AI change needed – growth is automatic. Balance: in AI-vs-AI games on Medium cities reach size 2–3 during the game; the extra income is modest (+1/+2 per city).
+- UI: dots along the bottom of a city tile (filled = reached size), "Size 2/3 · grows in 4 turns" / "growth halted: enemy at the gates" / "fully grown" in the city panel and tooltip. For cities that aren't yours only the size is shown, so the AI's progress in the fog stays hidden. The start-of-turn bar says "Your Capital grew to size 2 (+1 gold).". Help text updated.
+- State structure: `state.version` 26 (`city.size`, `city.growth`), migration gives every city size 1; `stateProblem` validates both.
+- Test adjusted (not weakened): `pillageSetup` sets all cities to full size, because the pillage test checks the AI's exact income over 12 turns and growth would otherwise raise it mid-test.
+- Tests: +2 logic (sizes after exactly 5 owner's turns, event and chronicle, income, new size pays the same turn, max size, siege halts but own neighbours don't, capture shrinks and resets with replay, texts, validation, migration; two real AI-vs-AI games keep sizes in range with neutral cities at 1 and some city growing, AI goal weight). Smoke test: city tooltip has the size, the city panel shows "Size 1/3 · grows in 5 turns".
+- Status: `npm run check` green (108 logic tests + smoke).
+
 ## 2026-11-19 – Recruit suggestion (v0.34.0)
 - **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.26.0–v0.34.0) is ahead of `main` (v0.25.0) – please merge it.
 - Starting state green (105 logic tests + smoke).

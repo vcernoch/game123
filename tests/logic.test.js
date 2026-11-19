@@ -15,6 +15,7 @@ import {
   rallyPath, rallyTarget, canRally, setRally, clearRally, canSwap, swapPartners, swapUnits,
   canBuildRoad, buildRoad, roadLinks, canSentry, sentry, checkSentries, SENTRY_TEXT, volleyTarget, cityVolleys, animSpeedOf, nextAnimSpeed,
   unitTitle, heroName, hallOfFame, inspiredBy, inspireBonus, inspiredUnits, timelineFor, leadChanges, whose, adviseTurn, suggestRecruit,
+  citySize, growthLeft, citySieged, growthText, growCities,
 } from '../src/game.js';
 import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
@@ -33,7 +34,7 @@ import { distance, key, neighbors } from '../src/hex.js';
 import {
   RESOURCES, FORTIFY, TERRITORY, ECONOMY, UNIT_TYPES, TERRAIN, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FLANK, HIGH_GROUND, CHARGE, REPAIR,
   UPGRADES, UPGRADE, DISBAND, RUINS, EXPLORE, PILLAGE,
-  SIGHTINGS, ROADWORK, SENTRY, VOLLEY, ANIM_SPEEDS, HEROES, INSPIRE, MILESTONES, ADVISOR,
+  SIGHTINGS, ROADWORK, SENTRY, VOLLEY, ANIM_SPEEDS, HEROES, INSPIRE, MILESTONES, ADVISOR, GROWTH,
 } from '../src/rules.js';
 
 test('map is deterministic and starting cities are connected', () => {
@@ -2564,6 +2565,7 @@ test('auto-explore: stops for enemies, cancelled by manual actions, ruins attrac
 function pillageSetup(raider, kind, { type = 'warrior', seed = 5, fog = false } = {}) {
   const s = createGame({ seed, fog, happenings: false });
   s.units = [];
+  for (const c of s.cities) c.size = GROWTH.maxSize; // fully grown, so city growth can't change incomes mid-test
   const victimCap = s.cities.find((c) => c.capital && c.owner === 1 - raider);
   const tile = cityResources(s, victimCap).find((t) => t.resource === kind);
   assert.ok(tile, `no ${kind} at the capital`);
@@ -3989,4 +3991,127 @@ test('recruit suggestion: counters horsemen, siege, archers, scouts, fast horsem
   assert.equal(suggestRecruit(createGame({ seed: 3 }), 1, null), null);
   s.winner = 0;
   assert.equal(suggestRecruit(s, 0, capital), null, 'nothing after the game');
+});
+
+test('city growth: sizes after the owner\'s turns, income, siege halts it, capture shrinks it, events replay, migration', () => {
+  const s = createGame({ seed: 3, fog: false, happenings: false });
+  s.units = [];
+  const cap = s.cities.find((c) => c.capital && c.owner === 0);
+  const neutral = s.cities.find((c) => c.owner === null);
+  assert.ok(s.cities.every((c) => c.size === 1 && c.growth === 0), 'every city starts at size 1');
+  assert.equal(growthLeft(cap), GROWTH.turns[0]);
+  assert.equal(growthLeft(neutral), null);
+  assert.match(growthText(s, neutral), /^Size 1\/3 · neutral cities don't grow$/);
+  assert.equal(growthText(s, cap), `Size 1/3 · grows in ${GROWTH.turns[0]} turns`);
+  const income1 = cityIncome(cap, s);
+  // only the owner's turns count: run whole rounds and watch the capital
+  let rounds = 0;
+  let grewEv = null;
+  while (citySize(cap) === 1 && rounds < 20) {
+    endTurn(s); // to the AI
+    endTurn(s); // back to the player – the capital grows here
+    rounds++;
+    const evs = drainEvents(s);
+    grewEv = evs.find((e) => e.type === 'grow' && e.cityId === cap.id) || grewEv;
+  }
+  assert.equal(rounds, GROWTH.turns[0]);
+  assert.equal(citySize(cap), 2);
+  assert.equal(cap.growth, 0);
+  assert.deepEqual(grewEv, { type: 'grow', cityId: cap.id, player: 0, size: 2 });
+  assert.equal(cityIncome(cap, s), income1 + GROWTH.income);
+  assert.equal(cityInfo(s, cap).size, 2);
+  assert.match(s.log.map((l) => l.msg).join('|'), new RegExp(`${cap.name} grew to size 2`));
+  assert.equal(citySize(neutral), 1, 'neutral cities stay small');
+  assert.equal(growthText(s, cap), `Size 2/3 · grows in ${GROWTH.turns[1]} turns`);
+  // a new size pays already in the turn it is reached (growth runs before income)
+  cap.growth = GROWTH.turns[1] - 1;
+  s.current = 1;
+  const g = s.gold[0];
+  endTurn(s);
+  assert.equal(citySize(cap), 3);
+  assert.equal(s.gold[0] - g, incomeOf(s, 0));
+  assert.equal(cityIncome(cap, s), income1 + 2 * GROWTH.income);
+  assert.equal(growthLeft(cap), null);
+  assert.equal(growthText(s, cap), 'Size 3/3 · fully grown');
+  assert.deepEqual(growCities(s, 0), [], 'no growth past the largest size');
+  assert.equal(cap.growth, 0);
+
+  // an enemy next to the city halts growth (own units next to it don't)
+  const city2 = s.cities.find((c) => c.owner === 1);
+  const [n1, n2] = neighbors(city2.q, city2.r).filter((n) => isPassable(s, n.q, n.r) && !cityAt(s, n.q, n.r));
+  spawnUnit(s, 'warrior', 1, n1.q, n1.r);
+  assert.ok(!citySieged(s, city2));
+  growCities(s, 1);
+  assert.equal(city2.growth, 1);
+  const besieger = spawnUnit(s, 'warrior', 0, n2.q, n2.r);
+  assert.ok(citySieged(s, city2));
+  assert.match(growthText(s, city2), /growth halted: enemy at the gates/);
+  growCities(s, 1);
+  assert.equal(city2.growth, 1, 'halted');
+  // capture: one size lost, growth starts anew, the capture event carries the size and replays
+  city2.size = 3; city2.growth = 4;
+  s.units = s.units.filter((u) => u.owner === 0);
+  s.current = 0;
+  besieger.movesLeft = 2; besieger.hasAttacked = false;
+  drainEvents(s);
+  const before = cloneState(s);
+  assert.ok(moveUnit(s, besieger.id, city2.q, city2.r));
+  assert.equal(city2.owner, 0);
+  assert.equal(citySize(city2), 2);
+  assert.equal(city2.growth, 0);
+  const evs = drainEvents(s);
+  assert.equal(evs.find((e) => e.type === 'capture').size, 2);
+  for (const e of evs) applyEvent(before, e);
+  const c2 = before.cities.find((c) => c.id === city2.id);
+  assert.equal(c2.size, 2);
+  assert.equal(c2.growth, 0);
+  // the grow event replays too
+  const copy = cloneState(s);
+  applyEvent(copy, { type: 'grow', cityId: cap.id, player: 0, size: 3 });
+  assert.equal(copy.cities.find((c) => c.id === cap.id).size, 3);
+  // size 1 stays 1 when captured
+  const n = s.cities.find((c) => c.owner === null);
+  n.size = 1;
+  assert.equal(Math.max(1, citySize(n) - GROWTH.captureLoss), 1);
+  assert.equal(citySize({ owner: 0 }), 1, 'a missing size counts as 1');
+  assert.equal(soundFor({ type: 'grow', player: 0 }, 0), 'boon');
+
+  // validation and migration
+  assert.equal(stateProblem(s), null);
+  const bad = cloneState(s); bad.cities[0].size = 4;
+  assert.match(stateProblem(bad), /bad size/);
+  const bad2 = cloneState(s); bad2.cities[0].growth = -1;
+  assert.match(stateProblem(bad2), /bad growth/);
+  const old = cloneState(createGame({ seed: 2 }));
+  old.version = 25;
+  for (const c of old.cities) { delete c.size; delete c.growth; }
+  const m = migrateState(old);
+  assert.equal(m.version, STATE_VERSION);
+  assert.ok(m.cities.every((c) => c.size === 1 && c.growth === 0));
+});
+
+test('city growth in real AI-vs-AI games: sizes stay in range, the AI values grown cities a bit more', () => {
+  for (const seed of [2, 7]) {
+    const s = createGame({ seed, size: 'medium', fog: false });
+    let maxSize = 1;
+    for (let i = 0; i < 120 && s.winner === null; i++) {
+      runAITurn(s);
+      drainEvents(s);
+      endTurn(s);
+      for (const c of s.cities) {
+        assert.ok(c.size >= 1 && c.size <= GROWTH.maxSize, `seed ${seed}: size ${c.size}`);
+        if (c.owner === null) assert.equal(c.size, 1);
+        maxSize = Math.max(maxSize, c.size);
+      }
+      assert.equal(stateProblem(s), null);
+    }
+    assert.ok(maxSize >= 2, `seed ${seed}: no city ever grew`);
+  }
+  const s = createGame({ seed: 4, fog: false });
+  const u = s.units.find((x) => x.owner === 1);
+  const enemyCap = s.cities.find((c) => c.capital && c.owner === 0);
+  const w1 = goalsFor(s, u).find((g) => g.q === enemyCap.q && g.r === enemyCap.r).w;
+  enemyCap.size = 3;
+  const w3 = goalsFor(s, u).find((g) => g.q === enemyCap.q && g.r === enemyCap.r).w;
+  assert.ok(Math.abs(w3 - w1 - 2 * GROWTH.aiGoalBonus) < 1e-9);
 });

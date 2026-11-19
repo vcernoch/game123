@@ -274,6 +274,18 @@ export const ADVISOR = {
 
 export const NEUTRAL_COLOR = '#e8e2d0';
 
+// City growth: a city held by a player grows a size every few of its owner's turns (neutral cities don't).
+// `turns[i]` = owner's turns needed to grow from size i+1 to i+2; each size above 1 adds `income` gold.
+// An enemy unit standing next to the city at the start of its owner's turn halts growth that turn
+// (a siege), and a captured city drops `captureLoss` sizes and starts growing anew.
+export const GROWTH = {
+  maxSize: 3,
+  turns: [5, 7],
+  income: 1,
+  captureLoss: 1,
+  aiGoalBonus: 0.1, // the AI values a grown foreign city a bit more per size above 1
+};
+
 export const ECONOMY = {
   startGold: 20,
   capitalIncome: 5,
