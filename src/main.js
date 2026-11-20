@@ -2,23 +2,24 @@
 import {
   createGame, reachable, attackTargets, moveUnit, attack, buyUnit, endTurn,
   unitAt, cityAt, getUnit, incomeOf, previewAttack, tileAt, pathTo, nextActiveUnit, cityInfo,
-  cloneState, drainEvents, migrateState, logFor, turnReport, reportText, reportIsBad, isUndoableMove, canFortify, fortify, activeUnits, territoryOwner, cityResources, unitSummary, planRoute, setOrder, runOrders, cancelOrder, visibleTiles, exploredTiles, build, unitCost, hasBuilding,
-  rankOf, rankMult, buildingCost, unitMove, factionOf, riverDefense, flankers, zocTiles, threatTiles, exportGame, importGame, saveFileName, parseSeed, restartOptions,
+  cloneState, drainEvents, migrateState, logFor, turnReport, reportText, reportIsBad, isUndoableMove, canFortify, fortify, canSentry, sentry, SENTRY_TEXT, animSpeedOf, nextAnimSpeed, activeUnits, territoryOwner, cityResources, unitSummary, planRoute, setOrder, runOrders, cancelOrder, visibleTiles, exploredTiles, build, unitCost, hasBuilding,
+  rankOf, rankMult, buildingCost, inspiredUnits, unitMove, factionOf, riverDefense, flankers, zocTiles, threatTiles, exportGame, importGame, saveFileName, parseSeed, restartOptions,
   upgradeOptions, upgradeUnit, canDisband, disbandRefund, disbandUnit, chargeReady,
   updateSightings, lastSeen, lastSeenAt, lastSeenText, armyOverview, ARMY_STATUS, ruinBelieved,
-  canExplore, setExplore, canPillage, pillage, isPillaged, pillageTurnsLeft,
+  canExplore, setExplore, canPillage, pillage, isPillaged, pillageTurnsLeft, canRepair, repair,
+  rallyPath, setRally, clearRally, swapPartners, swapUnits, canBuildRoad, buildRoad, timelineFor, adviseTurn, suggestRecruit, growthText, tradeText, tradeRoute, unrestText,
 } from './game.js';
 import { createAnimator } from './anim.js';
 import { decideTap } from './input.js';
 import { createSound, soundFor } from './sound.js';
-import { chartSvg, summaryRows } from './stats.js';
+import { chartSvg, summaryRows, hallOfFameHtml, timelineHtml } from './stats.js';
 import { GAME_VERSION, GAME_DATE } from './version.js';
 import { runAITurn } from './ai.js';
 import { SHORTCUTS, keyAction, recruitKey } from './keys.js';
 import { render, canvasSize, pickHex, tileCenter } from './render.js';
 import { key } from './hex.js';
 import {
-  UNIT_TYPES, TERRAIN, PLAYERS, DIFFICULTY, BUILDINGS, RANKS, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FORTIFY, TERRITORY, ECONOMY, RESOURCES, HIGH_GROUND, CHARGE, RUINS, PILLAGE,
+  UNIT_TYPES, TERRAIN, PLAYERS, DIFFICULTY, BUILDINGS, RANKS, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FORTIFY, TERRITORY, ECONOMY, RESOURCES, HIGH_GROUND, CHARGE, INSPIRE, RUINS, PILLAGE, REPAIR, ROADWORK, SENTRY,
 } from './rules.js';
 
 const SAVE_KEY = 'game123-save';
@@ -34,6 +35,8 @@ let selectedCityId = null;
 let hover = null;
 let aiRunning = false;
 let pending = null;        // touch: target awaiting confirmation by a second tap
+let rallyPick = null;      // id of the city whose rally point the player is picking on the map
+let swapPick = null;       // id of the unit that is picking a neighbour to swap places with
 let lastPointer = 'mouse'; // type of the last pointer (mouse / touch / pen)
 let endArmed = false;      // end-turn reminder: the first press only asks for confirmation
 let endArmTimer = null;
@@ -50,9 +53,12 @@ const anim = createAnimator(
 );
 let lastWinner = state.winner;
 let showThreats = false; // threat overlay, set from the preferences below
+let reducedMotion = false;
 try {
-  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) anim.speed = 0;
+  reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 } catch { /* old browser */ }
+let animSpeed = animSpeedOf(loadPrefs().animSpeed, reducedMotion); // see ANIM_SPEEDS
+anim.speed = animSpeed.mult;
 
 // Unit on a tile, only if the player can see it (enemy units in fog are treated as absent).
 function seenUnitAt(q, r) {
@@ -92,13 +98,25 @@ function resize() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
 
+// Escapes text for innerHTML (unit names may come from an imported save file).
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
 const fmt = (x) => (Math.round(x * 10) / 10).toLocaleString('en-US');
 
 // "Veteran ★ · XP 4/7" – rank and progress to the next one.
 function rankLine(u) {
   const r = rankOf(u);
   const next = RANKS[r + 1];
-  return `${RANKS[r].name} ${RANKS[r].symbol} · XP ${u.xp || 0}${next ? `/${next.xp}` : ''}`;
+  const kills = u.kills ? ` · ${u.kills} kill${u.kills === 1 ? '' : 's'}` : '';
+  return `${RANKS[r].name} ${RANKS[r].symbol} · XP ${u.xp || 0}${next ? `/${next.xp}` : ''}${kills}`;
+}
+
+// "Inspires 2 units next to it (+10 % defense)" for a named hero.
+function inspireLine(u) {
+  if (!u.name) return '';
+  const n = inspiredUnits(state, u).length;
+  const who = n ? `${n} unit${n === 1 ? '' : 's'} next to it` : 'units next to it';
+  return `<p class="inspire">Inspires ${who} (+${Math.round(INSPIRE.defBonus * 100)} % defense)</p>`;
 }
 
 // "Attack", "Attack across a river", "Flanking attack +20 %" … for the attack preview.
@@ -107,6 +125,7 @@ function attackLabel(attacker, target, preview) {
   if (preview.flank) label = `${label.replace('Attack', 'Flanking attack')} (+${Math.round(preview.flank * 100)} %)`;
   if (preview.high) label += ` · high ground +${Math.round(preview.high * 100)} %`;
   if (preview.charge) label += ` · charge +${Math.round(preview.charge * 100)} %`;
+  if (preview.inspired) label += ` · target inspired (defense +${Math.round(preview.inspired * 100)} %)`;
   return label;
 }
 
@@ -144,6 +163,19 @@ function flankView(u) {
   return new Set(flankers(state, u, target).map((f) => f.id));
 }
 
+// Rally flags of own cities; the selected city's route to its flag, or – while picking – to the hovered tile.
+function rallyView() {
+  if (busy()) return {};
+  const rallies = state.cities.filter((c) => c.owner === 0 && c.rally).map((c) => ({ ...c.rally, selected: c.id === selectedCityId }));
+  const city = state.cities.find((c) => c.id === (rallyPick ?? selectedCityId));
+  let rallyLine = null;
+  if (city && city.owner === 0) {
+    const to = rallyPick !== null ? hover : city.rally;
+    rallyLine = to ? rallyPath(state, city, to.q, to.r) : null;
+  }
+  return { rallies, rallyLine, rallyPicking: rallyPick !== null };
+}
+
 function drawBoard() {
   const u = selectedUnit();
   const mine = u && u.owner === state.current && !busy();
@@ -160,9 +192,12 @@ function drawBoard() {
     targets: mine ? new Set(attackTargets(state, u).map((t) => t.id)) : null,
     hover,
     flankers: mine ? flankView(u) : null,
+    inspired: u && u.owner === 0 && !busy() ? new Set(inspiredUnits(state, u).map((o) => o.id)) : null,
+    swaps: mine && swapPick === u.id ? new Set(swapPartners(state, u).map((o) => o.id)) : null,
     lossMarks: busy() ? null : lossMarks,
     ghosts: busy() ? null : lastSeen(state, 0),
     ...pathView(u, mine),
+    ...rallyView(),
   });
 }
 
@@ -180,10 +215,10 @@ function updateHud() {
   let html = '';
   if (u) {
     const t = UNIT_TYPES[u.type];
-    html += `<h3>${t.name} <span class="tag" style="background:${PLAYERS[u.owner].color}">${PLAYERS[u.owner].name}</span></h3>
+    html += `<h3>${u.name ? `<span class="hero">${esc(u.name)}</span> ` : ''}${t.name} <span class="tag" style="background:${PLAYERS[u.owner].color}">${PLAYERS[u.owner].name}</span></h3>
       <p>HP ${u.hp}/${t.hp} · Attack ${fmt(t.atk * rankMult(u))} · Defense ${fmt(t.def * rankMult(u))} · Range ${t.range}</p>
-      <p>Move ${fmt(u.movesLeft)}/${unitMove(state, u)}${u.fortified ? '' : u.hasAttacked ? ' · already attacked' : ''}${chargeReady(state, u) ? ` · <span class="charge">charge ready (+${Math.round(CHARGE.atkBonus * 100)} %)</span>` : ''}</p>
-      <p>${rankLine(u)}</p>${t.desc ? `<p class="hint">${t.desc}</p>` : ''}`;
+      <p>Move ${fmt(u.movesLeft)}/${unitMove(state, u)}${u.fortified ? '' : u.hasAttacked ? (u.movesLeft > 0 ? ' · already attacked' : ' · done for this turn') : ''}${chargeReady(state, u) ? ` · <span class="charge">charge ready (+${Math.round(CHARGE.atkBonus * 100)} %)</span>` : ''}</p>
+      <p>${rankLine(u)}</p>${inspireLine(u)}${t.desc ? `<p class="hint">${t.desc}</p>` : ''}`;
     if (u.goto && u.owner === 0) {
       const r = planRoute(state, u, u.goto.q, u.goto.r);
       html += `<p class="order">➜ Marching to a target${r ? ` · ${r.turns} turn${r.turns === 1 ? '' : 's'}` : ''}</p>`;
@@ -199,9 +234,33 @@ function updateHud() {
     if (u.owner === 0 && !busy() && canPillage(state, u)) {
       html += `<button data-pillage class="secondary wide-btn" title="Plunder this enemy resource: +${PILLAGE.gold} gold, it gives its owner nothing for ${PILLAGE.turns} turns; ends the unit's turn (P)">🔥 Pillage (+${PILLAGE.gold} gold)</button>`;
     }
+    if (u.owner === 0 && !busy() && canRepair(state, u, { affordable: false })) {
+      const ok = canRepair(state, u);
+      html += `<button data-repair class="secondary wide-btn" ${ok ? '' : 'disabled'} title="Rebuild this pillaged resource of yours: it works again right away; costs ${REPAIR.gold} gold and ends the unit's turn (R)">🔧 Repair (${REPAIR.gold} gold)</button>`;
+    }
+    if (u.owner === 0 && !busy() && canBuildRoad(state, u, { affordable: false })) {
+      const ok = canBuildRoad(state, u);
+      html += `<button data-road class="secondary wide-btn" ${ok ? '' : 'disabled'} title="Lay a road on this tile of your territory: moving between road tiles costs ½; costs ${ROADWORK.gold} gold and ends the unit's turn (B)">🛤 Build road (${ROADWORK.gold} gold)</button>`;
+    }
     if (u.fortified) html += `<p class="fortified">⛨ Fortified: +${Math.round(FORTIFY.defBonus * 100)} % defense until it moves or attacks</p>`;
+    if (u.sentry && u.owner === 0) {
+      html += `<p class="sentry">${SENTRY_TEXT[u.sentry]}</p>`;
+      if (!busy()) html += '<button data-cancel-order class="secondary wide-btn">✖ Wake up</button>';
+    }
+    if (u.owner === 0 && !busy() && canSentry(state, u)) {
+      const heal = u.hp < UNIT_TYPES[u.type].hp;
+      html += `<button data-sentry class="secondary wide-btn" title="${heal ? 'Rest here until fully healed' : 'Keep watch here'}; Tab skips the unit until an enemy comes within ${SENTRY.radius} tiles (W)">👁 ${heal ? 'Rest until healed' : 'Sentry'}</button>`;
+    }
     if (u.owner === 0 && !busy() && canFortify(state, u)) {
       html += `<button data-fortify class="secondary wide-btn" title="Dig in: +${Math.round(FORTIFY.defBonus * 100)} % defense, ends the unit's turn (F)">⛨ Fortify</button>`;
+    }
+    if (u.owner === 0 && !busy() && state.current === 0) {
+      const partners = swapPartners(state, u);
+      if (swapPick === u.id) {
+        html += '<p class="order">⇄ Tap a unit with a blue ring to swap places</p><button data-swap class="secondary wide-btn">✖ Cancel swap</button>';
+      } else if (partners.length) {
+        html += `<button data-swap class="secondary wide-btn" title="Trade tiles with a neighbouring unit of yours – both use one step (S)">⇄ Swap places${partners.length === 1 ? ` with ${UNIT_TYPES[partners[0].type].name}` : ''}</button>`;
+      }
     }
     const ups = u.owner === 0 && !busy() ? upgradeOptions(state, u) : [];
     if (ups.length) {
@@ -224,21 +283,28 @@ function updateHud() {
     const owner = city.owner === null ? 'neutral' : PLAYERS[city.owner].name;
     const ci = cityInfo(state, city);
     html += `<h3>${city.name}</h3><p>Owner: ${owner}${city.capital ? ' · capital' : ''}</p>
-      <p>Income +${ci.income} gold/turn · Garrison defense +${ci.defensePct} % · Healing +${ci.heal}</p>`;
+      <p>Income +${ci.income} gold/turn · Garrison defense +${ci.defensePct} % · Healing +${ci.heal}</p>
+      <p class="growth">${sizeText(city)}</p>`;
+    if (city.owner === 0 && unrestText(state, city)) html += `<p class="unrest">✊ ${unrestText(state, city)}</p>`;
+    if (city.owner === 0) html += `<p class="trade ${tradeRoute(state, city)}">🛤 ${tradeText(state, city)}</p>`;
     const res = cityResources(state, city).filter((t) => exploredTiles(state, 0).has(key(t.q, t.r)));
     if (res.length) html += `<p class="resource">Resources: ${res.map((t) => RESOURCES[t.resource].name + (isPillaged(state, t) ? ` (🔥 pillaged, ${pillageTurnsLeft(state, t)} more)` : '')).join(', ')}</p>`;
     const built = (city.buildings || []).map((b) => `<span class="building">${BUILDINGS[b].symbol} ${BUILDINGS[b].name}</span>`);
     if (built.length) html += `<p>${built.join(' ')}</p>`;
     if (city.owner === 0 && state.current === 0 && !busy()) {
       const blocked = !!unitAt(state, city.q, city.r);
+      const pick = suggestRecruit(state, 0, city);
       html += '<h4>Recruit</h4><div class="buy">';
       for (const [type, t] of Object.entries(UNIT_TYPES)) {
         const cost = unitCost(state, city, type);
         const dis = blocked || state.gold[0] < cost ? 'disabled' : '';
-        html += `<button data-buy="${type}" ${dis} title="${t.desc ? `${t.desc} · ` : ''}key ${recruitKey(type)}"><span><kbd class="hotkey">${recruitKey(type)}</kbd> ${t.name}</span> <small>${cost} gold</small></button>`;
+        const star = pick && pick.type === type;
+        html += `<button data-buy="${type}" ${dis}${star ? ' class="suggested"' : ''} title="${t.desc ? `${t.desc} · ` : ''}key ${recruitKey(type)}"><span><kbd class="hotkey">${recruitKey(type)}</kbd> ${t.name}${star ? ' <b class="star">★</b>' : ''}</span> <small>${cost} gold</small></button>`;
       }
       html += '</div>';
+      if (pick) html += `<p class="hint suggest">★ Suggested: ${UNIT_TYPES[pick.type].name} – ${pick.reason}.</p>`;
       if (blocked) html += '<p class="hint">The city is occupied – move the unit out first.</p>';
+      html += rallyPanel(city);
       const todo = Object.entries(BUILDINGS).filter(([b]) => !hasBuilding(city, b));
       if (todo.length) {
         html += '<h4>Build</h4><div class="buy">';
@@ -256,7 +322,7 @@ function updateHud() {
   } else if (!u && !city && hover && tileAt(state, hover.q, hover.r)) {
     const tile = tileAt(state, hover.q, hover.r);
     const t = TERRAIN[tile.terrain];
-    const road = tile.road ? ' · road (move cost ½ along roads)' : '';
+    const road = tile.road ? ` · ${tile.roadBuilt ? 'built road' : 'road'} (move cost ½ along roads)` : '';
     const river = tile.rivers && tile.rivers.length ? ` · river (crossing +${RIVER.crossCost} move, defender +${Math.round(RIVER.defBonus * 100)} %)` : '';
     const high = HIGH_GROUND.terrain.includes(tile.terrain) ? ` · high ground (attack +${Math.round(HIGH_GROUND.atkBonus * 100)} % against units below)` : '';
     const noCharge = CHARGE.blockedBy.includes(tile.terrain) ? ' · no cavalry charge' : '';
@@ -267,7 +333,7 @@ function updateHud() {
     if (tile.resource) html += `<p class="resource">${RESOURCES[tile.resource].name}: ${RESOURCES[tile.resource].desc}</p>`;
     if (tile.resource && isPillaged(state, tile)) {
       const n = pillageTurnsLeft(state, tile);
-      html += `<p class="pillaged">🔥 Pillaged – out of use, works again in ${n} round${n === 1 ? '' : 's'}</p>`;
+      html += `<p class="pillaged">🔥 Pillaged – out of use, works again in ${n} round${n === 1 ? '' : 's'}${territoryOwner(state, hover.q, hover.r) === 0 ? ` (a unit of yours standing here can repair it for ${REPAIR.gold} gold)` : ''}</p>`;
     }
     if (ruinBelieved(state, hover.q, hover.r, 0)) html += `<p class="resource ruin">Ancient ruins: ${RUINS.desc}</p>`;
     const realm = territoryOwner(state, hover.q, hover.r);
@@ -278,7 +344,7 @@ function updateHud() {
     const hc = cityAt(state, hover.q, hover.r);
     if (hc) {
       const ci = cityInfo(state, hc);
-      html = `<h3>${hc.name}</h3><p>Income +${ci.income} gold/turn · Garrison defense +${ci.defensePct} %</p>` + html;
+      html = `<h3>${hc.name}</h3><p>Income +${ci.income} gold/turn · Garrison defense +${ci.defensePct} % · ${sizeText(hc)}</p>` + html;
     }
   }
   const ghost = !u && !city && hover && lastSeenAt(state, 0, hover.q, hover.r);
@@ -328,6 +394,65 @@ function updateHud() {
   }
   updateStats();
   updateArmy();
+  updateAdvisor();
+}
+
+// Rally point part of the own city panel.
+function rallyPanel(city) {
+  let html = '<h4>Rally point</h4>';
+  if (rallyPick === city.id) {
+    html += '<p class="confirm">🚩 Click the tile where new units from this city should march. Click elsewhere or press Esc to cancel.</p>';
+    return `${html}<button data-rally-cancel class="secondary wide-btn">✖ Cancel</button>`;
+  }
+  if (city.rally) {
+    const path = rallyPath(state, city, city.rally.q, city.rally.r);
+    const n = path ? path.length - 1 : 0;
+    html += `<p class="order">🚩 New units march to the flag ${n} tile${n === 1 ? '' : 's'} away by themselves</p>`;
+    return `${html}<div class="row-btns"><button data-rally class="secondary" title="Pick another tile (G)">🚩 Move flag</button><button data-rally-clear class="secondary">✖ Remove</button></div>`;
+  }
+  html += '<p class="hint">Set a flag and every unit recruited here walks there on its own.</p>';
+  return `${html}<button data-rally class="secondary wide-btn" title="Pick a tile on the map (G)">🚩 Set rally point</button>`;
+}
+
+// Starts picking the rally point of the selected own city (G / panel button); pressing again cancels.
+function startRallyPick() {
+  if (busy() || state.winner !== null || state.current !== 0) return;
+  const city = state.cities.find((c) => c.id === selectedCityId);
+  if (!city || city.owner !== 0) return;
+  rallyPick = rallyPick === city.id ? null : city.id;
+  swapPick = null;
+  pending = null;
+  sound.play('click');
+  draw();
+}
+
+// Starts picking a neighbour to swap places with (S / panel button). With a single partner it swaps at
+// once; pressing again cancels the picking.
+function startSwapPick() {
+  if (busy() || state.winner !== null || state.current !== 0) return;
+  const u = selectedUnit();
+  if (swapPick !== null) { swapPick = null; draw(); return; }
+  if (!u || u.owner !== 0) return;
+  const partners = swapPartners(state, u);
+  if (!partners.length) return;
+  rallyPick = null;
+  pending = null;
+  if (partners.length === 1) { doSwap(u.id, partners[0].id); return; }
+  swapPick = u.id;
+  sound.play('click');
+  draw();
+}
+
+// Swaps two own units; undoable like a move. The selection stays on the unit that asked for the swap.
+function doSwap(unitId, otherId) {
+  const before = cloneState(state);
+  if (!swapUnits(state, unitId, otherId)) { draw(); return; }
+  if (isUndoableMove(before, state, state.events, 0)) undoStack.push(cloneState(before));
+  else undoStack = [];
+  const u = getUnit(state, unitId);
+  const c = cityAt(state, u.q, u.r);
+  selectedCityId = c ? c.id : null;
+  afterAction(before);
 }
 
 let armyKey = '';
@@ -341,7 +466,8 @@ function updateArmy() {
   if (k === armyKey) return;
   armyKey = k;
   $('army-count').textContent = sum;
-  if (!$('army-panel').open) return;
+  // a closed panel keeps no rows, so reopening never shows a stale list before the toggle redraw
+  if (!$('army-panel').open) { $('army').innerHTML = ''; return; }
   if (!rows.length) { $('army').innerHTML = '<li class="hint">You have no units. Recruit in a city.</li>'; return; }
   $('army').innerHTML = rows.map((r) => {
     const rank = RANKS[r.rank].symbol ? ` ${RANKS[r.rank].symbol}` : '';
@@ -349,10 +475,50 @@ function updateArmy() {
     return `<li><button type="button" data-army="${r.id}" class="army-row ${r.status}${r.id === selectedId ? ' sel' : ''}"
       aria-pressed="${r.id === selectedId}" ${busy() ? 'disabled' : ''}>
       <span class="sym">${r.symbol}</span>
-      <span class="nm">${r.name}${rank}<small>${r.where}</small></span>
+      <span class="nm">${r.hero ? `${esc(r.hero)} <small class="ty">${r.name}</small>` : r.name}${rank}<small>${r.where}${r.kills ? ` · ${r.kills} ⚔` : ''}</small></span>
       <span class="hp${hurt}">${r.hp}/${r.maxHp}</span>
       <span class="st">${ARMY_STATUS[r.status].label}</span></button></li>`;
   }).join('');
+}
+
+let advisorKey = '';
+
+// Advisor panel: hints for this turn. Recomputed only when the game changes (updateHud runs often).
+function updateAdvisor() {
+  const open = $('advisor-panel').open;
+  const k = `${open}:${busy()}:${state.turn}:${state.current}:${state.winner}:${state.gold[0]}:${JSON.stringify(state.units)}:${JSON.stringify(state.cities)}`;
+  if (k === advisorKey) return;
+  advisorKey = k;
+  const tips = busy() ? [] : adviseTurn(state, 0);
+  $('advisor-count').textContent = busy() || state.current !== 0 || state.winner !== null ? '' : tips.length ? `${tips.length} hint${tips.length === 1 ? '' : 's'}` : 'nothing urgent';
+  if (!open) { $('advisor').innerHTML = ''; return; }
+  if (!tips.length) {
+    const why = state.winner !== null ? 'The game is over.' : busy() || state.current !== 0 ? 'Waiting for your turn…' : 'Nothing urgent – carry on with your plan.';
+    $('advisor').innerHTML = `<li class="hint">${why}</li>`;
+    return;
+  }
+  $('advisor').innerHTML = tips.map((t) => `<li><button type="button" class="tip-row ${t.kind}" data-tip-q="${t.q}" data-tip-r="${t.r}"
+    ${t.unitId ? `data-tip-unit="${t.unitId}"` : ''} ${t.cityId ? `data-tip-city="${t.cityId}"` : ''}><span class="ic">${t.icon}</span><span>${esc(t.text)}</span></button></li>`).join('');
+}
+
+// A hint was clicked: select its unit or city (or just show its tile) and bring it into view.
+function selectFromTip(btn) {
+  if (busy()) return;
+  const unitId = Number(btn.dataset.tipUnit) || null;
+  const cityId = Number(btn.dataset.tipCity) || null;
+  if (unitId) { selectFromArmy(unitId); return; }
+  pending = null;
+  rallyPick = null;
+  swapPick = null;
+  const city = cityId ? state.cities.find((c) => c.id === cityId) : null;
+  const q = Number(btn.dataset.tipQ);
+  const r = Number(btn.dataset.tipR);
+  const u = unitAt(state, q, r);
+  selectedId = u && u.owner === 0 ? u.id : null;
+  selectedCityId = city ? city.id : null;
+  sound.play('click');
+  draw();
+  bringIntoView(q, r);
 }
 
 // Selects a unit from the army list and brings it into view (also inside the zoomed map on a phone).
@@ -360,14 +526,21 @@ function selectFromArmy(id) {
   const u = getUnit(state, id);
   if (busy() || !u || u.owner !== 0) return;
   pending = null;
+  rallyPick = null;
+  swapPick = null;
   selectedId = u.id;
   const city = cityAt(state, u.q, u.r);
   selectedCityId = city ? city.id : null;
   sound.play('click');
   draw();
+  bringIntoView(u.q, u.r);
+}
+
+// Scrolls the zoomed map (phone) to a tile and the page to the map if it is off screen.
+function bringIntoView(q, r) {
   const wrap = canvas.parentElement;
   if (wrap.classList.contains('zoomed')) {
-    const c = tileCenter(u.q, u.r);
+    const c = tileCenter(q, r);
     const k = canvas.clientWidth / canvasSize(state).w;
     wrap.scrollTo({ left: c.x * k - wrap.clientWidth / 2, top: c.y * k - wrap.clientHeight / 2 });
   }
@@ -382,7 +555,9 @@ let statsKey = '';
 function updateStats() {
   if (!$('stats-panel').open) return;
   const h = state.history || [];
-  const key = `${h.length}:${state.winner}:${JSON.stringify(state.stats)}:${h.length ? h[h.length - 1].power : ''}`;
+  const hall = hallOfFameHtml(state);
+  const marks = timelineFor(state, 0);
+  const key = `${h.length}:${state.winner}:${JSON.stringify(state.stats)}:${h.length ? h[h.length - 1].power : ''}:${hall}:${marks.length}`;
   if (key === statsKey) return;
   statsKey = key;
   if (h.length < 2) {
@@ -390,9 +565,14 @@ function updateStats() {
     return;
   }
   const rows = summaryRows(state).map(([label, a, b]) => `<tr><th>${label}</th><td>${a}</td><td>${b}</td></tr>`).join('');
-  $('stats').innerHTML = '<h4>Army strength</h4>' + chartSvg(h, { title: 'Army strength over time' })
+  $('stats').innerHTML = '<h4>Army strength</h4>' + chartSvg(h, { title: 'Army strength over time', marks })
     + '<h4>Cities</h4>' + chartSvg(h, { metric: 'cities', height: 110, title: 'Cities' })
-    + `<table class="stats-table"><tr><th></th><th>${PLAYERS[0].name}</th><th>${PLAYERS[1].name}</th></tr>${rows}</table>`;
+    + `<table class="stats-table"><tr><th></th><th>${PLAYERS[0].name}</th><th>${PLAYERS[1].name}</th></tr>${rows}</table>`
+    + '<h4>War timeline</h4>' + timelineHtml(state, 0)
+    + '<h4>Hall of fame</h4>' + hall;
+  // the newest turning point is the interesting one – show the end of a long timeline
+  const tl = $('stats').querySelector('.timeline');
+  if (tl) tl.scrollTop = tl.scrollHeight;
 }
 
 function canvasPoint(ev) {
@@ -407,9 +587,24 @@ function onClick(ev) {
   const p = canvasPoint(ev);
   const hex = pickHex(p.x, p.y);
   const touch = lastPointer === 'touch' || lastPointer === 'pen';
-  const act = decideTap(state, { selectedId, pending, viewer: 0, confirm: touch }, hex.q, hex.r);
+  const act = decideTap(state, { selectedId, pending, viewer: 0, confirm: touch, rallyCityId: rallyPick, swapUnitId: swapPick }, hex.q, hex.r);
   pending = null;
   if (act.type === 'none') return;
+  if (act.type === 'swap' || act.type === 'swapCancel') {
+    swapPick = null;
+    if (touch) hover = null;
+    if (act.type === 'swap') doSwap(act.unitId, act.otherId);
+    else draw();
+    return;
+  }
+  if (act.type === 'rally' || act.type === 'rallyCancel') {
+    if (act.type === 'rally' && setRally(state, act.cityId, act.q, act.r)) { sound.play('fortify'); save(); }
+    rallyPick = null;
+    swapPick = null;
+    if (touch) hover = null;
+    draw();
+    return;
+  }
   if (act.type === 'preview') {
     // touch: show the path / attack estimate and wait for a second tap
     pending = { q: act.q, r: act.r };
@@ -506,8 +701,9 @@ function showTooltip(ev, hex) {
 
 function unitTipText(u) {
   const s = unitSummary(state, u);
-  const tags = [s.rank !== RANKS[0].name ? s.rank : '', s.fortified ? 'fortified' : '', s.marching ? 'marching' : '', s.exploring ? 'exploring' : ''].filter(Boolean);
-  return `${PLAYERS[s.owner].name}: ${s.name}${tags.length ? ` (${tags.join(', ')})` : ''} · HP ${s.hp}/${s.maxHp}\n`
+  const tags = [s.rank !== RANKS[0].name ? s.rank : '', s.fortified ? 'fortified' : '', s.marching ? 'marching' : '', s.exploring ? 'exploring' : '', s.sentry && s.owner === 0 ? (s.sentry === 'heal' ? 'resting' : 'on watch') : ''].filter(Boolean);
+  if (s.kills) tags.push(`${s.kills} kill${s.kills === 1 ? '' : 's'}`);
+  return `${PLAYERS[s.owner].name}: ${s.hero ? `${s.hero} the ${s.name}` : s.name}${tags.length ? ` (${tags.join(', ')})` : ''} · HP ${s.hp}/${s.maxHp}\n`
     + `Attack ${fmt(s.attack)} · Defense ${fmt(s.defense)}${s.notes.length ? ` (${s.notes.join(', ')})` : ''} · Range ${s.range} · Move ${s.move}`;
 }
 
@@ -516,7 +712,13 @@ function cityTipText(city) {
   const owner = city.owner === null ? 'neutral' : PLAYERS[city.owner].name;
   const gar = ci.garrison ? UNIT_TYPES[ci.garrison.type].name : 'no garrison';
   const bs = (city.buildings || []).map((b) => BUILDINGS[b].name).join(', ');
-  return `${city.name} (${owner}): +${ci.income} gold/turn · defense +${ci.defensePct} % · ${gar}${bs ? ` · ${bs}` : ''}`;
+  return `${city.name} (${owner}): +${ci.income} gold/turn · defense +${ci.defensePct} % · ${gar}${bs ? ` · ${bs}` : ''}\n${sizeText(city)}${city.owner === 0 ? `\n${tradeText(state, city)}` : ''}${city.owner === 0 && unrestText(state, city) ? `\n${unrestText(state, city)}` : ''}`;
+}
+
+// City size line: own cities also show their growth progress; for others (the AI's progress is
+// hidden in the fog) only the size is shown.
+function sizeText(city) {
+  return city.owner === 0 ? growthText(state, city) : growthText(state, city).split(' · ')[0];
 }
 
 // After a player action: save and replay what happened (before = state before the action).
@@ -566,20 +768,31 @@ function doEndTurn(force = false) {
   disarmEndTurn();
   selectedId = null;
   selectedCityId = null;
+  rallyPick = null;
+  swapPick = null;
   $('tooltip').hidden = true;
   pending = null;
   showNotice([]);
   undoStack = [];
+  const beforeEnd = cloneState(state);
   endTurn(state);
-  drainEvents(state);
+  const volleys = drainEvents(state).filter((e) => e.type === 'volley'); // the player's walls shoot
   aiRunning = true;
+  save();
   draw();
   setTimeout(async () => {
+    if (volleys.length) await anim.play(beforeEnd, volleys);
     const before = cloneState(state);
     runAITurn(state);
     const events = drainEvents(state);
     if (state.winner === null) endTurn(state);
-    const happened = drainEvents(state).filter((e) => e.type === 'happening' && e.player === 0);
+    const ended = drainEvents(state);
+    const happened = ended.filter((e) => e.type === 'happening' && e.player === 0);
+    const grew = ended.filter((e) => e.type === 'grow' && e.player === 0)
+      .map((e) => `${state.cities.find((c) => c.id === e.cityId).name} grew to size ${e.size} (+1 gold).`);
+    grew.push(...ended.filter((e) => e.type === 'calm' && e.player === 0)
+      .map((e) => `${state.cities.find((c) => c.id === e.cityId).name} has accepted your rule and pays taxes again.`));
+    events.push(...ended.filter((e) => e.type === 'volley')); // the AI's walls shoot at the end of its turn
     // the report must be made before the animation, which plays the events on top of `before`
     const report = state.winner === null ? turnReport(before, events, 0) : null;
     updateSightings(state, 0, events);
@@ -593,9 +806,9 @@ function doEndTurn(force = false) {
     save();
     if (walked.length) await anim.play(beforeOrders, walked);
     aiRunning = false;
-    const stopped = orders.filter((o) => o.result === 'interrupted' || o.result === 'blocked' || o.result === 'done')
+    const stopped = orders.filter((o) => ['interrupted', 'blocked', 'done', 'alert', 'healed'].includes(o.result))
       .map((o) => orderText(getUnit(state, o.unitId), o.result));
-    showNotice(happened, stopped, report);
+    showNotice(happened, [...grew, ...stopped], report);
     draw();
   }, 250);
 }
@@ -604,6 +817,8 @@ function doEndTurn(force = false) {
 function orderText(unit, result) {
   const name = unit ? UNIT_TYPES[unit.type].name : 'A unit';
   if (result === 'done') return `${name} has explored all the land it can reach.`;
+  if (result === 'alert') return `${name} on watch spotted an enemy nearby.`;
+  if (result === 'healed') return `${name} is fully healed and ready.`;
   return result === 'interrupted' ? `${name} stopped its march: enemy in sight.` : `${name} can't get through – order cancelled.`;
 }
 
@@ -795,15 +1010,35 @@ $('seed-current').addEventListener('click', () => { $('seed-input').value = Stri
 $('stats-panel').addEventListener('toggle', () => { statsKey = ''; updateStats(); });
 $('next-unit').addEventListener('click', selectNextUnit);
 $('army-panel').addEventListener('toggle', () => { armyKey = ''; updateArmy(); });
+$('advisor-panel').addEventListener('toggle', () => {
+  advisorKey = '';
+  savePrefs({ ...loadPrefs(), advisor: $('advisor-panel').open });
+  updateAdvisor();
+});
+$('advisor').addEventListener('click', (ev) => {
+  const tip = ev.target.closest('button[data-tip-q]');
+  if (tip) selectFromTip(tip);
+});
 $('army').addEventListener('click', (ev) => {
   const row = ev.target.closest('button[data-army]');
   if (row) selectFromArmy(Number(row.dataset.army));
 });
 $('info').addEventListener('click', (ev) => {
   if (ev.target.closest('button[data-undo]')) { undoMove(); return; }
+  if (ev.target.closest('button[data-rally]')) { startRallyPick(); return; }
+  if (ev.target.closest('button[data-rally-cancel]')) { rallyPick = null; draw(); return; }
+  if (ev.target.closest('button[data-rally-clear]')) {
+    if (!busy() && clearRally(state, selectedCityId)) { sound.play('click'); save(); }
+    draw();
+    return;
+  }
+  if (ev.target.closest('button[data-swap]')) { startSwapPick(); return; }
   if (ev.target.closest('button[data-fortify]')) { fortifySelected(); return; }
   if (ev.target.closest('button[data-explore]')) { exploreSelected(); return; }
+  if (ev.target.closest('button[data-sentry]')) { sentrySelected(); return; }
   if (ev.target.closest('button[data-pillage]')) { pillageSelected(); return; }
+  if (ev.target.closest('button[data-repair]')) { repairSelected(); return; }
+  if (ev.target.closest('button[data-road]')) { roadSelected(); return; }
   if (ev.target.closest('button[data-disband]')) { disbandSelected(); return; }
   const uBtn = ev.target.closest('button[data-upgrade]');
   if (uBtn) { upgradeSelected(uBtn.dataset.upgrade); return; }
@@ -835,13 +1070,21 @@ window.addEventListener('keydown', (ev) => {
   else if (act.type === 'undo') undoMove();
   else if (act.type === 'fortify') fortifySelected();
   else if (act.type === 'explore') exploreSelected();
+  else if (act.type === 'sentry') sentrySelected();
   else if (act.type === 'pillage') pillageSelected();
+  else if (act.type === 'repair') repairSelected();
+  else if (act.type === 'road') roadSelected();
   else if (act.type === 'disband') disbandSelected();
   else if (act.type === 'recruit') recruitSelected(act.unitType);
   else if (act.type === 'help') $('keys-dialog').showModal();
   else if (act.type === 'threats') toggleThreats();
+  else if (act.type === 'animSpeed') cycleAnimSpeed();
+  else if (act.type === 'rally') startRallyPick();
+  else if (act.type === 'swap') startSwapPick();
   else if (act.type === 'escape') {
     if (busy()) { anim.skip(); return; }
+    if (swapPick !== null) { swapPick = null; draw(); return; }
+    if (rallyPick !== null) { rallyPick = null; draw(); return; }
     selectedId = null; selectedCityId = null; pending = null; draw();
   }
 });
@@ -860,6 +1103,25 @@ function updateThreatButton() {
 $('threats').addEventListener('click', toggleThreats);
 showThreats = loadPrefs().threats === true;
 updateThreatButton();
+$('advisor-panel').open = loadPrefs().advisor !== false; // the advisor can be collapsed for good
+
+// Animation speed (A / header button): normal → fast → off; remembered in the preferences.
+function cycleAnimSpeed() {
+  animSpeed = nextAnimSpeed(animSpeed.id);
+  anim.speed = animSpeed.mult;
+  if (!animSpeed.mult) anim.skip(); // turning animations off also finishes the one running
+  savePrefs({ ...loadPrefs(), animSpeed: animSpeed.id });
+  updateAnimButton();
+}
+
+function updateAnimButton() {
+  const b = $('anim-speed');
+  b.textContent = animSpeed.icon;
+  b.setAttribute('aria-pressed', String(animSpeed.mult > 0));
+  b.title = `Animations: ${animSpeed.label} (click or A to change)`;
+}
+$('anim-speed').addEventListener('click', cycleAnimSpeed);
+updateAnimButton();
 
 // Recruits in the selected own city (number keys and the panel buttons).
 function recruitSelected(type) {
@@ -871,6 +1133,8 @@ function recruitSelected(type) {
 function selectNextUnit() {
   if (busy() || state.winner !== null) return;
   pending = null;
+  rallyPick = null;
+  swapPick = null;
   const cur = selectedUnit();
   const next = nextActiveUnit(state, 0, cur && cur.owner === 0 ? cur.id : null);
   selectedId = next ? next.id : null;
@@ -890,6 +1154,16 @@ function fortifySelected() {
   selectNextUnit();
 }
 
+// Puts the selected unit on watch (W / button in the panel) and moves on to the next unit that can act.
+function sentrySelected() {
+  if (busy() || state.winner !== null) return;
+  const u = selectedUnit();
+  if (!u || u.owner !== 0 || !sentry(state, u.id)) return;
+  save();
+  sound.play('fortify');
+  selectNextUnit();
+}
+
 // Pillages the enemy resource under the selected unit (P / button in the panel), animated.
 function pillageSelected() {
   if (busy() || state.winner !== null) return;
@@ -897,6 +1171,28 @@ function pillageSelected() {
   if (!u || u.owner !== 0 || !canPillage(state, u)) return;
   const before = cloneState(state);
   pillage(state, u.id);
+  undoStack = [];
+  afterAction(before);
+}
+
+// Repairs the own pillaged resource under the selected unit (R / button in the panel), animated.
+function repairSelected() {
+  if (busy() || state.winner !== null) return;
+  const u = selectedUnit();
+  if (!u || u.owner !== 0 || !canRepair(state, u)) return;
+  const before = cloneState(state);
+  repair(state, u.id);
+  undoStack = [];
+  afterAction(before);
+}
+
+// Lays a road under the selected unit (B / button in the panel).
+function roadSelected() {
+  if (busy() || state.winner !== null) return;
+  const u = selectedUnit();
+  if (!u || u.owner !== 0 || !canBuildRoad(state, u)) return;
+  const before = cloneState(state);
+  buildRoad(state, u.id);
   undoStack = [];
   afterAction(before);
 }
@@ -971,9 +1267,12 @@ window.__game = {
   canUndo: () => undoStack.length > 0,
   nextUnit: selectNextUnit,
   selectedId: () => selectedId,
+  rallyPicking: () => rallyPick,
+  swapPicking: () => swapPick,
   isBusy: busy,
   version: GAME_VERSION,
   setAnimSpeed: (x) => { anim.speed = x; },
+  animSpeed: () => ({ id: animSpeed.id, speed: anim.speed }),
   refresh: () => { resize(); draw(); },
   newGame: (seed, options = {}) => { state = createGame({ seed, ...options }); updateSightings(state, 0); undoStack = []; showNotice([]); resize(); draw(); },
   showNotice: (events) => { showNotice(events); draw(); },

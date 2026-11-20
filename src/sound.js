@@ -17,6 +17,11 @@ export function soundFor(ev, viewer = 0) {
     case 'spawn': return 'recruit';
     case 'ruin': return 'discover';
     case 'pillage': return ev.player === viewer ? 'pillage' : 'bane';
+    case 'repair': return 'repair';
+    case 'road': return 'build';
+    case 'volley': return 'hit';
+    case 'grow': return 'boon';
+    case 'calm': return 'boon';
     case 'happening': {
       const good = ev.kind === 'harvest' || ev.suppressed;
       return (ev.player === viewer) === good ? 'boon' : 'bane';
@@ -58,6 +63,10 @@ const SOUNDS = {
   // crackling fire and a falling groan – something is burned down
   pillage: [{ noise: true, d: 0.3, v: 0.22, f: 700 }, { noise: true, d: 0.12, v: 0.15, f: 2200, t: 0.08 },
             { f: 180, d: 0.3, v: 0.18, w: 'sawtooth', slide: 90, t: 0.05 }],
+  // three hammer knocks and a bright ring – something is rebuilt
+  repair:  [{ f: 330, d: 0.05, v: 0.2, w: 'square' }, { noise: true, d: 0.04, v: 0.12, f: 1800 },
+            { f: 330, d: 0.05, v: 0.2, w: 'square', t: 0.14 }, { noise: true, d: 0.04, v: 0.12, f: 1800, t: 0.14 },
+            { f: 392, d: 0.05, v: 0.2, w: 'square', t: 0.28 }, { f: 988, d: 0.25, v: 0.12, w: 'triangle', t: 0.32 }],
   click:   [{ f: 520, d: 0.03, v: 0.12, w: 'square' }],
   victory: [523, 659, 784, 1047].map((f, i) => ({ f, d: 0.22, v: 0.25, w: 'triangle', t: i * 0.16 })),
   defeat:  [392, 349, 311, 262].map((f, i) => ({ f, d: 0.28, v: 0.25, w: 'triangle', t: i * 0.2 })),

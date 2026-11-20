@@ -2,9 +2,9 @@
 import { key, neighbors, distance } from './hex.js';
 import { generateMap, hasRiverEdge } from './map.js';
 import {
-  TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY, VISION, DIFFICULTY, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, ROAD_COST, RIVER, FLANK, HIGH_GROUND, CHARGE,
+  TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY, VISION, DIFFICULTY, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, ROAD_COST, RIVER, FLANK, HIGH_GROUND, CHARGE, INSPIRE,
   FACTIONS, NO_FACTION, MAP_SIZES, HAPPENINGS, FORTIFY, TERRITORY, RESOURCES,
-  UPGRADES, UPGRADE, DISBAND, SIGHTINGS, RUINS, EXPLORE, PILLAGE,
+  UPGRADES, UPGRADE, DISBAND, SIGHTINGS, RUINS, EXPLORE, PILLAGE, REPAIR, ROADWORK, SENTRY, VOLLEY, ANIM_SPEEDS, HEROES, MILESTONES, ADVISOR, GROWTH, TRADE, UNREST,
 } from './rules.js';
 import { createRng } from './rng.js';
 
@@ -21,7 +21,7 @@ export function createGame({
     aiFaction = others[Math.abs(seed) % others.length];
   }
   const { tiles, cities, starts } = generateMap(seed, cols, rows, neutralCities);
-  for (const c of cities) c.buildings = [];
+  for (const c of cities) { c.buildings = []; c.size = 1; c.growth = 0; }
   const state = {
     version: STATE_VERSION,
     seed,
@@ -46,6 +46,8 @@ export function createGame({
     stats: emptyStats(),
     explored: PLAYERS.map(() => []),
     sightings: PLAYERS.map(() => []),
+    fallen: [],
+    milestones: [],
   };
   starts.forEach((s, owner) => {
     spawnUnit(state, 'warrior', owner, s.q, s.r);
@@ -128,7 +130,7 @@ function countStat(state, name, player) {
   state.stats[name][player]++;
 }
 
-export const STATE_VERSION = 20;
+export const STATE_VERSION = 27;
 
 // Converts a saved state of an older version to the current one; returns null for an unknown format.
 export function migrateState(s) {
@@ -212,6 +214,38 @@ export function migrateState(s) {
   if (s.version === 19) {
     // pillage arrived in version 20 – a missing `tile.pillagedUntil` means the resource works
     s.version = 20;
+  }
+  if (s.version === 20) {
+    // rally points arrived in version 21 – a missing `city.rally` means none
+    s.version = 21;
+  }
+  if (s.version === 21) {
+    // road building arrived in version 22 – a missing `tile.roadBuilt` means the road came with the map
+    s.version = 22;
+  }
+  if (s.version === 22) {
+    // sentry arrived in version 23 – a missing `unit.sentry` means not on watch
+    s.version = 23;
+  }
+  if (s.version === 23) {
+    // heroes arrived in version 24: veterans already in the field get their names, kills start at 0
+    s.fallen = [];
+    for (const u of [...s.units].sort((a, b) => a.id - b.id)) nameHero(s, u);
+    s.version = 24;
+  }
+  if (s.version === 24) {
+    // the war timeline arrived in version 25 – it starts empty for games already in progress
+    s.milestones = [];
+    s.version = 25;
+  }
+  if (s.version === 25) {
+    // city growth arrived in version 26 – every city starts at size 1
+    for (const c of s.cities) { c.size = 1; c.growth = 0; }
+    s.version = 26;
+  }
+  if (s.version === 26) {
+    // unrest arrived in version 27 – a missing `city.unrest` means the city is calm
+    s.version = 27;
   }
   return s.version === STATE_VERSION ? s : null;
 }
@@ -368,29 +402,45 @@ export function applyEvent(state, ev) {
   if (ev.type === 'move') {
     const u = getUnit(state, ev.unitId);
     const end = ev.path[ev.path.length - 1];
-    if (u) { u.q = end.q; u.r = end.r; delete u.fortified; }
+    if (u) { u.q = end.q; u.r = end.r; delete u.fortified; delete u.sentry; }
   } else if (ev.type === 'attack') {
     const a = getUnit(state, ev.attackerId);
     const d = getUnit(state, ev.defenderId);
     if (d) {
       d.hp = ev.defenderHp ?? d.hp - ev.damage;
       d.xp = ev.defenderXp ?? d.xp;
+      if (ev.defenderName) d.name = ev.defenderName;
+      if (ev.defenderKills) d.kills = ev.defenderKills;
     }
     if (a) {
       delete a.fortified;
+      delete a.sentry;
       a.hp = ev.attackerHp ?? a.hp - ev.counter;
       a.xp = ev.attackerXp ?? a.xp;
+      if (ev.attackerName) a.name = ev.attackerName;
+      if (ev.attackerKills) a.kills = ev.attackerKills;
     }
     if (ev.killed) removeUnit(state, ev.defenderId);
     if (ev.died) removeUnit(state, ev.attackerId);
   } else if (ev.type === 'fortify') {
     const u = getUnit(state, ev.unitId);
-    if (u) u.fortified = true;
+    if (u) { u.fortified = true; delete u.sentry; }
   } else if (ev.type === 'spawn') {
     state.units.push({ ...ev.unit });
   } else if (ev.type === 'capture') {
     const c = state.cities.find((x) => x.id === ev.cityId);
-    if (c) c.owner = ev.owner;
+    if (c) {
+      c.owner = ev.owner;
+      delete c.rally;
+      if (ev.size) { c.size = ev.size; c.growth = 0; }
+      if (ev.unrest) c.unrest = ev.unrest; else delete c.unrest;
+    }
+  } else if (ev.type === 'calm') {
+    const c = state.cities.find((x) => x.id === ev.cityId);
+    if (c) delete c.unrest;
+  } else if (ev.type === 'grow') {
+    const c = state.cities.find((x) => x.id === ev.cityId);
+    if (c) { c.size = ev.size; c.growth = 0; }
   } else if (ev.type === 'happening') {
     if (ev.gold) state.gold[ev.player] += ev.gold;
     for (const h of ev.hits || []) {
@@ -402,19 +452,34 @@ export function applyEvent(state, ev) {
     if (c && !hasBuilding(c, ev.building)) c.buildings = [...(c.buildings || []), ev.building];
   } else if (ev.type === 'upgrade') {
     const u = getUnit(state, ev.unitId);
-    if (u) { u.type = ev.to; u.hp = ev.hp; delete u.fortified; }
+    if (u) { u.type = ev.to; u.hp = ev.hp; delete u.fortified; delete u.sentry; }
   } else if (ev.type === 'ruin') {
     const t = tileAt(state, ev.q, ev.r);
     if (t) { delete t.ruin; t.ruinGone = [...ev.knownBy]; }
     if (ev.gold) state.gold[ev.player] += ev.gold;
     const u = getUnit(state, ev.unitId);
-    if (u && ev.xp !== undefined) { u.xp = ev.xp; u.hp = ev.hp; }
+    if (u && ev.xp !== undefined) { u.xp = ev.xp; u.hp = ev.hp; if (ev.name) u.name = ev.name; }
   } else if (ev.type === 'pillage') {
     const t = tileAt(state, ev.q, ev.r);
     if (t) t.pillagedUntil = ev.until;
     const u = getUnit(state, ev.unitId);
-    if (u) { u.movesLeft = 0; u.hasAttacked = true; delete u.fortified; }
+    if (u) { u.movesLeft = 0; u.hasAttacked = true; delete u.fortified; delete u.sentry; }
     if (ev.gold) state.gold[ev.player] += ev.gold;
+  } else if (ev.type === 'repair') {
+    const t = tileAt(state, ev.q, ev.r);
+    if (t) delete t.pillagedUntil;
+    const u = getUnit(state, ev.unitId);
+    if (u) { u.movesLeft = 0; u.hasAttacked = true; delete u.fortified; delete u.sentry; }
+    if (ev.gold) state.gold[ev.player] -= ev.gold;
+  } else if (ev.type === 'road') {
+    const t = tileAt(state, ev.q, ev.r);
+    if (t) { t.road = true; t.roadBuilt = true; }
+    const u = getUnit(state, ev.unitId);
+    if (u) { u.movesLeft = 0; u.hasAttacked = true; delete u.fortified; delete u.sentry; }
+    if (ev.gold) state.gold[ev.player] -= ev.gold;
+  } else if (ev.type === 'volley') {
+    const u = getUnit(state, ev.unitId);
+    if (u) u.hp = ev.hp;
   } else if (ev.type === 'disband') {
     removeUnit(state, ev.unitId); // gold is not replayed, as for recruiting and upgrades
   }
@@ -476,12 +541,198 @@ export function terrainDefense(state, unit, tile) {
 
 // City income; with state, the owner's faction bonus is included too.
 export function cityIncome(city, state = null) {
+  if (cityUnrest(city) > 0) return 0; // a restless city pays nothing to its new owner
   const base = city.capital ? ECONOMY.capitalIncome : ECONOMY.cityIncome;
   const faction = state && city.owner !== null ? factionOf(state, city.owner).cityIncome || 0 : 0;
   const market = hasBuilding(city, 'market') ? BUILDING_EFFECTS.marketIncome : 0;
   const temple = hasBuilding(city, 'temple') ? BUILDING_EFFECTS.templeIncome : 0;
   const mines = state ? cityResources(state, city).filter((t) => t.resource === 'gold' && !isPillaged(state, t)).length * RESOURCES.gold.income : 0;
-  return base + faction + market + temple + mines;
+  const trade = state && tradeRoute(state, city) === 'linked' ? TRADE.income : 0;
+  return base + faction + market + temple + mines + (citySize(city) - 1) * GROWTH.income + trade;
+}
+
+// ---------- trade routes ----------
+
+// Breadth-first search from the city along road tiles to an own capital. Own cities are links, neutral and
+// enemy cities are not; with `blockers` a tile with an enemy unit breaks the chain. `seen` (optional) collects
+// the visited road tiles – only those can matter for this route.
+function roadLinkedToCapital(state, city, blockers, seen = new Set()) {
+  seen.add(key(city.q, city.r));
+  const queue = [city];
+  for (let i = 0; i < queue.length; i++) {
+    const cur = queue[i];
+    for (const n of neighbors(cur.q, cur.r)) {
+      const k = key(n.q, n.r);
+      if (seen.has(k)) continue;
+      const t = state.tiles[k];
+      if (!t) continue;
+      const c = t.road || cityAt(state, n.q, n.r) ? cityAt(state, n.q, n.r) : null;
+      if (!t.road && !c) continue;
+      seen.add(k);
+      if (c && c.owner !== city.owner) continue;
+      if (blockers && blockers.has(k)) continue;
+      if (c && c.capital) return true;
+      queue.push(n);
+    }
+  }
+  return false;
+}
+
+// Trade route state of a city: null (neutral), 'hub' (an own capital), 'linked' (earns TRADE.income),
+// 'cut' (the road exists but enemy units stand on it) or 'none' (no road chain to an own capital).
+export function tradeRoute(state, city) {
+  if (city.owner === null) return null;
+  if (city.capital) return 'hub';
+  if (roadLinkedToCapital(state, city, tradeBlockers(state, city.owner))) return 'linked';
+  return roadLinkedToCapital(state, city, null) ? 'cut' : 'none';
+}
+
+// Tiles with units hostile to `player` (optionally leaving one unit out).
+function tradeBlockers(state, player, skipId = null) {
+  return new Set(state.units.filter((u) => u.owner !== player && u.id !== skipId).map((u) => key(u.q, u.r)));
+}
+
+// Foreign cities whose working trade route `unit` would cut by standing on tile q,r (the unit itself
+// doesn't count where it stands now). Used by the AI to pick blockade tiles.
+export function routesCutBy(state, unit, q, r) {
+  return tradeTargets(state, unit).filter((x) => x.seen.has(key(q, r)) && cutsAt(state, x, q, r)).map((x) => x.city);
+}
+
+// Foreign cities with a working route (not counting `unit`) and the road tiles their search touched.
+export function tradeTargets(state, unit) {
+  const out = [];
+  for (const c of state.cities) {
+    if (c.owner === null || c.owner === unit.owner || c.capital) continue;
+    const blockers = tradeBlockers(state, c.owner, unit.id);
+    const seen = new Set();
+    if (roadLinkedToCapital(state, c, blockers, seen)) out.push({ city: c, blockers, seen });
+  }
+  return out;
+}
+
+// Would a unit on q,r cut the route of target x (from tradeTargets)?
+export function cutsAt(state, x, q, r) {
+  const t = tileAt(state, q, r);
+  if (!t || !t.road || cityAt(state, q, r)) return false;
+  const blockers = new Set(x.blockers);
+  blockers.add(key(q, r));
+  return !roadLinkedToCapital(state, x.city, blockers);
+}
+
+// Trade route line for the city panel and tooltip (only for the viewer's own cities).
+export function tradeText(state, city) {
+  const r = tradeRoute(state, city);
+  if (r === 'hub') return 'Trade hub: roads bring gold from linked cities';
+  if (r === 'linked') return `Trade route to the capital: +${TRADE.income} gold${cityUnrest(city) ? ' once the unrest ends' : ''}`;
+  if (r === 'cut') return 'Trade route cut: an enemy blocks the road';
+  if (r === 'none') return 'No trade route: no road to the capital';
+  return '';
+}
+
+// Own cities whose trade route is cut by enemy units (for the advisor and the turn report).
+export function cutRoutes(state, player) {
+  return state.cities.filter((c) => c.owner === player && tradeRoute(state, c) === 'cut');
+}
+
+// ---------- unrest ----------
+// A city taken from another player resists its new owner: no income and no growth while `city.unrest` > 0.
+// Neutral cities join willingly. The counter drops at the start of each of the owner's turns – faster
+// with an own unit inside – so a conqueror who leaves a garrison gets the city working sooner.
+
+// Owner's turns of unrest left (0 = calm; a missing field counts as calm).
+export function cityUnrest(city) {
+  return Number.isInteger(city.unrest) && city.unrest > 0 ? city.unrest : 0;
+}
+
+// How much the unrest drops at the start of the owner's next turn.
+export function unrestCalm(state, city) {
+  const g = unitAt(state, city.q, city.r);
+  return g && g.owner === city.owner ? UNREST.garrisonCalm : 1;
+}
+
+// Owner's turns until the city is calm if the garrison situation stays as it is now (0 = calm).
+export function unrestTurnsLeft(state, city) {
+  return Math.ceil(cityUnrest(city) / unrestCalm(state, city));
+}
+
+// Unrest line for panels and tooltips ('' for a calm city).
+export function unrestText(state, city) {
+  if (!cityUnrest(city)) return '';
+  const left = unrestTurnsLeft(state, city);
+  const when = `calms in ${left} turn${left === 1 ? '' : 's'}`;
+  const g = unitAt(state, city.q, city.r);
+  const how = g && g.owner === city.owner ? 'the garrison keeps order' : 'a garrison would calm it faster';
+  return `Unrest: no income, no growth · ${when} (${how})`;
+}
+
+// At the start of a player's turn their restless cities calm down (before growth and income, so a city
+// that becomes calm pays the same turn). Returns the cities that became calm.
+export function calmCities(state, player) {
+  if (state.winner !== null) return [];
+  const calmed = [];
+  for (const city of state.cities.filter((c) => c.owner === player && cityUnrest(c) > 0)) {
+    city.unrest = Math.max(0, cityUnrest(city) - unrestCalm(state, city));
+    if (city.unrest > 0) continue;
+    delete city.unrest;
+    calmed.push(city);
+    emit(state, { type: 'calm', cityId: city.id, player });
+    addLog(state, `${PLAYERS[player].name}: ${city.name} accepted its new rulers`, { by: player, at: [city] });
+  }
+  return calmed;
+}
+
+// ---------- city growth ----------
+
+// City size 1..GROWTH.maxSize (a missing size counts as 1).
+export function citySize(city) {
+  return Number.isInteger(city.size) ? Math.min(GROWTH.maxSize, Math.max(1, city.size)) : 1;
+}
+
+// Owner's turns still needed to reach the next size (null at the largest size or for a neutral city).
+export function growthLeft(city) {
+  const size = citySize(city);
+  if (city.owner === null || size >= GROWTH.maxSize) return null;
+  return Math.max(1, GROWTH.turns[size - 1] - (city.growth || 0));
+}
+
+// An enemy unit next to the city halts its growth (a siege).
+export function citySieged(state, city) {
+  if (city.owner === null) return false;
+  return neighbors(city.q, city.r).some((n) => {
+    const u = unitAt(state, n.q, n.r);
+    return u && u.owner !== city.owner;
+  });
+}
+
+// Growth text for panels and tooltips.
+export function growthText(state, city) {
+  const size = citySize(city);
+  const base = `Size ${size}/${GROWTH.maxSize}`;
+  if (city.owner === null) return `${base} · neutral cities don't grow`;
+  if (size >= GROWTH.maxSize) return `${base} · fully grown`;
+  if (cityUnrest(city)) return `${base} · growth halted: unrest`;
+  if (citySieged(state, city)) return `${base} · growth halted: enemy at the gates`;
+  const left = growthLeft(city);
+  return `${base} · grows in ${left} turn${left === 1 ? '' : 's'}`;
+}
+
+// At the start of a player's turn their cities grow (before income, so a new size pays at once).
+// Returns the cities that grew.
+export function growCities(state, player) {
+  if (state.winner !== null) return [];
+  const grown = [];
+  for (const city of state.cities.filter((c) => c.owner === player)) {
+    const size = citySize(city);
+    if (size >= GROWTH.maxSize || citySieged(state, city) || cityUnrest(city)) continue;
+    city.growth = (city.growth || 0) + 1;
+    if (city.growth < GROWTH.turns[size - 1]) continue;
+    city.size = size + 1;
+    city.growth = 0;
+    grown.push(city);
+    emit(state, { type: 'grow', cityId: city.id, player, size: city.size });
+    addLog(state, `${PLAYERS[player].name}: ${city.name} grew to size ${city.size}`, { by: player, at: [city] });
+  }
+  return grown;
 }
 
 // Resource tiles in the city's territory.
@@ -536,6 +787,8 @@ export function cityInfo(state, city) {
     defensePct: Math.round((defMult - 1) * 100),
     heal: cityHeal(city),
     garrison: garrison && garrison.owner === city.owner ? garrison : null,
+    size: citySize(city),
+    unrest: cityUnrest(city),
   };
 }
 
@@ -648,7 +901,8 @@ export function zocTiles(state, player) {
 }
 
 // Enemy threat for the threat overlay: Map key -> number of enemy units (visible to the player) that
-// could attack the tile next turn – walking with full movement, then shooting/striking within range.
+// could attack the tile next turn – walking with full movement, then shooting/striking within range –
+// plus one for each known enemy city with walls next to it (wall volley).
 // Only explored passable tiles are returned, so the overlay doesn't reveal unknown land.
 // `know` ({ sees(q, r), knows(q, r) }) replaces the player's fog view – the AI passes its own knowledge.
 export function threatTiles(state, player, know = null) {
@@ -673,6 +927,14 @@ export function threatTiles(state, player, know = null) {
       }
     }
     for (const t of hit) out.set(t, (out.get(t) || 0) + 1);
+  }
+  // known enemy cities with walls shoot the tiles around them at the end of their owner's turn
+  for (const c of state.cities) {
+    if (c.owner === null || c.owner === player || !hasBuilding(c, 'walls') || !know.knows(c.q, c.r)) continue;
+    for (const t of Object.values(state.tiles)) {
+      if (distance(t, c) > VOLLEY.range || (t.q === c.q && t.r === c.r)) continue;
+      if (know.knows(t.q, t.r) && isPassable(state, t.q, t.r)) out.set(key(t.q, t.r), (out.get(key(t.q, t.r)) || 0) + 1);
+    }
   }
   return out;
 }
@@ -762,13 +1024,14 @@ export function setOrder(state, unitId, q, r) {
   const unit = getUnit(state, unitId);
   if (!unit || unit.owner !== state.current || state.winner !== null || !planRoute(state, unit, q, r)) return null;
   delete unit.fortified;
+  delete unit.sentry;
   unit.goto = { q, r };
   return followOrder(state, unit);
 }
 
 export function cancelOrder(state, unitId) {
   const unit = getUnit(state, unitId);
-  if (unit) { delete unit.goto; delete unit.explore; }
+  if (unit) { delete unit.goto; delete unit.explore; delete unit.sentry; }
 }
 
 // Visible enemy units within `radius` of the unit (used to interrupt move orders).
@@ -802,10 +1065,11 @@ export function followOrder(state, unit) {
   return 'moved';
 }
 
-// At the start of a player's turn: units with orders walk on. An enemy already in sight stops the order
-// before moving. Returns [{ unitId, result }].
+// At the start of a player's turn: units on watch wake up when needed ('alert' / 'healed', see
+// checkSentries), then units with orders walk on. An enemy already in sight stops the order before
+// moving. Returns [{ unitId, result }].
 export function runOrders(state, player) {
-  const out = [];
+  const out = checkSentries(state, player);
   for (const unit of state.units.filter((u) => u.owner === player && (u.goto || u.explore))) {
     if (state.winner !== null) break;
     if (enemyInSight(state, unit)) {
@@ -901,6 +1165,7 @@ export function setExplore(state, unitId) {
   const unit = getUnit(state, unitId);
   if (!canExplore(state, unit)) return null;
   delete unit.fortified;
+  delete unit.sentry;
   delete unit.goto;
   unit.explore = true;
   return followExplore(state, unit);
@@ -945,10 +1210,10 @@ export function followExplore(state, unit) {
   return moved ? 'moved' : 'idle';
 }
 
-// Own units that can still move or attack, sorted by id. Fortified units are left alone (like sleeping
-// units); they can still be selected by clicking. Used by Tab and by the end-turn reminder.
+// Own units that can still move or attack, sorted by id. Fortified units and units on watch are left
+// alone (like sleeping units); they can still be selected by clicking. Used by Tab and by the end-turn reminder.
 export function activeUnits(state, player) {
-  const canAct = (u) => !u.fortified && (u.movesLeft > 0 || attackTargets(state, u).length > 0);
+  const canAct = (u) => !u.fortified && !u.sentry && (u.movesLeft > 0 || attackTargets(state, u).length > 0);
   return state.units.filter((u) => u.owner === player && canAct(u)).sort((a, b) => a.id - b.id);
 }
 
@@ -966,13 +1231,15 @@ export const ARMY_STATUS = {
   ready:     { order: 0, label: 'ready' },
   marching:  { order: 1, label: 'marching' },
   fortified: { order: 2, label: 'fortified' },
-  done:      { order: 3, label: 'done' },
+  sentry:    { order: 3, label: 'on watch' },
+  done:      { order: 4, label: 'done' },
 };
 
 // What a unit is doing this turn: ready (can still move or attack), marching (has a move order and no
-// moves left), fortified, or done.
+// moves left), fortified, on watch (sentry), or done.
 export function unitStatus(state, unit) {
   if (unit.fortified) return 'fortified';
+  if (unit.sentry) return 'sentry';
   if (unit.movesLeft > 0 || attackTargets(state, unit).length > 0) return 'ready'; // same rule as activeUnits / Tab
   return unit.goto || unit.explore ? 'marching' : 'done';
 }
@@ -1001,7 +1268,7 @@ export function armyOverview(state, player) {
   const rows = state.units.filter((u) => u.owner === player).map((u) => {
     const t = UNIT_TYPES[u.type];
     return {
-      id: u.id, type: u.type, name: t.name, symbol: t.symbol, hp: u.hp, maxHp: t.hp,
+      id: u.id, type: u.type, name: t.name, hero: u.name || null, kills: u.kills || 0, symbol: t.symbol, hp: u.hp, maxHp: t.hp,
       rank: rankOf(u), status: unitStatus(state, u), where: unitWhere(state, u, explored),
     };
   });
@@ -1015,7 +1282,9 @@ export function armyOverview(state, player) {
 // no newly explored tile, and no foreign unit or foreign city on newly visible tiles.
 export function isUndoableMove(before, after, events, viewer) {
   if (after.winner !== null || before.current !== viewer || after.current !== viewer) return false;
-  if (events.length !== 1 || events[0].type !== 'move') return false;
+  // a single move, or the two moves of a swap
+  const isSwap = events.length === 2 && events.every((e) => e.type === 'move' && e.swap !== undefined);
+  if (!isSwap && (events.length !== 1 || events[0].type !== 'move')) return false;
   if (exploredTiles(after, viewer).size !== exploredTiles(before, viewer).size) return false;
   const wasVisible = visibleTiles(before, viewer);
   for (const k of visibleTiles(after, viewer)) {
@@ -1026,6 +1295,49 @@ export function isUndoableMove(before, after, events, viewer) {
     if ((u && u.owner !== viewer) || (c && c.owner !== viewer)) return false;
   }
   return true;
+}
+
+// ---------- sentry ----------
+// unit.sentry = 'watch' | 'heal': the unit stays where it is and is skipped by Tab, the end-turn reminder
+// and the "ready" count, until an enemy shows up near it ('heal' also ends when it is fully healed). It
+// keeps its moves, so it can still be clicked and given orders; any action wakes it.
+
+// Panel line for a unit on watch, by mode.
+export const SENTRY_TEXT = {
+  watch: `👁 On watch – Tab skips it until an enemy comes within ${SENTRY.radius} tiles`,
+  heal: `👁 Resting until healed – or until an enemy comes within ${SENTRY.radius} tiles`,
+};
+
+// Can the unit go on watch? An own unit of the current player that isn't fortified or on watch already.
+export function canSentry(state, unit) {
+  return !!unit && unit.owner === state.current && state.winner === null && !unit.fortified && !unit.sentry;
+}
+
+// Puts the unit on watch. A wounded unit rests until healed ('heal'), a healthy one just keeps watch.
+// Cancels a move or explore order. Returns the mode or null.
+export function sentry(state, unitId) {
+  const unit = getUnit(state, unitId);
+  if (!canSentry(state, unit)) return null;
+  delete unit.goto;
+  delete unit.explore;
+  unit.sentry = unit.hp < UNIT_TYPES[unit.type].hp ? 'heal' : 'watch';
+  return unit.sentry;
+}
+
+// Start of the player's turn: wakes units on watch. An enemy in sight within SENTRY.radius → 'alert';
+// a resting unit back at full HP → 'healed'. Returns [{ unitId, result }] for the banner.
+export function checkSentries(state, player) {
+  const out = [];
+  for (const unit of state.units.filter((u) => u.owner === player && u.sentry)) {
+    if (enemyInSight(state, unit, SENTRY.radius)) {
+      delete unit.sentry;
+      out.push({ unitId: unit.id, result: 'alert' });
+    } else if (unit.sentry === 'heal' && unit.hp >= UNIT_TYPES[unit.type].hp) {
+      delete unit.sentry;
+      out.push({ unitId: unit.id, result: 'healed' });
+    }
+  }
+  return out;
 }
 
 // Can the unit fortify now? Only an own unit of the current player that hasn't moved or attacked this turn.
@@ -1039,6 +1351,7 @@ export function fortify(state, unitId) {
   const unit = getUnit(state, unitId);
   if (!canFortify(state, unit)) return false;
   unit.fortified = true;
+  delete unit.sentry;
   delete unit.goto;
   delete unit.explore;
   unit.movesLeft = 0;
@@ -1069,10 +1382,142 @@ function gainXp(state, unit, amount) {
   unit.xp = (unit.xp || 0) + amount;
   if (rankOf(unit) <= before) return false;
   unit.hp = Math.min(UNIT_TYPES[unit.type].hp, unit.hp + XP.promotionHeal);
-  addLog(state, `${PLAYERS[unit.owner].name}: ${UNIT_TYPES[unit.type].name} promoted to ${RANKS[rankOf(unit)].name}`, {
-    by: unit.owner, at: [unit],
-  });
+  const was = unitTitle(unit);
+  const named = nameHero(state, unit);
+  const where = { by: unit.owner, at: [unit] };
+  addLog(state, `${PLAYERS[unit.owner].name}: ${was} promoted to ${RANKS[rankOf(unit)].name}${named ? ` – now known as ${unit.name}` : ''}`, where);
+  // the war timeline notes only each side's first hero (veterans are common later on)
+  const first = named && ![...state.units, ...(state.fallen || [])].some((u) => u !== unit && u.owner === unit.owner && u.name);
+  if (first) addMilestone(state, 'hero', unit.owner, `${cap(whose(unit.owner))} first hero: ${was} earned the name ${unit.name}`, where);
   return true;
+}
+
+// ---------- heroes ----------
+// A unit reaching HEROES.minRank gets a name (unit.name) for life; unit.kills counts its kills.
+// Named units that leave the game are remembered in state.fallen for the hall of fame.
+
+// "Aldric (Warrior)" for a named unit, "Warrior" otherwise.
+export function unitTitle(unit) {
+  const type = UNIT_TYPES[unit.type].name;
+  return unit.name ? `${unit.name} (${type})` : type;
+}
+
+// A free name for the unit, chosen from the seed and the unit id (reproducible). Names used by any
+// living or remembered unit are skipped; when all are taken, a numeral is added ("Aldric II").
+export function heroName(state, unit) {
+  const names = HEROES.names;
+  const used = new Set([...state.units, ...(state.fallen || [])].map((u) => u.name).filter(Boolean));
+  const start = Math.abs(state.seed * 31 + unit.id * 7) % names.length;
+  for (let round = 1; ; round++) {
+    const suffix = round === 1 ? '' : ` ${['', '', 'II', 'III', 'IV', 'V'][round] || round}`;
+    for (let i = 0; i < names.length; i++) {
+      const n = names[(start + i) % names.length] + suffix;
+      if (!used.has(n)) return n;
+    }
+  }
+}
+
+// Names the unit if it has earned a rank worth a name and has none yet. Returns true when it did.
+function nameHero(state, unit) {
+  if (unit.name || rankOf(unit) < HEROES.minRank) return false;
+  unit.name = heroName(state, unit);
+  return true;
+}
+
+// Remembers a named unit that leaves the game (fate: 'fell' | 'disbanded').
+function rememberHero(state, unit, fate) {
+  if (!unit.name) return;
+  if (!state.fallen) state.fallen = [];
+  state.fallen.push({ name: unit.name, type: unit.type, owner: unit.owner, xp: unit.xp || 0, kills: unit.kills || 0, fate, turn: state.turn });
+}
+
+// The player's best units of the game: living and remembered named units plus any unit with kills,
+// best first (kills, then experience, then the living). Each row: { name, type, kills, xp, rank, fate }.
+export function hallOfFame(state, player, limit = HEROES.hallSize) {
+  const living = state.units.filter((u) => u.owner === player && (u.name || u.kills))
+    .map((u) => ({ name: u.name || null, type: u.type, kills: u.kills || 0, xp: u.xp || 0, fate: 'alive', id: u.id }));
+  const gone = (state.fallen || []).filter((f) => f.owner === player)
+    .map((f) => ({ name: f.name, type: f.type, kills: f.kills, xp: f.xp, fate: f.fate, turn: f.turn }));
+  return [...living, ...gone]
+    .sort((a, b) => b.kills - a.kills || b.xp - a.xp || (a.fate === 'alive' ? 0 : 1) - (b.fate === 'alive' ? 0 : 1))
+    .slice(0, limit)
+    .map((h) => ({ ...h, rank: rankOf(h) }));
+}
+
+// ---------- war timeline ----------
+// state.milestones: [{ turn, kind, player, text, seen? }] – the turning points of the game (see MILESTONES).
+// `seen` works like in the chronicle: who witnessed it (stored only with fog). Strength leads aren't
+// stored but derived from state.history (leadChanges), so they need no bookkeeping.
+
+// "your" / "the AI's" – the owner as seen by the human player.
+export function whose(player) {
+  return PLAYERS[player].isAI ? `the ${PLAYERS[player].name}'s` : 'your';
+}
+const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+
+function addMilestone(state, kind, player, text, where = null) {
+  if (!state.milestones) state.milestones = [];
+  const m = { turn: state.turn, kind, player, text };
+  if (where && state.fog) m.seen = where.seen || seenBy(state, where);
+  state.milestones.push(m);
+  if (state.milestones.length > MILESTONES.limit) {
+    // full: forget the oldest ordinary entry, the unique turning points stay
+    const i = state.milestones.findIndex((x) => !MILESTONES.keep.includes(x.kind));
+    state.milestones.splice(i < 0 ? 0 : i, 1);
+  }
+}
+
+// Milestones of a unit kill: the game's first kill and the fall of a named hero.
+function killMilestones(state, killer, victim, where) {
+  const st = state.stats || emptyStats();
+  const kills = st.kills.reduce((a, b) => a + b, 0); // counted after this call
+  const killerName = `${whose(killer.owner)} ${unitTitle(killer)}`;
+  if (kills === 0) {
+    addMilestone(state, 'firstBlood', killer.owner, `First blood: ${killerName} destroyed ${whose(victim.owner)} ${unitTitle(victim)}`, where);
+  }
+  const k = victim.kills || 0;
+  if (victim.name && k >= MILESTONES.fallKills) {
+    addMilestone(state, 'heroFell', victim.owner, `${cap(whose(victim.owner))} hero ${victim.name} (${k} kills) fell to ${killerName}`, where);
+  }
+}
+
+// Turns where the strength lead changed hands: [{ turn, kind: 'lead', player, text }]. A side leads when
+// its army power is at least MILESTONES.leadRatio times the other's (and not tiny); in between nobody does.
+export function leadChanges(history) {
+  const out = [];
+  let leader = null;
+  for (const e of history || []) {
+    if (!Array.isArray(e.power) || e.power.length !== 2) continue;
+    const [a, b] = e.power;
+    let now = null;
+    if (Math.max(a, b) >= MILESTONES.leadMin) {
+      if (a >= b * MILESTONES.leadRatio) now = 0;
+      else if (b >= a * MILESTONES.leadRatio) now = 1;
+    }
+    if (now === null || now === leader) continue;
+    leader = now;
+    const who = PLAYERS[now].isAI ? `The ${PLAYERS[now].name}'s` : 'Your';
+    out.push({ turn: e.turn, kind: 'lead', player: now, text: `${who} army pulls ahead (${e.power[now]} : ${e.power[1 - now]})` });
+  }
+  return out;
+}
+
+// The war timeline from a player's view, oldest first: stored milestones the viewer witnessed (all of
+// them once the game is over) merged with the strength leads. Same-turn entries keep their order.
+export function timelineFor(state, viewer) {
+  const over = state.winner !== null && state.winner !== undefined;
+  const stored = (state.milestones || []).filter((m) => over || !m.seen || m.seen.includes(viewer))
+    .map(({ turn, kind, player, text }) => ({ turn, kind, player, text }));
+  const leads = leadChanges(state.history);
+  const out = [];
+  // merge by turn; a lead is measured at the start of its turn, so it comes before that turn's events
+  let i = 0;
+  for (const m of stored) {
+    while (i < leads.length && leads[i].turn <= m.turn) out.push(leads[i++]);
+    out.push(m);
+  }
+  while (i < leads.length) out.push(leads[i++]);
+  return out;
 }
 
 // Unit strength multiplier against a specific opponent (spearman vs. horseman…).
@@ -1094,8 +1539,12 @@ export function unitSummary(state, unit) {
   const city = cityAt(state, unit.q, unit.r);
   if (city && city.owner === unit.owner) notes.push(hasBuilding(city, 'walls') ? 'city with walls' : 'city');
   if (unit.fortified) notes.push('fortified');
+  const muse = inspiredBy(state, unit);
+  if (muse) notes.push(`inspired by ${muse.name} +${Math.round(INSPIRE.defBonus * 100)} %`);
   return {
     name: t.name,
+    hero: unit.name || null,
+    kills: unit.kills || 0,
     owner: unit.owner,
     hp: unit.hp,
     maxHp: t.hp,
@@ -1109,8 +1558,32 @@ export function unitSummary(state, unit) {
     fortified: !!unit.fortified,
     marching: !!unit.goto,
     exploring: !!unit.explore,
+    sentry: unit.sentry || null,
     notes,
   };
+}
+
+// The named own hero (other than the unit itself) that inspires the unit, or null. The highest-ranked
+// one, then the lowest id, so the answer is stable.
+export function inspiredBy(state, unit) {
+  let best = null;
+  for (const h of state.units) {
+    if (!h.name || h.id === unit.id || h.owner !== unit.owner || h.hp <= 0) continue;
+    if (distance(h, unit) > INSPIRE.range) continue;
+    if (!best || rankOf(h) > rankOf(best) || (rankOf(h) === rankOf(best) && h.id < best.id)) best = h;
+  }
+  return best;
+}
+
+// Own units a hero inspires (empty for a unit without a name).
+export function inspiredUnits(state, hero) {
+  if (!hero.name) return [];
+  return state.units.filter((u) => u.id !== hero.id && u.owner === hero.owner && distance(u, hero) <= INSPIRE.range);
+}
+
+// Defense bonus from a nearby hero (0 or INSPIRE.defBonus).
+export function inspireBonus(state, unit) {
+  return inspiredBy(state, unit) ? INSPIRE.defBonus : 0;
 }
 
 // Unit defense; attacker (optional) determines type bonuses and siege.
@@ -1118,6 +1591,7 @@ export function defenseValue(state, unit, attacker = null) {
   const t = tileAt(state, unit.q, unit.r);
   let d = UNIT_TYPES[unit.type].def * rankMult(unit) * (1 + terrainDefense(state, unit, t)) * vsMult(unit, attacker);
   if (unit.fortified) d *= 1 + FORTIFY.defBonus;
+  d *= 1 + inspireBonus(state, unit);
   const city = cityAt(state, unit.q, unit.r);
   if (city && city.owner === unit.owner) {
     const siege = attacker && UNIT_TYPES[attacker.type].siege;
@@ -1150,7 +1624,8 @@ export function previewAttack(state, attacker, defender) {
     const cDef = defenseValue(state, attacker, defender);
     counter = Math.max(1, Math.round((3 * cAtk) / cDef));
   }
-  return { damage, counter, kills: defenderHp === 0, dies: attacker.hp - counter <= 0, flank, high, charge };
+  const inspired = inspireBonus(state, defender);
+  return { damage, counter, kills: defenderHp === 0, dies: attacker.hp - counter <= 0, flank, high, charge, inspired };
 }
 
 function hpFactor(unit) {
@@ -1159,9 +1634,11 @@ function hpFactor(unit) {
 
 // ---------- actions (return true/false on success) ----------
 
-export function spawnUnit(state, type, owner, q, r, xp = 0) {
+// `extra` is merged into the new unit before the spawn event (e.g. a move order from a rally point).
+export function spawnUnit(state, type, owner, q, r, xp = 0, extra = {}) {
   const t = UNIT_TYPES[type];
   const unit = {
+    ...extra,
     id: state.nextUnitId++,
     type,
     owner,
@@ -1172,6 +1649,7 @@ export function spawnUnit(state, type, owner, q, r, xp = 0) {
     hasAttacked: true,
     xp,
   };
+  nameHero(state, unit); // e.g. an academy recruit starts as a Veteran
   state.units.push(unit);
   emit(state, { type: 'spawn', unit: { ...unit } });
   updateExplored(state, owner);
@@ -1190,23 +1668,80 @@ export function moveUnit(state, unitId, q, r) {
   unit.movesLeft = Math.max(0, unit.movesLeft - cost);
   unit.moved = true;
   delete unit.fortified;
+  delete unit.sentry;
   delete unit.goto; // a manual move cancels a move order (followOrder puts it back)
   delete unit.explore; // … and an explore order (followExplore puts it back)
   const city = cityAt(state, q, r);
   if (city && city.owner !== unit.owner) {
     const prev = city.owner;
     city.owner = unit.owner;
-    emit(state, { type: 'capture', cityId: city.id, owner: unit.owner });
+    delete city.rally; // the old owner's rally point means nothing to the new one
+    city.size = Math.max(1, citySize(city) - GROWTH.captureLoss); // a conquered city shrinks …
+    city.growth = 0; // … and starts growing anew
+    if (prev !== null) city.unrest = UNREST.turns; // the people of a conquered city resist (neutral ones join willingly)
+    else delete city.unrest;
+    emit(state, { type: 'capture', cityId: city.id, owner: unit.owner, size: city.size, unrest: cityUnrest(city) });
     countStat(state, 'captures', unit.owner);
     const loot = factionOf(state, unit.owner).captureGold || 0;
     state.gold[unit.owner] += loot;
-    addLog(state, `${PLAYERS[unit.owner].name}: captured ${city.name}${loot ? ` (loot ${loot} gold)` : ''}`, {
-      by: unit.owner, at: [city], also: prev === null ? [] : [prev],
-    });
+    const where = { by: unit.owner, at: [city], also: prev === null ? [] : [prev] };
+    addLog(state, `${PLAYERS[unit.owner].name}: captured ${city.name}${loot ? ` (loot ${loot} gold)` : ''}`, where);
+    const capital = city.capital && prev !== null;
+    const what = prev === null ? `neutral ${city.name}` : capital ? `${whose(prev)} capital` : `${whose(prev)} ${city.name}`;
+    addMilestone(state, capital ? 'capital' : 'capture', unit.owner, `${cap(whose(unit.owner))} ${unitTitle(unit)} took ${what}`, where);
     if (prev !== null) checkWinner(state);
   }
   if (tileAt(state, q, r).ruin && state.winner === null) exploreRuin(state, unit);
   updateExplored(state, unit.owner);
+  return true;
+}
+
+// ---------- swapping places ----------
+// Two neighbouring own units trade tiles in one step, so a fresh unit can relieve a wounded one at the
+// front line (normally the front tile is occupied and the back unit can only walk around it).
+// Both need a move left; each pays the step cost into the other's tile (a single step is always allowed
+// with any points left, as for the first step of a normal move).
+
+// Can `unit` swap places with `other` right now?
+export function canSwap(state, unit, other) {
+  if (!unit || !other || unit.id === other.id || state.winner !== null) return false;
+  if (unit.owner !== state.current || other.owner !== unit.owner) return false;
+  if (distance(unit, other) !== 1 || unit.movesLeft <= 0 || other.movesLeft <= 0) return false;
+  if (unit.hasAttacked || other.hasAttacked) return false;
+  return !cityForbidden(state, unit, other.q, other.r) && !cityForbidden(state, other, unit.q, unit.r);
+}
+
+// Own units the unit could swap with now (for the panel and the map highlight).
+export function swapPartners(state, unit) {
+  if (!unit) return [];
+  return state.units.filter((o) => canSwap(state, unit, o));
+}
+
+// Swaps the two units. Emits two one-step move events (replayable, animated, undoable like a move).
+export function swapUnits(state, unitId, otherId) {
+  const a = getUnit(state, unitId);
+  const b = getUnit(state, otherId);
+  if (!canSwap(state, a, b)) return false;
+  const pa = { q: a.q, r: a.r };
+  const pb = { q: b.q, r: b.r };
+  const costA = stepCost(state, pa, pb, a);
+  const costB = stepCost(state, pb, pa, b);
+  emit(state, { type: 'move', unitId: a.id, path: [pa, pb], swap: b.id });
+  emit(state, { type: 'move', unitId: b.id, path: [pb, pa], swap: a.id });
+  for (const [u, to, cost] of [[a, pb, costA], [b, pa, costB]]) {
+    u.q = to.q;
+    u.r = to.r;
+    u.movesLeft = Math.max(0, u.movesLeft - cost);
+    u.moved = true;
+    delete u.fortified;
+    delete u.sentry;
+    delete u.goto;
+    delete u.explore;
+  }
+  addLog(state, `${PLAYERS[a.owner].name}: ${UNIT_TYPES[a.type].name} and ${UNIT_TYPES[b.type].name} swapped places`, {
+    by: a.owner, at: [pa, pb],
+  });
+  updateExplored(state, a.owner);
   return true;
 }
 
@@ -1216,14 +1751,15 @@ export function attack(state, attackerId, defenderId) {
   if (!a || !d || a.owner !== state.current || state.winner !== null) return false;
   if (!attackTargets(state, a).includes(d)) return false;
   delete a.fortified; // attacking leaves the fortification before the fight
+  delete a.sentry;
   delete a.goto;
   const res = previewAttack(state, a, d);
   d.hp -= res.damage;
   a.hasAttacked = true;
   a.movesLeft = 0;
   a.moved = true;
-  const aName = UNIT_TYPES[a.type].name;
-  const dName = UNIT_TYPES[d.type].name;
+  const aName = unitTitle(a);
+  const dName = unitTitle(d);
   // the fight is seen by both participants and anyone who sees at least one of the tiles (computed before units are lost)
   const fight = { by: a.owner, at: [{ q: a.q, r: a.r }, { q: d.q, r: d.r }], also: [d.owner] };
   fight.seen = seenBy(state, fight);
@@ -1231,7 +1767,10 @@ export function attack(state, attackerId, defenderId) {
   emit(state, ev);
   if (d.hp <= 0) {
     removeUnit(state, d.id);
+    a.kills = (a.kills || 0) + 1;
+    rememberHero(state, d, 'fell');
     addLog(state, `${PLAYERS[a.owner].name}: ${aName} destroyed ${dName}`, fight);
+    killMilestones(state, a, d, fight);
     countStat(state, 'kills', a.owner);
     countStat(state, 'losses', d.owner);
     ev.promoted = gainXp(state, a, XP.attack + XP.kill);
@@ -1242,7 +1781,10 @@ export function attack(state, attackerId, defenderId) {
     addLog(state, `${PLAYERS[a.owner].name}: ${aName} attacks ${dName} (−${res.damage}, counter −${res.counter})`, fight);
     if (a.hp <= 0) {
       removeUnit(state, a.id);
+      d.kills = (d.kills || 0) + 1;
+      rememberHero(state, a, 'fell');
       addLog(state, `${aName} fell in battle`, fight);
+      killMilestones(state, d, a, fight);
       countStat(state, 'kills', d.owner);
       countStat(state, 'losses', a.owner);
     } else {
@@ -1255,6 +1797,10 @@ export function attack(state, attackerId, defenderId) {
   ev.attackerXp = a.xp;
   ev.defenderHp = d.hp;
   ev.defenderXp = d.xp;
+  if (a.name) ev.attackerName = a.name;
+  if (d.name) ev.defenderName = d.name;
+  if (a.kills) ev.attackerKills = a.kills;
+  if (d.kills) ev.defenderKills = d.kills;
   checkWinner(state);
   return true;
 }
@@ -1267,8 +1813,99 @@ export function buyUnit(state, cityId, type) {
   if (state.gold[state.current] < cost || unitAt(state, city.q, city.r)) return false;
   state.gold[state.current] -= cost;
   const xp = hasBuilding(city, 'academy') ? BUILDING_EFFECTS.academyXp : 0; // academy: starts as a Veteran
-  spawnUnit(state, type, state.current, city.q, city.r, xp);
+  // rally point: the recruit gets a move order there and sets off at the start of the next turn
+  const goal = rallyTarget(state, city);
+  const extra = goal ? { goto: goal } : {};
+  spawnUnit(state, type, state.current, city.q, city.r, xp, extra);
   addLog(state, `${PLAYERS[state.current].name}: recruited ${t.name} (${city.name})`, { by: state.current, at: [city] });
+  return true;
+}
+
+// ---------- rally points ----------
+// city.rally = { q, r }: units recruited in the city get a move order to that tile (see buyUnit),
+// so a stream of recruits walks to the front without a click each. Player-only comfort – the AI moves
+// its own recruits. A captured city loses its rally point.
+
+// Cheapest path from the city to (q, r) over tiles its owner has explored and that are passable;
+// units are ignored (they move). Returns [{q,r}…] including both ends, or null.
+export function rallyPath(state, city, q, r) {
+  if (!city || city.owner === null) return null;
+  const explored = exploredTiles(state, city.owner);
+  const target = key(q, r);
+  if (!explored.has(target) || !isPassable(state, q, r) || (city.q === q && city.r === r)) return null;
+  const best = new Map([[key(city.q, city.r), 0]]);
+  const parent = new Map();
+  const frontier = [{ q: city.q, r: city.r, cost: 0 }];
+  while (frontier.length) {
+    frontier.sort((a, b) => a.cost - b.cost);
+    const cur = frontier.shift();
+    if (key(cur.q, cur.r) === target) break;
+    for (const n of neighbors(cur.q, cur.r)) {
+      const k = key(n.q, n.r);
+      if (!explored.has(k) || !isPassable(state, n.q, n.r)) continue;
+      const cost = cur.cost + stepCost(state, cur, n);
+      if (best.has(k) && best.get(k) <= cost) continue;
+      best.set(k, cost);
+      parent.set(k, key(cur.q, cur.r));
+      frontier.push({ q: n.q, r: n.r, cost });
+    }
+  }
+  if (!best.has(target)) return null;
+  const path = [];
+  for (let k = target; k !== undefined; k = parent.get(k)) {
+    const [pq, pr] = k.split(',').map(Number);
+    path.unshift({ q: pq, r: pr });
+  }
+  return path;
+}
+
+// Can the current player set the rally point of this city to (q, r)? An own city, an explored
+// passable tile other than the city itself, reachable over known land.
+export function canRally(state, city, q, r) {
+  return !!city && city.owner === state.current && state.winner === null && !!rallyPath(state, city, q, r);
+}
+
+// Where a recruit of the city should march: the rally point, or – when an own unit already stands
+// there – the nearest tile around it that is free of own units and reachable (rings 1 and 2, in a
+// fixed order). null = no rally point or no room.
+export function rallyTarget(state, city) {
+  if (!city || !city.rally) return null;
+  const { q, r } = city.rally;
+  const free = (t) => {
+    const o = unitAt(state, t.q, t.r);
+    return !(o && o.owner === city.owner) && !!rallyPath(state, city, t.q, t.r);
+  };
+  if (free({ q, r })) return { q, r };
+  const seen = new Set([key(q, r)]);
+  let ring = [{ q, r }];
+  for (let d = 1; d <= 2; d++) {
+    const next = [];
+    for (const t of ring) {
+      for (const n of neighbors(t.q, t.r)) {
+        const k = key(n.q, n.r);
+        if (seen.has(k) || !tileAt(state, n.q, n.r)) continue;
+        seen.add(k);
+        next.push(n);
+      }
+    }
+    const spot = next.find(free);
+    if (spot) return { q: spot.q, r: spot.r };
+    ring = next;
+  }
+  return null;
+}
+
+export function setRally(state, cityId, q, r) {
+  const city = state.cities.find((c) => c.id === cityId);
+  if (!canRally(state, city, q, r)) return false;
+  city.rally = { q, r };
+  return true;
+}
+
+export function clearRally(state, cityId) {
+  const city = state.cities.find((c) => c.id === cityId);
+  if (!city || city.owner !== state.current || !city.rally) return false;
+  delete city.rally;
   return true;
 }
 
@@ -1305,6 +1942,7 @@ export function upgradeUnit(state, unitId, to) {
   unit.movesLeft = 0;
   unit.hasAttacked = true;
   delete unit.fortified;
+  delete unit.sentry;
   delete unit.goto;
   emit(state, { type: 'upgrade', unitId: unit.id, from, to, hp: unit.hp });
   const city = cityAt(state, unit.q, unit.r);
@@ -1334,9 +1972,10 @@ export function disbandUnit(state, unitId) {
   const refund = disbandRefund(state, unit);
   state.gold[unit.owner] += refund;
   removeUnit(state, unit.id);
+  rememberHero(state, unit, 'disbanded');
   emit(state, { type: 'disband', unitId: unit.id, owner: unit.owner, refund, q: unit.q, r: unit.r });
   const city = cityAt(state, unit.q, unit.r);
-  addLog(state, `${PLAYERS[unit.owner].name}: disbanded ${UNIT_TYPES[unit.type].name}${refund ? ` (${city.name}, +${refund} gold)` : ''}`,
+  addLog(state, `${PLAYERS[unit.owner].name}: disbanded ${unitTitle(unit)}${refund ? ` (${city.name}, +${refund} gold)` : ''}`,
     { by: unit.owner, at: [unit] });
   return refund;
 }
@@ -1357,6 +1996,7 @@ export function build(state, cityId, building) {
 
 export function endTurn(state) {
   if (state.winner !== null) return false;
+  cityVolleys(state, state.current);
   // heal units of the player ending the turn
   for (const u of state.units.filter((x) => x.owner === state.current)) {
     const city = cityAt(state, u.q, u.r);
@@ -1370,6 +2010,8 @@ export function endTurn(state) {
     recoverPillaged(state);
     recordHistory(state);
   }
+  calmCities(state, state.current);
+  growCities(state, state.current);
   state.gold[state.current] += incomeOf(state, state.current);
   for (const u of state.units.filter((x) => x.owner === state.current)) {
     u.movesLeft = unitMove(state, u);
@@ -1378,6 +2020,89 @@ export function endTurn(state) {
   }
   if (state.happenings) rollHappening(state, state.current);
   return true;
+}
+
+// ---------- animation speed (viewer preference) ----------
+
+// The speed entry for a saved preference id. Without a valid saved choice the system "reduce motion"
+// setting picks 'off', otherwise 'normal'.
+export function animSpeedOf(id, reducedMotion = false) {
+  return ANIM_SPEEDS.find((s) => s.id === id) || ANIM_SPEEDS.find((s) => s.id === (reducedMotion ? 'off' : 'normal'));
+}
+
+// The next speed after `id` (normal → fast → off → normal).
+export function nextAnimSpeed(id) {
+  const i = ANIM_SPEEDS.findIndex((s) => s.id === id);
+  return ANIM_SPEEDS[(i + 1) % ANIM_SPEEDS.length];
+}
+
+// ---------- wall volley ----------
+
+// The enemy unit a city's walls would shoot now, or null: an owned city with walls, an enemy unit within
+// VOLLEY.range that still has more than VOLLEY.minHp; the weakest first, then the lowest id.
+export function volleyTarget(state, city) {
+  if (city.owner === null || !hasBuilding(city, 'walls')) return null;
+  const targets = state.units.filter((u) => u.owner !== city.owner && distance(u, city) <= VOLLEY.range && u.hp > VOLLEY.minHp);
+  targets.sort((a, b) => a.hp - b.hp || a.id - b.id);
+  return targets[0] || null;
+}
+
+// End of the player's turn: each of their walled cities shoots once. Emits 'volley' events.
+export function cityVolleys(state, player) {
+  for (const city of state.cities.filter((c) => c.owner === player)) {
+    const u = volleyTarget(state, city);
+    if (!u) continue;
+    const damage = Math.min(VOLLEY.damage, u.hp - VOLLEY.minHp);
+    u.hp -= damage;
+    emit(state, { type: 'volley', cityId: city.id, player, unitId: u.id, victim: u.owner, damage, hp: u.hp, q: u.q, r: u.r });
+    addLog(state, `${PLAYERS[player].name}: the walls of ${city.name} hit ${UNIT_TYPES[u.type].name} (−${damage})`, {
+      by: player, also: [u.owner], at: [city],
+    });
+  }
+}
+
+// ---------- road building ----------
+// A built road works like a road from the map (tile.road) – both sides can use it; `tile.roadBuilt` only
+// remembers that it was built during the game.
+
+// Can the unit lay a road on the tile it stands on? An own unit of the current player (any kind) that hasn't
+// attacked and has moves left, on a roadless tile of its own territory that is not a city.
+// `affordable` = also checks the gold.
+export function canBuildRoad(state, unit, { affordable = true } = {}) {
+  if (!unit || unit.owner !== state.current || state.winner !== null) return false;
+  if (unit.hasAttacked || unit.movesLeft <= 0) return false;
+  const tile = tileAt(state, unit.q, unit.r);
+  if (!tile || tile.road || cityAt(state, unit.q, unit.r)) return false;
+  if (territoryOwner(state, unit.q, unit.r) !== unit.owner) return false;
+  return !affordable || state.gold[unit.owner] >= ROADWORK.gold;
+}
+
+// Own road tiles and own cities next to the tile: a new road there joins the network (used by the AI and the panel).
+export function roadLinks(state, q, r) {
+  return neighbors(q, r).filter((n) => {
+    const t = tileAt(state, n.q, n.r);
+    return t && (t.road || cityAt(state, n.q, n.r));
+  }).length;
+}
+
+// Lays a road under the unit. Returns the 'road' event or null when not allowed.
+export function buildRoad(state, unitId) {
+  const unit = getUnit(state, unitId);
+  if (!canBuildRoad(state, unit)) return null;
+  const tile = tileAt(state, unit.q, unit.r);
+  tile.road = true;
+  tile.roadBuilt = true;
+  state.gold[unit.owner] -= ROADWORK.gold;
+  unit.movesLeft = 0;
+  unit.hasAttacked = true;
+  delete unit.fortified;
+  delete unit.goto;
+  delete unit.explore;
+  delete unit.sentry;
+  const ev = { type: 'road', unitId: unit.id, player: unit.owner, q: tile.q, r: tile.r, gold: ROADWORK.gold };
+  emit(state, ev);
+  addLog(state, `${PLAYERS[unit.owner].name}: ${UNIT_TYPES[unit.type].name} built a road (−${ROADWORK.gold} gold)`, { by: unit.owner, at: [tile] });
+  return ev;
 }
 
 // ---------- pillage ----------
@@ -1427,11 +2152,45 @@ export function pillage(state, unitId) {
   delete unit.fortified;
   delete unit.goto;
   delete unit.explore;
+  delete unit.sentry;
   const ev = { type: 'pillage', unitId: unit.id, player: unit.owner, victim, q: tile.q, r: tile.r,
     resource: tile.resource, gold: PILLAGE.gold, until: tile.pillagedUntil };
   emit(state, ev);
   addLog(state, `${PLAYERS[unit.owner].name}: ${UNIT_TYPES[unit.type].name} pillaged ${RESOURCES[tile.resource].name.toLowerCase()} near ${city.name} (+${PILLAGE.gold} gold, out of use for ${PILLAGE.turns} turns)`,
     { by: unit.owner, also: [victim], at: [tile] });
+  return ev;
+}
+
+// Can the unit repair the tile it stands on? An own unit of the current player (any kind) that hasn't attacked
+// and has moves left, on a pillaged resource in its own territory. `affordable` = also checks the gold.
+export function canRepair(state, unit, { affordable = true } = {}) {
+  if (!unit || unit.owner !== state.current || state.winner !== null) return false;
+  if (unit.hasAttacked || unit.movesLeft <= 0) return false;
+  const tile = tileAt(state, unit.q, unit.r);
+  if (!tile || !tile.resource || !isPillaged(state, tile)) return false;
+  if (territoryOwner(state, unit.q, unit.r) !== unit.owner) return false;
+  return !affordable || state.gold[unit.owner] >= REPAIR.gold;
+}
+
+// Repairs the pillaged resource under the unit. Returns the 'repair' event or null when not allowed.
+export function repair(state, unitId) {
+  const unit = getUnit(state, unitId);
+  if (!canRepair(state, unit)) return null;
+  const tile = tileAt(state, unit.q, unit.r);
+  const city = state.cities.find((c) => c.id === territoryMap(state).get(key(tile.q, tile.r)));
+  const left = pillageTurnsLeft(state, tile);
+  delete tile.pillagedUntil;
+  state.gold[unit.owner] -= REPAIR.gold;
+  unit.movesLeft = 0;
+  unit.hasAttacked = true;
+  delete unit.fortified;
+  delete unit.goto;
+  delete unit.explore;
+  delete unit.sentry;
+  const ev = { type: 'repair', unitId: unit.id, player: unit.owner, q: tile.q, r: tile.r, resource: tile.resource, gold: REPAIR.gold, saved: left };
+  emit(state, ev);
+  addLog(state, `${PLAYERS[unit.owner].name}: ${UNIT_TYPES[unit.type].name} repaired ${RESOURCES[tile.resource].name.toLowerCase()} near ${city.name} (−${REPAIR.gold} gold)`,
+    { by: unit.owner, at: [tile] });
   return ev;
 }
 
@@ -1503,6 +2262,7 @@ export function exploreRuin(state, unit) {
     gainXp(state, unit, info.xp);
     ev.xp = unit.xp;
     ev.hp = unit.hp;
+    if (unit.name) ev.name = unit.name;
   }
   emit(state, ev);
   if (kind === 'recruits') spawnUnit(state, info.unit, player, spot.q, spot.r);
@@ -1589,6 +2349,7 @@ function checkWinner(state) {
     if (!hasCity) {
       state.winner = (p + 1) % PLAYERS.length;
       addLog(state, `Game over – winner: ${PLAYERS[state.winner].name}`);
+      addMilestone(state, 'victory', state.winner, `${PLAYERS[state.winner].isAI ? `The ${PLAYERS[state.winner].name}` : 'You'} won the war`);
       recordHistory(state);
       return;
     }
@@ -1665,6 +2426,8 @@ export function turnReport(before, events, viewer) {
         rep.citiesLost.push(c.name === 'Your Capital' ? 'your capital' : `the city ${c.name}`);
         rep.spots.push({ q: c.q, r: c.r, kind: 'city' });
       }
+    } else if (ev.type === 'volley' && ev.victim === viewer && ev.player !== viewer) {
+      wounded.add(ev.unitId);
     } else if (ev.type === 'disband') {
       wounded.delete(ev.unitId);
     } else if (ev.type === 'pillage' && ev.victim === viewer && ev.player !== viewer) {
@@ -1698,6 +2461,212 @@ export function reportText(rep) {
 // Whether the report contains a loss (the banner turns red).
 export function reportIsBad(rep) {
   return Object.keys(rep.lost).length > 0 || rep.citiesLost.length > 0 || rep.wounded > 0 || (rep.pillaged || 0) > 0;
+}
+
+// ---------- advisor ----------
+// A short list of hints for the player's turn – one per kind, most urgent first (ADVISOR in rules.js).
+// Uses only what the player knows: visible enemy units, explored cities and ruins. Each hint is
+// { kind, icon, text, q, r, unitId?, cityId? } – (q, r) is the tile to look at, unitId / cityId what to select.
+// Nothing for the other player's turn or after the game ends.
+
+export function adviseTurn(state, player) {
+  if (state.winner !== null || state.current !== player) return [];
+  const visible = visibleTiles(state, player);
+  const explored = exploredTiles(state, player);
+  const enemies = state.units.filter((u) => u.owner !== player && visible.has(key(u.q, u.r)));
+  const mine = state.units.filter((u) => u.owner === player).sort((a, b) => a.id - b.id);
+  const cities = state.cities.filter((c) => c.owner === player).sort((a, b) => (b.capital ? 1 : 0) - (a.capital ? 1 : 0) || a.id - b.id);
+  const gold = state.gold[player];
+  const moves = new Map(mine.filter((u) => u.movesLeft > 0).map((u) => [u.id, reachable(state, u)]));
+  const tips = [];
+  const add = (kind, text, at, extra = {}) => tips.push({ kind, icon: ADVISOR.kinds[kind].icon, text, q: at.q, r: at.r, ...extra });
+
+  // an own city with nobody in it and a visible enemy close by
+  let worst = null;
+  for (const c of cities) {
+    const guard = unitAt(state, c.q, c.r);
+    if (guard && guard.owner === player) continue;
+    for (const e of enemies) {
+      const d = distance(c, e);
+      if (d <= ADVISOR.dangerRange && (!worst || d < worst.d)) worst = { c, e, d };
+    }
+  }
+  if (worst) {
+    add('undefended', `${worst.c.name} is unguarded – an enemy ${UNIT_TYPES[worst.e.type].name} is ${worst.d} tile${worst.d === 1 ? '' : 's'} away.`,
+      worst.c, { cityId: worst.c.id });
+  }
+
+  // a sure kill without losing the attacker (weakest target first)
+  let kill = null;
+  for (const u of mine) {
+    for (const t of attackTargets(state, u)) {
+      if (!visible.has(key(t.q, t.r))) continue;
+      const p = previewAttack(state, u, t);
+      if (p.kills && !p.dies && (!kill || t.hp < kill.t.hp)) kill = { u, t };
+    }
+  }
+  if (kill) {
+    add('finish', `${unitTitle(kill.u)} can finish off the enemy ${UNIT_TYPES[kill.t.type].name} (${kill.t.hp} HP).`, kill.u, { unitId: kill.u.id });
+  }
+
+  // a badly wounded unit that enemies can reach next turn (in an own city it heals anyway)
+  const threats = enemies.length ? threatTiles(state, player) : new Map();
+  const hurt = mine.find((u) => {
+    const city = cityAt(state, u.q, u.r);
+    return u.movesLeft > 0 && !u.hasAttacked && u.hp <= UNIT_TYPES[u.type].hp * ADVISOR.woundedShare
+      && threats.has(key(u.q, u.r)) && !(city && city.owner === player);
+  });
+  if (hurt) {
+    add('wounded', `${unitTitle(hurt)} is badly wounded (${hurt.hp}/${UNIT_TYPES[hurt.type].hp} HP) and within enemy reach – pull it back to rest.`,
+      hurt, { unitId: hurt.id });
+  }
+
+  // a known foreign city a unit can walk into this turn (enemy capitals, then enemy cities, then neutral ones)
+  const targets = state.cities.filter((c) => c.owner !== player && explored.has(key(c.q, c.r)))
+    .sort((a, b) => (a.owner === null) - (b.owner === null) || (b.capital ? 1 : 0) - (a.capital ? 1 : 0) || a.id - b.id);
+  capture: for (const c of targets) {
+    for (const u of mine) {
+      if (moves.has(u.id) && moves.get(u.id).has(key(c.q, c.r))) {
+        add('capture', `${unitTitle(u)} can capture ${c.name} this turn.`, u, { unitId: u.id });
+        break capture;
+      }
+    }
+  }
+
+  // a known ruin within reach
+  ruin: for (const u of mine) {
+    for (const k of moves.get(u.id)?.keys() || []) {
+      const [q, r] = k.split(',').map(Number);
+      if (explored.has(k) && ruinBelieved(state, q, r, player)) {
+        add('ruin', `${unitTitle(u)} can explore the ruins this turn.`, u, { unitId: u.id });
+        break ruin;
+      }
+    }
+  }
+
+  // an own pillaged resource that can be repaired
+  if (gold >= REPAIR.gold) {
+    const terr = territoryMap(state);
+    const tile = Object.values(state.tiles).find((t) => t.resource && isPillaged(state, t)
+      && territoryOwner(state, t.q, t.r) === player);
+    if (tile) {
+      const city = state.cities.find((c) => c.id === terr.get(key(tile.q, tile.r)));
+      const on = unitAt(state, tile.q, tile.r);
+      const now = on && canRepair(state, on);
+      add('repair', now
+        ? `${unitTitle(on)} can repair the ${RESOURCES[tile.resource].name.toLowerCase()} near ${city.name} (${REPAIR.gold} gold).`
+        : `The ${RESOURCES[tile.resource].name.toLowerCase()} near ${city.name} is pillaged – a unit standing on it can repair it (${REPAIR.gold} gold).`,
+      tile, now ? { unitId: on.id } : {});
+    }
+  }
+
+  // a restless city without a garrison that a unit can walk into this turn (nearest unit first)
+  unrest: for (const c of cities.filter((x) => cityUnrest(x) && !unitAt(state, x.q, x.r))) {
+    const near = mine.filter((u) => moves.get(u.id)?.has(key(c.q, c.r))).sort((a, b) => distance(a, c) - distance(b, c) || a.id - b.id);
+    if (!near.length) continue;
+    add('unrest', `${c.name} is in unrest – move ${unitTitle(near[0])} in as a garrison to calm it faster.`,
+      near[0], { unitId: near[0].id, cityId: c.id });
+    break unrest;
+  }
+
+  // a trade route cut by an enemy the player can see on the road (hidden blockers stay hidden)
+  const enemyKeys = new Set(enemies.map((e) => key(e.q, e.r)));
+  for (const c of cities) {
+    if (tradeRoute(state, c) !== 'cut' || roadLinkedToCapital(state, c, enemyKeys)) continue;
+    const onRoad = enemies.filter((e) => tileAt(state, e.q, e.r).road).sort((a, b) => distance(a, c) - distance(b, c) || a.id - b.id);
+    if (!onRoad.length) continue;
+    const e = onRoad[0];
+    add('trade', `The trade route from ${c.name} is cut – drive the enemy ${UNIT_TYPES[e.type].name} off the road (+${TRADE.income} gold).`,
+      e, { cityId: c.id });
+    break;
+  }
+
+  // gold to spend: recruit in a free city (naming the suggested type), otherwise build
+  // (keeping enough for a recruit later)
+  const free = cities.find((c) => !unitAt(state, c.q, c.r)
+    && Object.keys(UNIT_TYPES).some((type) => unitCost(state, c, type) <= gold));
+  if (free) {
+    const pick = suggestRecruit(state, player, free);
+    add('recruit', `You have ${gold} gold – recruit ${withArticle(UNIT_TYPES[pick.type].name)} in ${free.name} (${pick.reason}).`,
+      free, { cityId: free.id, unitType: pick.type });
+  } else {
+    build: for (const b of ADVISOR.buildOrder) {
+      for (const c of cities) {
+        const cost = buildingCost(state, player, b);
+        if (!hasBuilding(c, b) && cost + ADVISOR.buildReserve <= gold) {
+          const name = BUILDINGS[b].name.toLowerCase();
+          const what = name.endsWith('s') ? name : `a ${name}`; // "walls", "barracks" take no article
+          add('build', `You have ${gold} gold – build ${what} in ${c.name} (${cost} gold).`, c, { cityId: c.id });
+          break build;
+        }
+      }
+    }
+  }
+
+  return tips.sort((a, b) => ADVISOR.kinds[a.kind].order - ADVISOR.kinds[b.kind].order).slice(0, ADVISOR.limit);
+}
+
+// "an Archer", "a Spearman"
+function withArticle(word) {
+  return `${/^[AEIOU]/i.test(word) ? 'an' : 'a'} ${word}`;
+}
+
+// "1 enemy horseman", "3 enemy horsemen"
+function enemyCount(n, type) {
+  const name = UNIT_TYPES[type].name.toLowerCase();
+  return `${n} enemy ${n === 1 ? name : (/man$/.test(name) ? name.replace(/man$/, 'men') : `${name}s`)}`;
+}
+
+// Recruit suggestion for an own free city: { type, reason } or null (not own, occupied, no gold).
+// Pure and fog-safe – it only looks at visible enemies and explored cities. In order:
+// spearmen against enemy horsemen nearby, a catapult for a near known enemy city (when the army has
+// none and few enemies are around), archers behind a melee line / warriors when enemies are near,
+// a scout when much of the fog is unexplored, a horseman to grab a known neutral city, else a warrior.
+// A type the player can't afford is skipped; the fallback is the cheapest affordable type.
+export function suggestRecruit(state, player, city) {
+  if (!city || state.winner !== null || city.owner !== player || unitAt(state, city.q, city.r)) return null;
+  const gold = state.gold[player];
+  const can = (type) => unitCost(state, city, type) <= gold;
+  const affordable = Object.keys(UNIT_TYPES).filter(can);
+  if (!affordable.length) return null;
+  const cfg = ADVISOR.recruit;
+  const visible = visibleTiles(state, player);
+  const explored = exploredTiles(state, player);
+  const near = state.units.filter((u) => u.owner !== player && visible.has(key(u.q, u.r)) && distance(u, city) <= cfg.range);
+  const mine = state.units.filter((u) => u.owner === player);
+  const picks = [];
+
+  const horses = near.filter((u) => u.type === 'horseman').length;
+  if (horses && horses * 2 >= near.length) picks.push(['spearman', `counters the ${enemyCount(horses, 'horseman')} nearby`]);
+
+  const siege = state.cities
+    .filter((c) => c.owner !== null && c.owner !== player && explored.has(key(c.q, c.r)) && distance(c, city) <= cfg.siegeRange)
+    .sort((a, b) => distance(a, city) - distance(b, city) || a.id - b.id)[0];
+  if (siege && near.length < 2 && !mine.some((u) => UNIT_TYPES[u.type].siege)) {
+    picks.push(['catapult', hasBuilding(siege, 'walls') ? `ignores the walls of ${siege.name}` : `strong against the garrison of ${siege.name}`]);
+  }
+
+  if (near.length) {
+    const ranged = mine.filter((u) => UNIT_TYPES[u.type].range > 1).length;
+    const melee = mine.length - ranged;
+    if (melee >= 2 && ranged * 2 < melee) picks.push(['archer', 'supports your front line from 2 tiles away']);
+    picks.push(['warrior', `a solid defender against the ${near.length} enem${near.length === 1 ? 'y' : 'ies'} nearby`]);
+  } else {
+    const unknown = 1 - explored.size / Object.keys(state.tiles).length;
+    if (state.fog !== false && unknown >= cfg.unknownShare && !mine.some((u) => u.type === 'scout')) {
+      picks.push(['scout', `${Math.round(unknown * 100)} % of the map is still unexplored`]);
+    }
+    const neutral = state.cities
+      .filter((c) => c.owner === null && explored.has(key(c.q, c.r)))
+      .sort((a, b) => distance(a, city) - distance(b, city) || a.id - b.id)[0];
+    if (neutral) picks.push(['horseman', `fast enough to take ${neutral.name}`]);
+  }
+  picks.push(['warrior', 'the cheapest all-round unit']);
+
+  const hit = picks.find(([type]) => can(type));
+  if (hit) return { type: hit[0], reason: hit[1] };
+  const cheapest = affordable.sort((a, b) => unitCost(state, city, a) - unitCost(state, city, b) || a.localeCompare(b))[0];
+  return { type: cheapest, reason: 'the best you can afford now' };
 }
 
 // ---------- save files ----------
@@ -1757,6 +2726,10 @@ export function stateProblem(s) {
   const validOwner = (o) => o === null || (isInt(o) && o >= 0 && o < PLAYERS.length);
   for (const c of s.cities) {
     if (!c || !s.tiles[key(c.q, c.r)] || !validOwner(c.owner)) return `bad city ${c && c.name}`;
+    if (c.rally !== undefined && !(c.rally && s.tiles[key(c.rally.q, c.rally.r)])) return `bad rally point of ${c.name}`;
+    if (c.size !== undefined && !(isInt(c.size) && c.size >= 1 && c.size <= GROWTH.maxSize)) return `bad size of ${c.name}`;
+    if (c.growth !== undefined && !(isInt(c.growth) && c.growth >= 0 && c.growth < 100)) return `bad growth of ${c.name}`;
+    if (c.unrest !== undefined && !(isInt(c.unrest) && c.unrest >= 0 && c.unrest <= UNREST.turns)) return `bad unrest of ${c.name}`;
   }
   const taken = new Set();
   for (const u of s.units) {
@@ -1766,6 +2739,24 @@ export function stateProblem(s) {
     if (taken.has(k)) return `two units on ${k}`;
     taken.add(k);
     if (!Number.isFinite(u.hp) || u.hp <= 0) return `unit ${u.id} has no HP`;
+    if (u.sentry !== undefined && u.sentry !== 'watch' && u.sentry !== 'heal') return `unit ${u.id} has a bad watch order`;
+    if (u.name !== undefined && !(typeof u.name === 'string' && u.name.length > 0 && u.name.length <= 40)) return `unit ${u.id} has a bad name`;
+    if (u.kills !== undefined && !(isInt(u.kills) && u.kills >= 0)) return `unit ${u.id} has bad kills`;
+  }
+  if (s.fallen !== undefined) {
+    if (!Array.isArray(s.fallen)) return 'bad hall of fame';
+    for (const f of s.fallen) {
+      if (!f || typeof f.name !== 'string' || f.name.length > 40 || !UNIT_TYPES[f.type] || !validOwner(f.owner)
+        || !isInt(f.kills) || f.kills < 0 || !isInt(f.xp) || f.xp < 0) return 'bad hall of fame';
+    }
+  }
+  if (s.milestones !== undefined) {
+    if (!Array.isArray(s.milestones) || s.milestones.length > MILESTONES.limit) return 'bad war timeline';
+    for (const m of s.milestones) {
+      if (!m || !isInt(m.turn) || m.turn < 1 || !MILESTONES.kinds[m.kind] || m.kind === 'lead' || !validOwner(m.player) || m.player === null
+        || typeof m.text !== 'string' || m.text.length > 200) return 'bad war timeline';
+      if (m.seen !== undefined && !(Array.isArray(m.seen) && m.seen.every((p) => validOwner(p) && p !== null))) return 'bad war timeline';
+    }
   }
   if (s.winner !== null && s.winner !== undefined && !validOwner(s.winner)) return 'bad winner';
   return null;

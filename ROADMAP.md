@@ -81,6 +81,31 @@ Check off `[x]` when done. Add new ideas to the end of the relevant phase or to 
 
 ## Phase 12 – economy war (own improvements)
 - [x] Pillage (🔥 / P): a unit standing on an enemy resource plunders it for gold; the resource gives its owner nothing for their next 4 turns; the AI raids nearby player resources too
+- [x] Repair (🔧 / R): an own unit standing on a pillaged resource in own territory rebuilds it for 3 gold (ends its turn), the resource works again at once; the AI walks back to repair its own
+
+## Phase 13 – logistics (own improvements)
+- [x] Rally points (🚩 / G): an own city can have a flag on a known tile; every unit recruited there gets a move order to it (or the nearest free tile next to it) and sets off at the start of the next turn; a captured city loses its flag
+- [x] Swap places (⇄ / S): two neighbouring own units with a move left trade tiles in one step, so a fresh unit can relieve a wounded one at the front; undoable like a move; the AI swaps a wounded unit pressed by an enemy with a healthy melee neighbour
+- [x] Road building (🛤 / B): a unit that hasn't attacked builds a road on a roadless tile of own territory for 4 gold (ends its turn); roads serve both sides; the AI extends its network next to roads and cities with spare gold
+
+## Phase 14 – command comfort (own improvements)
+- [x] Sentry (👁 / W): a unit keeps watch where it stands (a wounded one rests until fully healed); Tab, the end-turn reminder and the army "ready" count skip it until an enemy comes within 2 tiles at the start of your turn; the banner says who woke up and why
+- [x] Wall volley: at the end of its owner's turn a city with walls shoots the weakest adjacent enemy for 2 HP (never below 1, no counter); animated stone, chronicle, turn report, threat overlay and AI danger map count it
+- [x] Animation speed (▶ / A): header button and key cycle normal → fast → off, remembered between visits; a saved choice wins over the system "reduce motion" setting (which still makes "off" the default)
+
+## Phase 15 – war stories (own improvements)
+- [x] Heroes: a unit reaching Veteran earns a name for life, every unit counts its kills (panel, tooltip, army list, chronicle); a hall of fame in the statistics remembers each side's best units, fallen ones too (the enemy's are revealed at the end)
+- [x] Inspiration: a named hero gives own units next to it +10 % defense (also on counterattacks, heroes don't stack); shown in the tooltip, attack preview, hero panel and with gold badges when the hero is selected
+- [x] War timeline: the statistics list the game's turning points (first blood, captured cities and capitals, each side's first hero, fallen heroes with 2+ kills, strength leads, victory) with markers under the strength chart; only what you witnessed until the game ends
+
+## Phase 16 – guidance (own improvements)
+- [x] Advisor (💡 panel): up to three hints for the turn, most urgent first – an unguarded city with a visible enemy within 3 tiles, a sure kill, a badly wounded unit within enemy reach, a city or ruin reachable now, a pillaged resource to repair, gold to recruit or build with; only what the player can see; a click selects the unit or city; collapsing is remembered
+- [x] Recruit suggestion: the city panel marks a unit type that fits the situation (★) with a reason – spearmen against nearby horsemen, a catapult for a close enemy city, archers behind a melee line, a scout while the map is mostly unknown, a horseman for a neutral city; the advisor's recruit hint names it
+
+## Phase 17 – living cities (own improvements)
+- [x] City growth: a held city grows to size 2 after 5 of its owner's turns and to size 3 after 7 more (+1 gold per size above 1, dots on the tile); an enemy next to the city halts growth, a captured city loses a size; neutral cities don't grow; the AI values grown cities a bit more
+- [x] Trade routes: an own city linked to an own capital by an unbroken road chain (own cities are links, neutral/enemy cities aren't) earns +1 gold; an enemy unit on the road cuts it; built roads can link a city; the city panel shows the route, the advisor points at a visible blocker, AI melee units blockade nearby enemy roads
+- [x] Unrest: a city taken from the enemy (not a neutral one) pays no gold and doesn't grow until it calms – 4 of its new owner's turns, 2 with an own garrison inside; a flame on the roof, the city panel and tooltip count down, the advisor sends a unit in, the AI keeps its conquerors in place
 
 ## Ideas (unordered)
 - Diplomacy with multiple AIs

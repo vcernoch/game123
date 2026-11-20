@@ -100,6 +100,7 @@ try {
   await page.mouse.move(cityPt.x, cityPt.y);
   const tipText = await page.evaluate(() => !document.getElementById('tooltip').hidden && document.getElementById('tooltip').textContent);
   if (!tipText || !tipText.includes('gold/turn')) throw new Error(`city tooltip missing: ${tipText}`);
+  if (!/Size [1-3]\/3/.test(tipText)) throw new Error(`city tooltip has no size: ${tipText}`);
   // hovering a unit shows its stats
   const unitPt = await page.evaluate(async () => {
     const rnd = await import('./src/render.js');
@@ -256,6 +257,89 @@ try {
     if (!ok) throw new Error('the X key did not send the unit exploring');
   }
 
+  // sentry: the panel button puts a wounded unit to rest (eye badge, Tab moves on, end-turn count drops),
+  // W puts the next one on watch; at the start of the next turn the healed one wakes with a banner line
+  await page.evaluate(() => window.__game.newGame(31, { happenings: false }));
+  await page.evaluate(() => window.__game.nextUnit());
+  const sen0 = await page.evaluate(() => {
+    const g = window.__game;
+    const u = g.getState().units.find((x) => x.id === g.selectedId());
+    u.hp -= 1; // wounded: the button offers rest until healed
+    g.refresh();
+    return { id: u.id, label: document.getElementById('end-turn').textContent };
+  });
+  const senBtn = await page.textContent('#info button[data-sentry]');
+  if (!senBtn.includes('Rest until healed')) throw new Error(`sentry button text: ${senBtn}`);
+  await page.click('#info button[data-sentry]');
+  const sen1 = await page.evaluate((id) => {
+    const g = window.__game;
+    return { sentry: g.getState().units.find((u) => u.id === id).sentry, sel: g.selectedId(), label: document.getElementById('end-turn').textContent };
+  }, sen0.id);
+  const idle = (t) => Number((t.match(/· (\d+)/) || [0, 0])[1]);
+  if (sen1.sentry !== 'heal' || sen1.sel === sen0.id || idle(sen1.label) !== idle(sen0.label) - 1) {
+    throw new Error(`sentry did not rest the unit: ${JSON.stringify({ sen0, sen1 })}`);
+  }
+  if (sen1.sel !== null) {
+    await page.keyboard.press('w');
+    const watch = await page.evaluate((id) => window.__game.getState().units.find((u) => u.id === id).sentry, sen1.sel);
+    if (watch !== 'watch') throw new Error(`the W key did not put the unit on watch: ${watch}`);
+  }
+  await page.screenshot({ path: 'artifacts/screenshot-sentry.png' });
+  await page.evaluate(() => window.__game.endTurn());
+  await page.waitForFunction(() => !window.__game.isBusy() && window.__game.getState().current === 0, null, { timeout: 15000 });
+  const sen2 = await page.evaluate((id) => ({
+    sentry: window.__game.getState().units.find((u) => u.id === id).sentry, notice: document.getElementById('notice').textContent,
+  }), sen0.id);
+  if (sen2.sentry || !sen2.notice.includes('is fully healed and ready')) throw new Error(`the rested unit did not wake: ${JSON.stringify(sen2)}`);
+
+  // wall volley: the capital gets walls and an AI warrior next to it; ending the turn the walls shoot it
+  // (a stone flies, slowed down for the screenshot), the chronicle says so and the threat overlay marks the AI's walls
+  await page.evaluate(() => window.__game.newGame(31, { happenings: false, fog: false }));
+  const vol = await page.evaluate(async () => {
+    const g = await import('./src/game.js');
+    const { neighbors } = await import('./src/hex.js');
+    const st = window.__game.getState();
+    const cap = st.cities.find((c) => c.owner === 0 && c.capital);
+    cap.buildings = ['walls'];
+    const n = neighbors(cap.q, cap.r).find((p) => g.isPassable(st, p.q, p.r) && !g.unitAt(st, p.q, p.r) && !g.cityAt(st, p.q, p.r));
+    const foe = g.spawnUnit(st, 'warrior', 1, n.q, n.r);
+    g.drainEvents(st);
+    window.__game.refresh();
+    return { id: foe.id, city: cap.name };
+  });
+  await page.evaluate(() => window.__game.setAnimSpeed(3));
+  await page.evaluate(() => window.__game.endTurn());
+  await page.waitForTimeout(700);
+  await page.screenshot({ path: 'artifacts/screenshot-volley.png' });
+  await page.evaluate(() => window.__game.setAnimSpeed(1));
+  await page.waitForFunction(() => !window.__game.isBusy() && window.__game.getState().current === 0, null, { timeout: 15000 });
+  const volLog = await page.textContent('#log');
+  if (!volLog.includes(`the walls of ${vol.city} hit Warrior (−2)`)) throw new Error(`wall volley missing in the chronicle: ${volLog.slice(0, 300)}`);
+  const volThreat = await page.evaluate(async () => {
+    const g = await import('./src/game.js');
+    const { neighbors } = await import('./src/hex.js');
+    const st = window.__game.getState();
+    const c = st.cities.find((x) => x.owner === 1);
+    c.buildings = ['walls'];
+    const t = g.threatTiles(st, 0);
+    return neighbors(c.q, c.r).filter((p) => g.isPassable(st, p.q, p.r)).every((p) => t.get(`${p.q},${p.r}`) >= 1);
+  });
+  if (!volThreat) throw new Error('the threat overlay ignores enemy walls');
+
+  // animation speed: the header button cycles normal → fast → off (remembered), A cycles back to normal
+  const sp0 = await page.evaluate(() => window.__game.animSpeed().id);
+  await page.click('#anim-speed');
+  const sp1 = await page.evaluate(() => ({ ...window.__game.animSpeed(), icon: document.getElementById('anim-speed').textContent,
+    pref: JSON.parse(localStorage.getItem(Object.keys(localStorage).find((k) => localStorage.getItem(k).includes('animSpeed')) || 'x') || '{}').animSpeed }));
+  if (sp0 !== 'normal' || sp1.id !== 'fast' || !(sp1.speed > 0 && sp1.speed < 1) || sp1.icon !== '⏩' || sp1.pref !== 'fast') {
+    throw new Error(`animation speed button: ${JSON.stringify({ sp0, sp1 })}`);
+  }
+  await page.keyboard.press('a');
+  const sp2 = await page.evaluate(() => window.__game.animSpeed());
+  await page.keyboard.press('a');
+  const sp3 = await page.evaluate(() => window.__game.animSpeed());
+  if (sp2.id !== 'off' || sp2.speed !== 0 || sp3.id !== 'normal' || sp3.speed !== 1) throw new Error(`key A: ${JSON.stringify({ sp2, sp3 })}`);
+
   // end-turn reminder: with idle units the first press only asks, the second ends the turn
   await page.evaluate(() => window.__game.newGame(4242));
   const label0 = await page.textContent('#end-turn');
@@ -283,6 +367,10 @@ try {
   await marketBtn.click();
   const hasMarket = await page.evaluate(() => window.__game.getState().cities.find((c) => c.owner === 0 && c.capital).buildings.includes('market'));
   if (!hasMarket) throw new Error('market was not built');
+  const growth = await page.locator('.growth').first().textContent();
+  if (!/^Size 1\/3 · grows in 5 turns$/.test(growth.trim())) throw new Error(`city panel growth line wrong: ${growth}`);
+  const trade = await page.locator('.trade.hub').first().textContent().catch(() => '');
+  if (!/Trade hub/.test(trade)) throw new Error(`city panel trade line wrong: ${trade}`);
   await page.screenshot({ path: 'artifacts/screenshot-city-panel.png' });
 
   // number key recruits in the selected city (the capital must be empty first)
@@ -405,6 +493,56 @@ try {
   });
   if (opts.d !== 'hard' || opts.fog !== false || opts.seed !== 4242 || opts.open) throw new Error(`new game dialog: ${JSON.stringify(opts)}`);
 
+  // heroes: a unit promoted to Veteran by a kill gets a name, shown in the unit panel and the army list
+  await page.evaluate(() => window.__game.newGame(31, { happenings: false, fog: false }));
+  await page.evaluate(() => window.__game.nextUnit());
+  const hero = await page.evaluate(async () => {
+    const g = await import('./src/game.js');
+    const { neighbors } = await import('./src/hex.js');
+    const w = window.__game;
+    const st = w.getState();
+    const u = st.units.find((x) => x.id === w.selectedId());
+    const spot = neighbors(u.q, u.r).find((n) => g.isFree(st, n.q, n.r) && !g.cityAt(st, n.q, n.r));
+    const foe = g.spawnUnit(st, 'warrior', 1, spot.q, spot.r);
+    foe.hp = 1;
+    u.xp = 2;
+    g.attack(st, u.id, foe.id);
+    g.drainEvents(st);
+    document.getElementById('army-panel').open = true;
+    w.refresh();
+    return { name: u.name, kills: u.kills, panel: document.querySelector('#info .hero')?.textContent || '',
+      army: document.getElementById('army').textContent, info: document.getElementById('info').textContent };
+  });
+  if (!hero.name || hero.kills !== 1 || hero.panel !== hero.name || !hero.army.includes(hero.name) || !hero.info.includes('1 kill')) {
+    throw new Error(`heroes: ${JSON.stringify(hero)}`);
+  }
+  await page.screenshot({ path: 'artifacts/screenshot-hero.png' });
+  await page.evaluate(() => { document.getElementById('army-panel').open = false; });
+
+  // inspiration: an own unit next to the selected hero gets the gold badge and the tooltip names the hero
+  const muse = await page.evaluate(async () => {
+    const g = await import('./src/game.js');
+    const { neighbors } = await import('./src/hex.js');
+    const rnd = await import('./src/render.js');
+    const w = window.__game;
+    const st = w.getState();
+    const h = st.units.find((x) => x.id === w.selectedId());
+    const spot = neighbors(h.q, h.r).find((n) => g.isFree(st, n.q, n.r) && !g.cityAt(st, n.q, n.r));
+    const pal = g.spawnUnit(st, 'spearman', 0, spot.q, spot.r);
+    w.refresh();
+    const c = rnd.tileCenter(pal.q, pal.r);
+    const rect = document.getElementById('board').getBoundingClientRect();
+    const k = rect.width / rnd.canvasSize(st).w;
+    return { inspired: g.inspiredUnits(st, h).map((x) => x.id), pal: pal.id, name: h.name, x: rect.left + c.x * k, y: rect.top + c.y * k };
+  });
+  const museInfo = await page.textContent('#info');
+  if (!/Inspires \d+ units? next to it/.test(museInfo)) throw new Error(`inspiration: panel "${museInfo}"`);
+  if (!muse.inspired.includes(muse.pal)) throw new Error(`inspiration: ${JSON.stringify(muse)}`);
+  await page.screenshot({ path: 'artifacts/screenshot-inspire.png' });
+  await page.mouse.move(muse.x, muse.y);
+  const museTip = await page.textContent('#tooltip');
+  if (!museTip.includes(`inspired by ${muse.name}`)) throw new Error(`inspiration: tooltip "${museTip}"`);
+
   // game over: small map played out by the AI for both players, then the statistics screen
   await page.evaluate(async () => {
     const g = await import('./src/game.js');
@@ -420,11 +558,20 @@ try {
     banner: !document.getElementById('banner').hidden,
     statsOpen: document.getElementById('stats-panel').open,
     charts: document.querySelectorAll('#stats svg.chart').length,
+    hall: document.querySelector('#stats .hall')?.textContent || '',
+    timeline: [...document.querySelectorAll('#stats .timeline li')].map((li) => li.textContent),
+    marks: document.querySelectorAll('#stats svg.chart .mark').length,
   }));
-  if (end.winner === null || !end.banner || !end.statsOpen || end.charts !== 2) {
+  if (end.winner === null || !end.banner || !end.statsOpen || end.charts !== 2 || !end.hall || end.hall.includes('Revealed')) {
     throw new Error(`game over / statistics: ${JSON.stringify(end)}`);
   }
+  // war timeline: first blood and the victory are listed, the strength chart carries markers
+  if (!end.timeline.some((t) => t.includes('First blood')) || !/won the war/.test(end.timeline[end.timeline.length - 1] || '') || end.marks < 2) {
+    throw new Error(`war timeline: ${JSON.stringify({ timeline: end.timeline, marks: end.marks })}`);
+  }
   await page.screenshot({ path: 'artifacts/screenshot-end.png', fullPage: true });
+  await page.evaluate(() => document.querySelector('#stats .timeline').scrollIntoView());
+  await page.screenshot({ path: 'artifacts/screenshot-timeline.png' });
 
   // mobile width – no horizontal scroll
   await page.setViewportSize({ width: 390, height: 844 });
@@ -433,9 +580,13 @@ try {
   await page.screenshot({ path: 'artifacts/screenshot-mobile.png', fullPage: true });
 
   // "Same map again" on the game-over banner restarts the same map with the same settings
-  // (looted ruins and pillaged resources are the only changes a game makes to its map – undo them before comparing)
+  // (looted ruins, pillaged resources and built roads are the only changes a game makes to its map – undo them before comparing)
   const endTiles = await page.evaluate(() => JSON.stringify(Object.fromEntries(Object.entries(window.__game.getState().tiles)
-    .map(([k, t]) => { const { ruinGone, pillagedUntil, ...rest } = t; return [k, ruinGone ? { ...rest, ruin: true } : rest]; }))));
+    .map(([k, t]) => {
+      const { ruinGone, pillagedUntil, roadBuilt, ...rest } = t;
+      if (roadBuilt) delete rest.road;
+      return [k, ruinGone ? { ...rest, ruin: true } : rest];
+    }))));
   await page.click('#banner-again');
   const again = await page.evaluate(() => {
     const s = window.__game.getState();
@@ -648,6 +799,49 @@ try {
   await page.keyboard.press('Escape'); // the next sections start without a selection
   await page.click('#army-panel summary');
 
+  // advisor: an unguarded capital with an enemy close by is the first hint; clicking it selects the city;
+  // collapsing the panel is remembered
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const adv = await page.evaluate(async () => {
+    const g = await import('./src/game.js');
+    const hex = await import('./src/hex.js');
+    window.__game.newGame(54321);
+    const st = window.__game.getState();
+    const cap = st.cities.find((c) => c.owner === 0 && c.capital);
+    const taken = (t) => st.units.some((u) => u.q === t.q && u.r === t.r) || st.cities.some((c) => c.q === t.q && c.r === t.r);
+    const spots = Object.values(st.tiles).filter((t) => g.isPassable(st, t.q, t.r) && !taken(t));
+    for (const u of st.units.filter((x) => x.owner === 0 && x.q === cap.q && x.r === cap.r)) {
+      const t = spots.find((x) => hex.distance(x, cap) === 1 && !taken(x));
+      u.q = t.q; u.r = t.r;
+    }
+    const e = spots.find((x) => hex.distance(x, cap) === 2 && !taken(x));
+    g.spawnUnit(st, 'horseman', 1, e.q, e.r);
+    st.gold[0] = 30;
+    window.__game.refresh();
+    const rows = [...document.querySelectorAll('#advisor .tip-row')];
+    return { name: cap.name, open: document.getElementById('advisor-panel').open, texts: rows.map((b) => b.textContent),
+      first: rows[0]?.className, count: document.getElementById('advisor-count').textContent };
+  });
+  if (!adv.open || !/^tip-row undefended/.test(adv.first) || !adv.texts[0].includes(`${adv.name} is unguarded – an enemy Horseman is 2 tiles away.`)
+    || !adv.texts.some((t) => / recruit an? [A-Z][a-z]+ in .+ \(.+\)\./.test(t)) || adv.texts.length > 3 || !/^[1-3] hints?$/.test(adv.count)) {
+    throw new Error(`advisor: ${JSON.stringify(adv)}`);
+  }
+  await page.click('#advisor .tip-row.undefended');
+  const advInfo = await page.textContent('#info');
+  if (!advInfo.includes(adv.name)) throw new Error(`advisor: click did not select the city (${advInfo.slice(0, 120)})`);
+  const sug = await page.evaluate(() => ({ btn: [...document.querySelectorAll('#info .buy button.suggested')].map((b) => b.dataset.buy),
+    text: document.querySelector('#info .suggest')?.textContent || '' }));
+  if (sug.btn.length !== 1 || !sug.text.startsWith('★ Suggested: ') || !adv.texts.some((t) => t.includes(sug.text.slice(13).split(' – ')[0]))) {
+    throw new Error(`recruit suggestion: ${JSON.stringify(sug)}`);
+  }
+  await page.screenshot({ path: 'artifacts/screenshot-advisor.png' });
+  await page.click('#advisor-panel summary');
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem('game123-prefs') || '{}').advisor === false);
+  if (await page.evaluate(() => document.querySelectorAll('#advisor li').length)) throw new Error('advisor: a closed panel keeps rows');
+  await page.click('#advisor-panel summary');
+  await page.waitForSelector('#advisor .tip-row');
+  await page.keyboard.press('Escape');
+
   // ancient ruins: drawn on the map, described in the panel, a unit stepping on one loots it
   await page.setViewportSize({ width: 1280, height: 800 });
   const ruin = await page.evaluate(async () => {
@@ -686,6 +880,41 @@ try {
   }, ruin);
   if (looted.ruin || !looted.gone || !looted.log.includes('explored ancient ruins')) throw new Error(`ruins: not looted ${JSON.stringify(looted)}`);
   await page.keyboard.press('Escape'); // the next sections start without a selection
+
+  // unrest: a player unit walks into an AI city; the city panel shows the unrest and the roof flame is drawn
+  const riot = await page.evaluate(async () => {
+    const hex = await import('./src/hex.js');
+    const rnd = await import('./src/render.js');
+    const g = await import('./src/game.js');
+    window.__game.newGame(321, { fog: false, happenings: false });
+    const st = window.__game.getState();
+    const city = st.cities.find((c) => !c.capital);
+    city.owner = 1;
+    const u = st.units.find((x) => x.owner === 0);
+    const from = Object.values(st.tiles).find((t) => hex.distance(t, city) === 1 && g.isPassable(st, t.q, t.r)
+      && !st.units.some((x) => x.q === t.q && x.r === t.r) && !st.cities.some((c) => c.q === t.q && c.r === t.r));
+    if (!from) return { error: 'no free tile next to the city' };
+    u.q = from.q; u.r = from.r; u.movesLeft = 2; u.hasAttacked = false; delete u.fortified;
+    window.__game.refresh();
+    const rect = document.getElementById('board').getBoundingClientRect();
+    const k = rect.width / rnd.canvasSize(st).w;
+    const pt = (p) => { const c = rnd.tileCenter(p.q, p.r); return { x: rect.left + c.x * k, y: rect.top + c.y * k }; };
+    return { id: city.id, name: city.name, at: pt(city), unit: pt(u) };
+  });
+  if (riot.error) throw new Error(`unrest: ${riot.error}`);
+  await page.mouse.click(riot.unit.x, riot.unit.y);
+  await page.mouse.click(riot.at.x, riot.at.y);
+  await page.waitForFunction(() => !window.__game.isBusy(), null, { timeout: 5000 });
+  await page.mouse.move(riot.unit.x, riot.unit.y);
+  await page.mouse.move(riot.at.x, riot.at.y);
+  const riotInfo = await page.evaluate((id) => ({ unrest: window.__game.getState().cities.find((c) => c.id === id).unrest,
+    line: document.querySelector('#info .unrest')?.textContent || '', tip: document.getElementById('tooltip').textContent }), riot.id);
+  if (riotInfo.unrest !== 4 || !riotInfo.line.startsWith('✊ Unrest: no income, no growth · calms in 2 turns (the garrison keeps order)')
+    || !riotInfo.tip.includes('Unrest: no income')) {
+    throw new Error(`unrest: ${JSON.stringify(riotInfo)}`);
+  }
+  await page.screenshot({ path: 'artifacts/screenshot-unrest.png' });
+  await page.keyboard.press('Escape');
 
   // pillage: a unit on the AI's gold mine plunders it with the panel button, another one on its horses with P
   const raid = await page.evaluate(async () => {
@@ -727,6 +956,188 @@ try {
   if (!raided.log.includes('pillaged gold mine') || !raided.info.includes('Pillaged – out of use')) throw new Error(`pillage: texts ${JSON.stringify(raided)}`);
   await page.screenshot({ path: 'artifacts/screenshot-pillage.png' });
   await page.keyboard.press('Escape');
+
+  // repair: the AI's raid burned the player's gold mine; a unit standing on it repairs it with the panel button
+  const fix = await page.evaluate(async () => {
+    const g = await import('./src/game.js');
+    const rnd = await import('./src/render.js');
+    const st = window.__game.getState();
+    const cap = st.cities.find((c) => c.capital && c.owner === 0);
+    const mine = g.cityResources(st, cap).find((t) => t.resource === 'gold' || t.resource === 'horses');
+    if (!mine) return { error: 'player capital lacks a resource' };
+    mine.pillagedUntil = st.turn + 3;
+    const u = st.units.find((x) => x.owner === 0 && x.movesLeft > 0 && !x.hasAttacked)
+      || st.units.find((x) => x.owner === 0);
+    u.q = mine.q; u.r = mine.r; u.movesLeft = 2; u.hasAttacked = false; delete u.fortified;
+    window.__game.refresh();
+    const rect = document.getElementById('board').getBoundingClientRect();
+    const k = rect.width / rnd.canvasSize(st).w;
+    const c = rnd.tileCenter(mine.q, mine.r);
+    return { q: mine.q, r: mine.r, x: rect.left + c.x * k, y: rect.top + c.y * k, gold: st.gold[0] };
+  });
+  if (fix.error) throw new Error(`repair: ${fix.error}`);
+  await page.mouse.click(fix.x, fix.y);
+  if (!(await page.textContent('#info')).includes('Repair (3 gold)')) throw new Error('repair: no button in the unit panel');
+  await page.screenshot({ path: 'artifacts/screenshot-repair.png' });
+  await page.click('#info button[data-repair]');
+  await page.waitForFunction(() => !window.__game.isBusy(), null, { timeout: 5000 });
+  const fixed = await page.evaluate((f) => {
+    const st = window.__game.getState();
+    return { until: st.tiles[`${f.q},${f.r}`].pillagedUntil, gold: st.gold[0], log: document.getElementById('log').textContent };
+  }, fix);
+  if (fixed.until !== undefined || fixed.gold !== fix.gold - 3 || !fixed.log.includes('repaired')) throw new Error(`repair: not repaired ${JSON.stringify(fixed)}`);
+  await page.keyboard.press('Escape');
+
+  // rally point: select the capital, set a flag with the panel button and a click on the map,
+  // recruit with key 1 – the recruit has a move order and leaves the city at the start of the next turn
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const rally = await page.evaluate(async () => {
+    const g = await import('./src/game.js');
+    const rnd = await import('./src/render.js');
+    window.__game.newGame(31, { fog: false, happenings: false });
+    const st = window.__game.getState();
+    const cap = st.cities.find((c) => c.capital && c.owner === 0);
+    st.units = st.units.filter((u) => u.owner !== 0 || (u.q !== cap.q || u.r !== cap.r));
+    st.gold[0] = 100;
+    const hexDist = (a, b) => Math.max(Math.abs(a.q - b.q), Math.abs(a.r - b.r), Math.abs(a.q + a.r - b.q - b.r));
+    const spot = Object.values(st.tiles).find((t) => hexDist(t, cap) === 3 && g.isFree(st, t.q, t.r)
+      && !g.cityAt(st, t.q, t.r) && g.canRally(st, cap, t.q, t.r));
+    if (!spot) return { error: 'no tile for the flag' };
+    window.__game.refresh();
+    const rect = document.getElementById('board').getBoundingClientRect();
+    const k = rect.width / rnd.canvasSize(st).w;
+    const at = (p) => { const c = rnd.tileCenter(p.q, p.r); return { x: rect.left + c.x * k, y: rect.top + c.y * k }; };
+    return { cap: { q: cap.q, r: cap.r, ...at(cap) }, spot: { q: spot.q, r: spot.r, ...at(spot) } };
+  });
+  if (rally.error) throw new Error(`rally: ${rally.error}`);
+  await page.mouse.click(rally.cap.x, rally.cap.y);
+  if (!(await page.textContent('#info')).includes('Set rally point')) throw new Error('rally: no button in the city panel');
+  await page.click('#info button[data-rally]');
+  if ((await page.evaluate(() => window.__game.rallyPicking())) === null) throw new Error('rally: picking did not start');
+  // clicking the panel button may have scrolled the page (the side panel is long): scroll back, measure the flag tile again
+  Object.assign(rally.spot, await page.evaluate(async (p) => {
+    window.scrollTo(0, 0);
+    const rnd = await import('./src/render.js');
+    const rect = document.getElementById('board').getBoundingClientRect();
+    const k = rect.width / rnd.canvasSize(window.__game.getState()).w;
+    const c = rnd.tileCenter(p.q, p.r);
+    return { x: rect.left + c.x * k, y: rect.top + c.y * k };
+  }, rally.spot));
+  await page.mouse.move(rally.spot.x, rally.spot.y);
+  await page.mouse.click(rally.spot.x, rally.spot.y);
+  const flagged = await page.evaluate((r) => {
+    const st = window.__game.getState();
+    const cap = st.cities.find((c) => c.q === r.cap.q && c.r === r.cap.r);
+    return { rally: cap.rally, picking: window.__game.rallyPicking(), info: document.getElementById('info').textContent };
+  }, rally);
+  if (!flagged.rally || flagged.rally.q !== rally.spot.q || flagged.rally.r !== rally.spot.r || flagged.picking !== null) {
+    throw new Error(`rally: flag not set ${JSON.stringify(flagged)}`);
+  }
+  if (!flagged.info.includes('New units march to the flag 3 tiles away')) throw new Error(`rally: panel text ${flagged.info}`);
+  await page.keyboard.press('1');
+  const recruit = await page.evaluate((r) => {
+    const st = window.__game.getState();
+    const u = st.units.find((x) => x.owner === 0 && x.q === r.cap.q && x.r === r.cap.r);
+    return u ? { id: u.id, goto: u.goto } : null;
+  }, rally);
+  if (!recruit || !recruit.goto || recruit.goto.q !== rally.spot.q) throw new Error(`rally: recruit has no order ${JSON.stringify(recruit)}`);
+  await page.screenshot({ path: 'artifacts/screenshot-rally.png' });
+  await page.evaluate(() => window.__game.endTurn());
+  await page.waitForFunction(() => !window.__game.isBusy() && window.__game.getState().current === 0, null, { timeout: 20000 });
+  const recruitAt = await page.evaluate((id) => {
+    const u = window.__game.getState().units.find((x) => x.id === id);
+    return u && { q: u.q, r: u.r };
+  }, recruit.id);
+  if (!recruitAt || (recruitAt.q === rally.cap.q && recruitAt.r === rally.cap.r)) throw new Error(`rally: recruit did not set off ${JSON.stringify(recruitAt)}`);
+
+  // swap places: a warrior with two own neighbours – S starts picking (blue rings), a click on one of
+  // them swaps, Z undoes it
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const swap = await page.evaluate(async () => {
+    const g = await import('./src/game.js');
+    const rnd = await import('./src/render.js');
+    window.__game.newGame(31, { fog: false, happenings: false });
+    const st = window.__game.getState();
+    st.units = st.units.filter((u) => u.owner !== 0);
+    const free = (t) => t && g.isFree(st, t.q, t.r) && !g.cityAt(st, t.q, t.r) && !t.ruin;
+    const hexN = (t) => [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]].map(([dq, dr]) => st.tiles[`${t.q + dq},${t.r + dr}`]);
+    const enemy = st.units.filter((u) => u.owner === 1);
+    const far = (t) => enemy.every((e) => Math.max(Math.abs(e.q - t.q), Math.abs(e.r - t.r), Math.abs(e.q + e.r - t.q - t.r)) > 3);
+    let mid = null;
+    let ns = [];
+    for (const t of Object.values(st.tiles)) {
+      if (!free(t) || !far(t)) continue;
+      ns = hexN(t).filter(free);
+      if (ns.length >= 2) { mid = t; break; }
+    }
+    if (!mid) return { error: 'no spot' };
+    const a = g.spawnUnit(st, 'warrior', 0, mid.q, mid.r);
+    const b = g.spawnUnit(st, 'spearman', 0, ns[0].q, ns[0].r);
+    const c = g.spawnUnit(st, 'archer', 0, ns[1].q, ns[1].r);
+    for (const u of [a, b, c]) { u.movesLeft = 1; u.hasAttacked = false; }
+    g.drainEvents(st);
+    window.__game.refresh();
+    const rect = document.getElementById('board').getBoundingClientRect();
+    const k = rect.width / rnd.canvasSize(st).w;
+    const at = (p) => { const cc = rnd.tileCenter(p.q, p.r); return { x: rect.left + cc.x * k, y: rect.top + cc.y * k }; };
+    return { a: { id: a.id, q: a.q, r: a.r, ...at(a) }, b: { id: b.id, q: b.q, r: b.r, ...at(b) } };
+  });
+  if (swap.error) throw new Error(`swap: ${swap.error}`);
+  await page.mouse.click(swap.a.x, swap.a.y);
+  if (!(await page.textContent('#info')).includes('Swap places')) throw new Error('swap: no button in the unit panel');
+  await page.keyboard.press('s');
+  if ((await page.evaluate(() => window.__game.swapPicking())) !== swap.a.id) throw new Error('swap: picking did not start');
+  if (!(await page.textContent('#info')).includes('Cancel swap')) throw new Error('swap: panel does not show the picking');
+  await page.screenshot({ path: 'artifacts/screenshot-swap.png' });
+  await page.mouse.click(swap.b.x, swap.b.y);
+  await page.waitForFunction(() => !window.__game.isBusy(), null, { timeout: 10000 });
+  const swapped = await page.evaluate((sw) => {
+    const st = window.__game.getState();
+    const pos = (id) => { const u = st.units.find((x) => x.id === id); return [u.q, u.r]; };
+    return { a: pos(sw.a.id), b: pos(sw.b.id), undo: window.__game.canUndo(), picking: window.__game.swapPicking() };
+  }, swap);
+  if (swapped.a[0] !== swap.b.q || swapped.a[1] !== swap.b.r || swapped.b[0] !== swap.a.q || swapped.b[1] !== swap.a.r) {
+    throw new Error(`swap: units did not trade tiles ${JSON.stringify(swapped)}`);
+  }
+  if (!swapped.undo || swapped.picking !== null) throw new Error(`swap: undo / picking state ${JSON.stringify(swapped)}`);
+  await page.keyboard.press('z');
+  const unswapped = await page.evaluate((id) => { const u = window.__game.getState().units.find((x) => x.id === id); return [u.q, u.r]; }, swap.a.id);
+  if (unswapped[0] !== swap.a.q || unswapped[1] !== swap.a.r) throw new Error('swap: undo did not put the units back');
+
+  // road building: a warrior next to the capital builds a road with the panel button, the tile panel names it
+  const road = await page.evaluate(async () => {
+    const g = await import('./src/game.js');
+    const rnd = await import('./src/render.js');
+    window.__game.newGame(31, { fog: false, happenings: false });
+    const st = window.__game.getState();
+    st.units = st.units.filter((u) => u.owner !== 0);
+    st.gold[0] = 20;
+    const cap = st.cities.find((c) => c.capital && c.owner === 0);
+    const hexDist = (a, b) => Math.max(Math.abs(a.q - b.q), Math.abs(a.r - b.r), Math.abs(a.q + a.r - b.q - b.r));
+    const t = Object.values(st.tiles).find((x) => hexDist(x, cap) === 1 && g.isFree(st, x.q, x.r) && !x.road && !x.ruin
+      && g.territoryOwner(st, x.q, x.r) === 0);
+    if (!t) return { error: 'no tile' };
+    const u = g.spawnUnit(st, 'warrior', 0, t.q, t.r);
+    u.movesLeft = 2; u.hasAttacked = false;
+    g.drainEvents(st);
+    window.__game.refresh();
+    const rect = document.getElementById('board').getBoundingClientRect();
+    const k = rect.width / rnd.canvasSize(st).w;
+    const c = rnd.tileCenter(t.q, t.r);
+    return { q: t.q, r: t.r, x: rect.left + c.x * k, y: rect.top + c.y * k };
+  });
+  if (road.error) throw new Error(`road: ${road.error}`);
+  await page.mouse.click(road.x, road.y);
+  if (!(await page.textContent('#info')).includes('Build road (4 gold)')) throw new Error('road: no button in the unit panel');
+  await page.click('#info button[data-road]');
+  await page.waitForFunction(() => !window.__game.isBusy(), null, { timeout: 10000 });
+  const built = await page.evaluate((p) => {
+    const st = window.__game.getState();
+    const t = st.tiles[`${p.q},${p.r}`];
+    return { road: t.road, built: t.roadBuilt, gold: st.gold[0], log: document.getElementById('log').textContent };
+  }, road);
+  if (!built.road || !built.built || built.gold !== 16 || !built.log.includes('built a road')) throw new Error(`road: ${JSON.stringify(built)}`);
+  await page.screenshot({ path: 'artifacts/screenshot-road.png' });
 
   // rivers: large map without fog, hovering a river tile shows its description in the panel
   await page.setViewportSize({ width: 1280, height: 800 });

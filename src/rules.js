@@ -44,7 +44,7 @@ export const PLAYERS = [
 
 // City buildings. Each can be built once per city; they remain when the city is captured.
 export const BUILDINGS = {
-  walls:    { name: 'Walls',   cost: 20, symbol: '▣', desc: 'garrison +50 % defense' },
+  walls:    { name: 'Walls',   cost: 20, symbol: '▣', desc: 'garrison +50 % defense, shoots a besieger for 2 HP each turn' },
   market:   { name: 'Market',  cost: 25, symbol: '¤', desc: '+2 gold per turn' },
   barracks: { name: 'Barracks', cost: 20, symbol: '⚑', desc: 'recruiting 3 gold cheaper' },
   watchtower: { name: 'Watchtower', cost: 15, symbol: '♜', desc: 'the city sees 2 tiles farther' },
@@ -150,6 +150,15 @@ export const RESOURCES = {
 // nothing (no income, no discount) during its owner's next `turns` turns, then it recovers by itself.
 export const PILLAGE = { gold: 6, turns: 4 };
 
+// Repair: a unit of any kind that hasn't attacked and still has moves left, standing on a pillaged resource in its
+// own territory, can rebuild it for `gold`: the resource works again right away and the unit's turn ends.
+export const REPAIR = { gold: 3 };
+
+// Road building: a unit of any kind that hasn't attacked and still has moves left, standing on a tile of its
+// own territory without a road (not a city), can lay a road there for `gold`; the unit's turn ends.
+// The AI extends its road network only with gold above `aiReserve` and at most once per turn.
+export const ROADWORK = { gold: 4, aiReserve: 16 };
+
 // Ancient ruins: scattered over the map in pairs (one nearer each capital, about equally far, so neither
 // side is favoured). The first unit of any kind to end its move on a ruin explores it and gets one reward.
 // perPair: one pair per this many map tiles (small 1, medium 2, large 4 pairs).
@@ -181,7 +190,117 @@ export const SIGHTINGS = { maxAge: 3 };
 // as `ruinBonus` extra tiles. The order stops when an enemy comes within `enemyRadius` or nothing is left.
 export const EXPLORE = { ruinBonus: 6, enemyRadius: 2, legsPerTurn: 3 };
 
+// Wall volley: at the end of its owner's turn a city with walls shoots the weakest enemy unit within
+// `range` for `damage` HP (no counterattack). It never takes a unit below `minHp` – walls harass
+// besiegers, they don't finish them off.
+export const VOLLEY = { damage: 2, range: 1, minHp: 1 };
+
+// Animation speed (a viewer preference, not part of the game state): mult scales animation durations,
+// 0 = no animations. The header button / key A cycle through them in this order.
+export const ANIM_SPEEDS = [
+  { id: 'normal', mult: 1, icon: '▶', label: 'normal' },
+  { id: 'fast', mult: 0.4, icon: '⏩', label: 'fast' },
+  { id: 'off', mult: 0, icon: '⏸', label: 'off' },
+];
+
+// Sentry: a unit on watch is skipped by Tab and the end-turn reminder until, at the start of its owner's
+// turn, a visible enemy is within `radius` (it wakes up) – or, when it was put on watch wounded, until it
+// is fully healed ("rest until healed").
+export const SENTRY = { radius: 2 };
+
+// Heroes: a unit that reaches rank `minRank` (Veteran) gets a name of its own and keeps it for life
+// (also when retrained). Kills are counted per unit; named units that fall or are disbanded are kept
+// in `state.fallen`, so the end-of-game hall of fame remembers them. `hallSize` heroes per side are shown.
+export const HEROES = {
+  minRank: 1,
+  hallSize: 3,
+  names: [
+    'Aldric', 'Brenna', 'Corwin', 'Dagny', 'Edric', 'Freya', 'Gareth', 'Hilda', 'Ivo', 'Jorunn',
+    'Kestrel', 'Leofric', 'Maren', 'Nolan', 'Osric', 'Petra', 'Quill', 'Rowan', 'Sigrun', 'Tamsin',
+    'Ulric', 'Vesna', 'Wulfric', 'Yara', 'Bram', 'Cordelia', 'Dunstan', 'Elowen', 'Fenwick', 'Gwen',
+  ],
+};
+
+// Inspiration: a named hero steadies the own units standing next to it – they get +defBonus defense
+// (also when counterattacking). The hero itself doesn't profit and several heroes don't stack.
+export const INSPIRE = { defBonus: 0.1, range: 1 };
+
+// War timeline: the turning points of a game, kept in state.milestones and shown in the statistics
+// (list + markers on the strength chart). `lead` entries aren't stored – they are derived from history
+// when one side's army becomes at least `leadRatio` times stronger than the other's.
+export const MILESTONES = {
+  limit: 60,
+  keep: ['firstBlood', 'hero', 'capital', 'victory'], // never dropped when the list is full
+  fallKills: 2, // a fallen hero is a milestone only with at least this many kills
+  leadRatio: 1.5,
+  leadMin: 10, // ignore "leads" while both armies are tiny
+  kinds: {
+    firstBlood: { icon: '🩸', name: 'First blood' },
+    capture: { icon: '🏰', name: 'City captured' },
+    capital: { icon: '👑', name: 'Capital captured' },
+    hero: { icon: '⭐', name: 'First hero' },
+    heroFell: { icon: '✝', name: 'Famous hero fell' },
+    lead: { icon: '⚖', name: 'Lead in strength' },
+    victory: { icon: '🏆', name: 'Victory' },
+  },
+};
+
+// Advisor: a few hints for the player's turn, most urgent first (see adviseTurn in game.js).
+// Only what the player can see is used. `dangerRange` = how close a visible enemy must be to an
+// unguarded own city, `woundedShare` = HP share counted as badly wounded, `buildOrder` = which
+// building to suggest first when there is gold to spare and no free city to recruit in;
+// `buildReserve` = gold that should stay after building.
+export const ADVISOR = {
+  limit: 3,
+  dangerRange: 3,
+  woundedShare: 0.4,
+  buildReserve: 10,
+  buildOrder: ['market', 'walls', 'barracks', 'temple', 'infirmary', 'watchtower', 'academy'],
+  kinds: {
+    undefended: { icon: '🛡', order: 0 },
+    finish:     { icon: '⚔', order: 1 },
+    wounded:    { icon: '✚', order: 2 },
+    capture:    { icon: '🏰', order: 3 },
+    ruin:       { icon: '🏛', order: 4 },
+    repair:     { icon: '🔧', order: 5 },
+    unrest:     { icon: '✊', order: 5.2 },
+    trade:      { icon: '🛤', order: 5.5 },
+    recruit:    { icon: '⚑', order: 6 },
+    build:      { icon: '🔨', order: 7 },
+  },
+  // recruit suggestion: which unit type fits the situation around a city
+  // range: visible enemies this close to the city count; siegeRange: a known enemy city this close
+  // asks for a catapult; unknownShare: with this much of the map unexplored and no scout, a scout helps
+  recruit: { range: 6, siegeRange: 5, unknownShare: 0.4 },
+};
+
 export const NEUTRAL_COLOR = '#e8e2d0';
+
+// City growth: a city held by a player grows a size every few of its owner's turns (neutral cities don't).
+// `turns[i]` = owner's turns needed to grow from size i+1 to i+2; each size above 1 adds `income` gold.
+// An enemy unit standing next to the city at the start of its owner's turn halts growth that turn
+// (a siege), and a captured city drops `captureLoss` sizes and starts growing anew.
+export const GROWTH = {
+  maxSize: 3,
+  turns: [5, 7],
+  income: 1,
+  captureLoss: 1,
+  aiGoalBonus: 0.1, // the AI values a grown foreign city a bit more per size above 1
+};
+
+// Trade routes: an own city linked to an own capital by an unbroken chain of road tiles (own cities count
+// as links; neutral and enemy cities and tiles with an enemy unit break the chain) earns `income` extra gold.
+// The capital itself is the hub and earns nothing extra. Built roads join the network.
+export const TRADE = {
+  income: 1,
+};
+
+// Unrest: a city taken from another player (not a neutral one) resists its new owner for a while –
+// no income and no growth. Each of the owner's turns calms it by 1, by `garrisonCalm` with an own unit inside.
+export const UNREST = {
+  turns: 4,
+  garrisonCalm: 2,
+};
 
 export const ECONOMY = {
   startGold: 20,

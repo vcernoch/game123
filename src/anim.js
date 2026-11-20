@@ -114,6 +114,23 @@ export function createAnimator(redraw, isVisible = () => true, onShow = () => {}
     } else if (ev.type === 'pillage') {
       addFloater(tileCenter(ev.q, ev.r), `🔥 pillaged +${ev.gold}`, '#ffb36b');
       await tween(PAUSE_MS * 2, () => {});
+    } else if (ev.type === 'repair') {
+      addFloater(tileCenter(ev.q, ev.r), '🔧 repaired', '#bfe8a6');
+      await tween(PAUSE_MS * 2, () => {});
+    } else if (ev.type === 'road') {
+      addFloater(tileCenter(ev.q, ev.r), '🛤 road built', '#e8d3a6');
+      await tween(PAUSE_MS * 2, () => {});
+    } else if (ev.type === 'volley') {
+      const c = st.cities.find((x) => x.id === ev.cityId);
+      const to = tileCenter(ev.q, ev.r);
+      if (c) {
+        // a stone flies from the walls to the target
+        const from = tileCenter(c.q, c.r);
+        await tween(ATTACK_MS, (t) => { a.shot = { ...lerp(from, to, t), lift: Math.sin(Math.PI * t) * 14 }; });
+        a.shot = null;
+      }
+      addFloater(to, `−${ev.damage} ▣`, '#ff8a5b');
+      await tween(PAUSE_MS, () => {});
     } else if (ev.type === 'disband') {
       addFloater(tileCenter(ev.q, ev.r), ev.refund ? `✖ disbanded +${ev.refund}` : '✖ disbanded', '#e8e2d0');
       await tween(PAUSE_MS, () => {});
@@ -151,7 +168,8 @@ export function createAnimator(redraw, isVisible = () => true, onShow = () => {}
     if (ev.type === 'capture') return see(st.cities.find((c) => c.id === ev.cityId));
     if (ev.type === 'spawn') return see(ev.unit);
     if (ev.type === 'fortify' || ev.type === 'upgrade') return see(getUnit(st, ev.unitId));
-    if (ev.type === 'disband' || ev.type === 'ruin' || ev.type === 'pillage') return see(ev);
+    if (ev.type === 'volley') return see(ev) || see(st.cities.find((c) => c.id === ev.cityId));
+    if (ev.type === 'disband' || ev.type === 'ruin' || ev.type === 'pillage' || ev.type === 'repair' || ev.type === 'road') return see(ev);
     return true;
   }
 
@@ -164,6 +182,6 @@ export function createAnimator(redraw, isVisible = () => true, onShow = () => {}
   }
 
   a.skip = () => { if (a.busy) a.skipping = true; };
-  a.view = () => ({ unitPos: a.unitPos, floaters: floaterView() });
+  a.view = () => ({ unitPos: a.unitPos, floaters: floaterView(), shot: a.shot || null });
   return a;
 }

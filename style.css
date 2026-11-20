@@ -62,6 +62,9 @@ aside p { margin: 4px 0; }
 .hint { color: var(--muted); }
 .tag { font-size: 11px; padding: 1px 6px; border-radius: 4px; color: #fff; vertical-align: middle; }
 .buy { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.buy button.suggested { outline: 2px solid var(--text); outline-offset: 2px; }
+.buy .star { color: inherit; }
+.suggest { font-size: 0.9em; }
 .buy button { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 0 8px; text-align: left; }
 .buy .desc { flex-basis: 100%; font-weight: 400; color: var(--muted); }
 aside h4 { margin: 10px 0 0; font-size: 13px; color: var(--muted); font-weight: 600; }
@@ -134,6 +137,8 @@ fieldset .seed-row + small { margin-left: 0; }
   .board-wrap.zoomed canvas { width: var(--zoom-w, 820px); max-width: none; }
 }
 .undo-btn, .wide-btn { width: 100%; margin-top: 10px; }
+.row-btns { display: flex; gap: 8px; margin-top: 10px; }
+.row-btns button { flex: 1; }
 .fortified { color: #cfe3ff; }
 .pillaged { color: #ffb36b; }
 #end-turn.armed { background: #e07a3a; color: #fff; }
@@ -141,7 +146,12 @@ fieldset .seed-row + small { margin-left: 0; }
 .disband.armed { background: #c0392b; color: #fff; }
 .order { color: #ffe27a; }
 .charge { color: #ffb74d; font-weight: 600; }
+.inspire { color: #f2c94c; }
 .resource { color: #f2c94c; }
+.trade.linked { color: #9fd89f; }
+.trade.cut { color: #ff9b8a; }
+.trade.none { opacity: 0.75; }
+.unrest { color: #ffb36b; }
 .resource.ruin { color: #d9cbff; }
 kbd { font: 600 11px ui-monospace, monospace; background: #3c434f; color: var(--text); border-radius: 4px; padding: 1px 5px; border-bottom: 2px solid #20242c; }
 .hotkey { margin-right: 4px; opacity: 0.85; }
@@ -156,7 +166,13 @@ kbd { font: 600 11px ui-monospace, monospace; background: #3c434f; color: var(--
 #file-status { margin: 8px 0 0; font-size: 14px; overflow-wrap: anywhere; }
 #file-status.ok { color: #8fd18f; }
 #file-status.bad { color: #ff9a8a; }
-#army-count { font-weight: 400; margin-left: 4px; }
+#army-count, #advisor-count { font-weight: 400; margin-left: 4px; }
+#advisor { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.tip-row { width: 100%; display: grid; grid-template-columns: 24px minmax(0, 1fr); align-items: start; gap: 8px; padding: 6px 8px;
+  text-align: left; font-weight: 400; font-size: 13px; line-height: 1.35; background: #2b3039; color: var(--text); border: 1px solid transparent; overflow-wrap: anywhere; }
+.tip-row .ic { text-align: center; }
+.tip-row.undefended, .tip-row.wounded { border-color: #a5523f; }
+.tip-row.finish { border-color: #8a7330; }
 #army { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; max-height: 260px; overflow-y: auto; }
 .army-row { width: 100%; display: grid; grid-template-columns: 28px minmax(0, 1fr) auto auto; align-items: center; gap: 8px;
   padding: 5px 8px; text-align: left; font-weight: 400; background: #2b3039; color: var(--text); border: 1px solid transparent; }
@@ -169,5 +185,24 @@ kbd { font: 600 11px ui-monospace, monospace; background: #3c434f; color: var(--
 .army-row.ready .st { background: #e0b44a; color: #1d2128; font-weight: 600; }
 .army-row.marching .st { color: #ffe27a; }
 .army-row.fortified .st { color: #cfe3ff; }
+.army-row.sentry .st { color: #b9f0d0; }
+.sentry { color: #b9f0d0; }
 .army-row.done { opacity: 0.6; }
 .army-row.sel { border-color: var(--accent); }
+.hall { display: grid; grid-template-columns: 1fr; gap: 6px; font-size: 13px; }
+.hall h5 { margin: 0 0 2px; font-size: 13px; }
+.hall ol { margin: 0; padding-left: 18px; }
+.hall li { margin: 2px 0; }
+.hall li.gone { opacity: 0.7; }
+.hall small { color: var(--muted); }
+.timeline { list-style: none; margin: 0 0 6px; padding: 0; font-size: 12.5px; max-height: 260px; overflow-y: auto; }
+.timeline li { display: flex; align-items: baseline; gap: 5px; padding: 2px 0; border-bottom: 1px solid #ffffff10; overflow-wrap: anywhere; }
+.timeline .ms-turn { flex: 0 0 30px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.timeline .ms-dot { flex: 0 0 8px; height: 8px; border-radius: 50%; align-self: flex-start; margin-top: 5px; }
+.timeline .ms-icon { flex: 0 0 auto; }
+.timeline .ms-text { flex: 1 1 auto; min-width: 0; }
+.timeline li.ms-victory, .timeline li.ms-capital { font-weight: 600; }
+.timeline li.ms-lead { color: var(--muted); font-style: italic; }
+svg.chart .mark { stroke: #1d2128; stroke-width: 0.8; }
+.hero { color: #e8b84a; font-weight: 700; }
+.army-row .nm small.ty { display: inline; font-size: 11px; }

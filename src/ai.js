@@ -3,9 +3,10 @@ import { distance, key } from './hex.js';
 import {
   reachable, attackTargets, previewAttack, moveUnit, attack, buyUnit,
   unitAt, getUnit, tileAt, fortify, difficultyOf, visibleTiles, exploredTiles, build, hasBuilding, unitCost, buildingCost, factionOf,
-  threatTiles, cityAt, upgradeOptions, upgradeUnit, ruinBelieved, canPillage, pillage, isPillaged, territoryOwner,
+  threatTiles, cityAt, upgradeOptions, upgradeUnit, ruinBelieved, canPillage, pillage, isPillaged, repair, pillageTurnsLeft, territoryOwner,
+  swapPartners, swapUnits, canBuildRoad, buildRoad, roadLinks, citySize, tradeTargets, cutsAt, cityUnrest,
 } from './game.js';
-import { UNIT_TYPES, TERRAIN } from './rules.js';
+import { UNIT_TYPES, TERRAIN, ROADWORK, GROWTH } from './rules.js';
 
 // What the AI knows about the map. On hard it sees everything, otherwise only what it has explored and sees.
 export function aiKnowledge(state, me) {
@@ -36,23 +37,44 @@ export function runAITurn(state) {
     if (garrisons.has(id)) {
       holdCity(state, unit, garrisons.get(id));
     } else if (isWounded(unit) && enemiesNear(state, unit, know, 3).length) {
-      retreat(state, unit, know, danger.get());
+      relieveWounded(state, unit, know, garrisons);
+      const u = getUnit(state, id);
+      if (u) retreat(state, u, know, danger.get());
     } else {
       const melee = UNIT_TYPES[unit.type].range === 1;
       const plan = planStrike(state, unit, know, danger.get(), melee ? { lineUp: lined } : {});
       if (plan && typeof plan === 'object') { lined.push(plan); continue; }
       if (plan) continue;
       if (tryBestAttack(state, unit)) continue;
-      if (pillage(state, unit.id)) continue; // already standing on an enemy resource
+      if (pillage(state, unit.id) || repair(state, unit.id)) continue; // already standing on an enemy / own pillaged resource
       moveTowardsGoal(state, unit, danger.get());
       const after = getUnit(state, id);
-      if (after && !tryBestAttack(state, after)) pillage(state, after.id);
+      if (after && !tryBestAttack(state, after) && !pillage(state, after.id)) repair(state, after.id);
     }
   }
   strikeLinedUp(state, lined);
   if (state.winner !== null) return;
   recruit(state, me);
   buildSomething(state, me);
+  layRoad(state, me, know);
+}
+
+// Road building: with spare gold, one idle unit a turn lays a road in own territory where it joins the
+// network (next to a road or an own city), preferring tiles that link two pieces; never with a visible enemy
+// within 2 tiles. Returns the 'road' event or null.
+export function layRoad(state, me, know = aiKnowledge(state, me)) {
+  if (state.gold[me] < ROADWORK.aiReserve + ROADWORK.gold) return null;
+  let best = null;
+  let bestScore = 0;
+  for (const u of state.units) {
+    if (u.owner !== me || !canBuildRoad(state, u) || enemiesNear(state, u, know, 2).length) continue;
+    const links = roadLinks(state, u.q, u.r);
+    if (!links) continue;
+    // cost-2 terrain gains the most from a road
+    const score = Math.min(links, 2) * 2 + TERRAIN[tileAt(state, u.q, u.r).terrain].cost;
+    if (score > bestScore || (score === bestScore && u.id < best.id)) { best = u; bestScore = score; }
+  }
+  return best ? buildRoad(state, best.id) : null;
 }
 
 // Carries out lined-up melee strikes in the order they were planned (later plans assume the earlier hits);
@@ -136,8 +158,10 @@ export function assignGarrisons(state, me, know = aiKnowledge(state, me)) {
   const taken = new Set();
   for (const city of state.cities.filter((c) => c.owner === me)) {
     const threat = state.units.some((u) => u.owner !== me && know.sees(u.q, u.r) && distance(u, city) <= THREAT_RADIUS);
-    if (!threat) continue;
     const here = unitAt(state, city.q, city.r);
+    // a unit already inside a restless city stays as its garrison, so the city calms faster
+    const unrest = cityUnrest(city) > 0 && here && here.owner === me;
+    if (!threat && !unrest) continue;
     if (here && here.owner === me) {
       result.set(here.id, city);
       taken.add(here.id);
@@ -197,6 +221,24 @@ export function dangerPenalty(state, unit, q, r, attackers) {
   return extra > 0 ? extra * fragile * hurt : 0;
 }
 export const DANGER = { ranged: 1.2, melee: 0.6, strike: 1 };
+
+// A wounded unit pressed by an adjacent enemy swaps places with a healthy melee neighbour standing on a
+// quieter tile, so the fresh unit takes the front and the wounded one gets out from behind it.
+// Returns the partner it swapped with, or null.
+export const RELIEF_MIN_HP = 0.6;
+export function relieveWounded(state, unit, know = aiKnowledge(state, unit.owner), garrisons = new Map()) {
+  const pressure = (q, r) => state.units.filter((e) => e.owner !== unit.owner && know.sees(e.q, e.r) && distance(e, { q, r }) === 1).length;
+  const here = pressure(unit.q, unit.r);
+  if (!here) return null;
+  let best = null;
+  for (const o of swapPartners(state, unit)) {
+    const t = UNIT_TYPES[o.type];
+    if (garrisons.has(o.id) || t.range !== 1 || t.noCapture || o.hp / t.hp < RELIEF_MIN_HP) continue;
+    if (pressure(o.q, o.r) >= here) continue;
+    if (!best || o.hp > best.hp || (o.hp === best.hp && o.id < best.id)) best = o;
+  }
+  return best && swapUnits(state, unit.id, best.id) ? best : null;
+}
 
 // A wounded unit retreats to an own city, or as far from enemies as possible. It attacks only when it's safe.
 function retreat(state, unit, know, danger = new Map()) {
@@ -309,14 +351,14 @@ function tryBestAttack(state, unit, { safeOnly = false } = {}) {
 // Movement goals: known foreign cities and visible enemies. If there are none, the AI explores.
 // Scouts can't capture, so they only ever explore (and stay put once everything is known).
 export function goalsFor(state, unit, know = aiKnowledge(state, unit.owner)) {
-  const goals = ruinGoals(state, unit, know);
+  const goals = [...ruinGoals(state, unit, know), ...repairGoals(state, unit)];
   if (UNIT_TYPES[unit.type].noCapture) return [...goals, ...exploreGoals(state, know)];
-  goals.push(...pillageGoals(state, unit, know));
+  goals.push(...pillageGoals(state, unit, know), ...blockadeGoals(state, unit, know));
   for (const c of state.cities) {
-    if (c.owner !== unit.owner && know.knows(c.q, c.r)) goals.push({ q: c.q, r: c.r, w: c.owner === null ? 1 : 1.3 });
+    if (c.owner !== unit.owner && know.knows(c.q, c.r)) goals.push({ q: c.q, r: c.r, w: (c.owner === null ? 1 : 1.3) + (citySize(c) - 1) * GROWTH.aiGoalBonus });
   }
   for (const u of state.units) if (u.owner !== unit.owner && know.sees(u.q, u.r)) goals.push({ q: u.q, r: u.r, w: 1.1, enemy: true });
-  return goals.some((g) => !g.ruin && !g.pillage) ? goals : [...goals, ...exploreGoals(state, know)];
+  return goals.some((g) => !g.ruin && !g.pillage && !g.repair && !g.blockade) ? goals : [...goals, ...exploreGoals(state, know)];
 }
 
 // Known unexplored ruins within a few turns' walk are worth a detour (scouts are made for this).
@@ -336,6 +378,29 @@ export function pillageGoals(state, unit, know) {
       && !cityAt(state, t.q, t.r))
     .filter((t) => { const o = territoryOwner(state, t.q, t.r); return o !== undefined && o !== null && o !== unit.owner; })
     .map((t) => ({ q: t.q, r: t.r, w: 0.95, pillage: true }));
+}
+
+// Known enemy road tiles close by where the unit would cut a working trade route (one blockader per route
+// is enough: a route another unit already cuts offers no goal). Melee units only – archers and catapults
+// standing alone on a road are easy prey.
+export const BLOCKADE_DETOUR = 3; // tiles
+export function blockadeGoals(state, unit, know) {
+  if (UNIT_TYPES[unit.type].range > 1) return [];
+  const targets = tradeTargets(state, unit);
+  if (!targets.length) return [];
+  return Object.values(state.tiles)
+    .filter((t) => t.road && distance(t, unit) <= BLOCKADE_DETOUR && know.knows(t.q, t.r)
+      && targets.some((x) => x.seen.has(key(t.q, t.r)) && cutsAt(state, x, t.q, t.r)))
+    .map((t) => ({ q: t.q, r: t.r, w: 0.85, blockade: true }));
+}
+
+// Own pillaged resources close by that would stay out of use for a while are worth walking back to and repairing.
+export const REPAIR_DETOUR = 3; // tiles
+export function repairGoals(state, unit) {
+  return Object.values(state.tiles)
+    .filter((t) => t.resource && pillageTurnsLeft(state, t) >= 2 && distance(t, unit) <= REPAIR_DETOUR
+      && territoryOwner(state, t.q, t.r) === unit.owner)
+    .map((t) => ({ q: t.q, r: t.r, w: 0.9, repair: true }));
 }
 
 function exploreGoals(state, know) {

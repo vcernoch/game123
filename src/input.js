@@ -3,10 +3,15 @@
 // and only a second tap on the same tile performs the action.
 import { key } from './hex.js';
 import {
-  getUnit, unitAt, cityAt, reachable, attackTargets, visibleTiles, exploredTiles, planRoute,
+  getUnit, unitAt, cityAt, reachable, attackTargets, visibleTiles, exploredTiles, planRoute, canRally, canSwap,
 } from './game.js';
 
-// ctx = { selectedId, pending: {q,r}|null, viewer, confirm }
+// ctx = { selectedId, pending: {q,r}|null, viewer, confirm, rallyCityId, swapUnitId }
+// rallyCityId: the player is picking a rally point for that city – a valid tile sets it
+// ({ type: 'rally', cityId, q, r }), any other tap leaves the picking ({ type: 'rallyCancel' }).
+// swapUnitId: the player is picking a unit to swap places with – a tap on a neighbour that can swap
+// does it ({ type: 'swap', unitId, otherId }), any other tap leaves the picking ({ type: 'swapCancel' }).
+// Picking is an explicit mode, so the swap needs no touch confirmation.
 // Returns one of these actions:
 //   { type: 'move', unitId, q, r } | { type: 'attack', unitId, targetId }
 //   { type: 'goto', unitId, q, r } – a multi-turn move order to a known tile out of reach this turn
@@ -14,7 +19,17 @@ import {
 //   { type: 'select', unitId|null, cityId|null } | { type: 'none' }
 export function decideTap(state, ctx, q, r) {
   if (!state.tiles[key(q, r)] || state.winner !== null) return { type: 'none' };
-  const { selectedId, pending, viewer = 0, confirm = false } = ctx;
+  const { selectedId, pending, viewer = 0, confirm = false, rallyCityId = null, swapUnitId = null } = ctx;
+  if (rallyCityId !== null) {
+    const rc = state.cities.find((c) => c.id === rallyCityId);
+    return canRally(state, rc, q, r) ? { type: 'rally', cityId: rallyCityId, q, r } : { type: 'rallyCancel' };
+  }
+  if (swapUnitId !== null) {
+    const su = getUnit(state, swapUnitId);
+    const other = unitAt(state, q, r);
+    return su && su.owner === viewer && canSwap(state, su, other)
+      ? { type: 'swap', unitId: su.id, otherId: other.id } : { type: 'swapCancel' };
+  }
   const visible = visibleTiles(state, viewer);
   const explored = exploredTiles(state, viewer);
   const other = unitAt(state, q, r);

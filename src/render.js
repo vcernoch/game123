@@ -1,7 +1,7 @@
 // Canvas rendering. No game logic, only drawing the state.
 import { hexToPixel, hexCorners, pixelToHex, key, neighbors, DIRS } from './hex.js';
-import { TERRAIN, UNIT_TYPES, PLAYERS, NEUTRAL_COLOR, RANKS } from './rules.js';
-import { territoryMap, ruinBelieved, isPillaged } from './game.js';
+import { TERRAIN, UNIT_TYPES, PLAYERS, NEUTRAL_COLOR, RANKS, GROWTH } from './rules.js';
+import { territoryMap, ruinBelieved, isPillaged, citySize, cityUnrest } from './game.js';
 
 export const HEX_SIZE = 32;
 const PAD = 8;
@@ -36,6 +36,8 @@ function hexPath(ctx, cx, cy, size) {
 
 // view = { selectedId, reachable: Map, targets: Set(unitId), hover: {q,r}, path: [{q,r}],
 //          unitPos: Map(unitId -> {x,y}) for animations, floaters: [{x,y,text,color,age}],
+//          swaps: Set(unitId) of own units the selected unit can swap places with (while picking),
+//          inspired: Set(unitId) of own units inspired by the selected hero (small gold chevron badge),
 //          flankers: Set(unitId) of own units flanking the hovered target (marked with a small ⚔ badge),
 //          visible/explored: Set of keys for fog of war (missing = everything visible), viewer: player at the screen }
 export function render(ctx, state, view = {}) {
@@ -96,6 +98,18 @@ export function render(ctx, state, view = {}) {
 
   if (view.path && view.path.length > 1) drawPath(ctx, view.path, view.pathTurns, view.pathFaint);
 
+  // rally points of own cities: a dashed line to the selected city's flag (or the tile being picked)
+  if (view.rallyLine && view.rallyLine.length > 1) drawRallyLine(ctx, view.rallyLine);
+  for (const f of view.rallies || []) {
+    const c = tileCenter(f.q, f.r);
+    drawRallyFlag(ctx, c.x - HEX_SIZE * 0.05, c.y + HEX_SIZE * 0.05, f.selected || !view.rallyPicking ? 1 : 0.5);
+  }
+  if (view.rallyPicking && view.rallyLine && view.rallyLine.length > 1) {
+    const end = view.rallyLine[view.rallyLine.length - 1];
+    const c = tileCenter(end.q, end.r);
+    drawRallyFlag(ctx, c.x - HEX_SIZE * 0.05, c.y + HEX_SIZE * 0.05, 0.8);
+  }
+
   // last-seen markers of enemy units that went into the fog
   for (const g of view.ghosts || []) {
     const c = tileCenter(g.q, g.r);
@@ -123,12 +137,25 @@ export function render(ctx, state, view = {}) {
       ctx.setLineDash([]);
     }
     if (view.flankers && view.flankers.has(u.id)) drawFlankBadge(ctx, c.x, c.y);
+    if (view.swaps && view.swaps.has(u.id)) drawSwapRing(ctx, c.x, c.y);
+    if (view.inspired && view.inspired.has(u.id)) drawInspireBadge(ctx, c.x, c.y);
   }
 
   // where the player lost units or cities in the last enemy turn (until the player ends the turn)
   for (const m of view.lossMarks || []) {
     const c = tileCenter(m.q, m.r);
     drawLossMark(ctx, c.x + HEX_SIZE * 0.42, c.y - HEX_SIZE * 0.5);
+  }
+
+  // wall volley in flight: a stone on an arc
+  if (view.shot) {
+    ctx.beginPath();
+    ctx.arc(view.shot.x, view.shot.y - view.shot.lift, 4.5, 0, Math.PI * 2);
+    ctx.fillStyle = '#d8d2c4';
+    ctx.fill();
+    ctx.lineWidth = 1.2;
+    ctx.strokeStyle = 'rgba(0,0,0,0.8)';
+    ctx.stroke();
   }
 
   for (const f of view.floaters || []) drawFloater(ctx, f);
@@ -204,6 +231,29 @@ function drawLossMark(ctx, x, y) {
   ctx.beginPath();
   ctx.moveTo(x - d, y - d); ctx.lineTo(x + d, y + d);
   ctx.moveTo(x + d, y - d); ctx.lineTo(x - d, y + d);
+  ctx.stroke();
+  ctx.restore();
+}
+
+// Small gold badge with an upward chevron at the bottom-left of a unit inspired by the selected hero.
+function drawInspireBadge(ctx, x, y) {
+  const bx = x - HEX_SIZE * 0.5;
+  const by = y + HEX_SIZE * 0.42;
+  const r = HEX_SIZE * 0.2;
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(bx, by, r, 0, Math.PI * 2);
+  ctx.fillStyle = '#f2c94c';
+  ctx.fill();
+  ctx.strokeStyle = '#3a2a00';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.lineWidth = 2;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  const d = r * 0.55;
+  ctx.beginPath();
+  ctx.moveTo(bx - d, by + d * 0.6); ctx.lineTo(bx, by - d * 0.6); ctx.lineTo(bx + d, by + d * 0.6);
   ctx.stroke();
   ctx.restore();
 }
@@ -309,6 +359,84 @@ function drawPath(ctx, path, turns = null, faint = false) {
       ctx.stroke();
     }
   }
+  ctx.restore();
+}
+
+// Swap partner while picking: a light-blue dashed ring with two small arrows chasing each other.
+function drawSwapRing(ctx, x, y) {
+  const rad = HEX_SIZE * 0.72;
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(x, y, rad, 0, Math.PI * 2);
+  ctx.strokeStyle = '#7fd8ff';
+  ctx.lineWidth = 3;
+  ctx.setLineDash([6, 4]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = '#7fd8ff';
+  for (const a of [-Math.PI / 4, (3 * Math.PI) / 4]) {
+    // arrow head on the ring pointing clockwise
+    const px = x + Math.cos(a) * rad;
+    const py = y + Math.sin(a) * rad;
+    const tx = -Math.sin(a);
+    const ty = Math.cos(a);
+    ctx.beginPath();
+    ctx.moveTo(px + tx * 6, py + ty * 6);
+    ctx.lineTo(px - tx * 3 + Math.cos(a) * 5, py - ty * 3 + Math.sin(a) * 5);
+    ctx.lineTo(px - tx * 3 - Math.cos(a) * 5, py - ty * 3 - Math.sin(a) * 5);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+// Rally route: a thin dashed white line from the city to its flag.
+function drawRallyLine(ctx, path) {
+  const pts = path.map((p) => tileCenter(p.q, p.r));
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.setLineDash([3, 6]);
+  for (const [color, width] of [['rgba(0,0,0,0.4)', 5], ['rgba(255,255,255,0.85)', 2.5]]) {
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// Rally flag: a pole with a red pennant, its foot at (x, y).
+function drawRallyFlag(ctx, x, y, alpha = 1) {
+  const h = HEX_SIZE * 0.75;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.ellipse(x, y, HEX_SIZE * 0.16, HEX_SIZE * 0.06, 0, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.lineTo(x, y - h);
+  ctx.strokeStyle = '#3b2a1a';
+  ctx.lineWidth = 3;
+  ctx.stroke();
+  ctx.strokeStyle = '#e8d9b5';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(x + 1, y - h);
+  ctx.quadraticCurveTo(x + h * 0.35, y - h * 0.92, x + h * 0.6, y - h * 0.78);
+  ctx.quadraticCurveTo(x + h * 0.35, y - h * 0.66, x + 1, y - h * 0.5);
+  ctx.closePath();
+  ctx.fillStyle = '#e04a3a';
+  ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+  ctx.lineWidth = 1.2;
+  ctx.fill();
+  ctx.stroke();
   ctx.restore();
 }
 
@@ -605,7 +733,48 @@ function drawCity(ctx, city) {
     ctx.stroke();
   }
   drawBuildings(ctx, city, c.x, c.y);
+  drawSize(ctx, city, c.x, c.y);
+  if (cityUnrest(city)) drawUnrest(ctx, c.x + houses[0][0], c.y + houses[0][1] - 5);
   ctx.restore();
+}
+
+// Unrest: a small flame on the roof of the first house (x, y = the roof top).
+function drawUnrest(ctx, x0, y0) {
+  ctx.save();
+  ctx.translate(x0, y0);
+  ctx.scale(1.3, 1.3);
+  const x = 0;
+  const y = 0;
+  ctx.beginPath();
+  ctx.moveTo(x, y + 1);
+  ctx.bezierCurveTo(x - 6, y - 2, x - 3, y - 7, x - 1, y - 11);
+  ctx.bezierCurveTo(x, y - 7, x + 3, y - 8, x + 2, y - 12);
+  ctx.bezierCurveTo(x + 6, y - 7, x + 6, y - 2, x, y + 1);
+  ctx.fillStyle = '#ff7a1a';
+  ctx.strokeStyle = 'rgba(90,20,0,0.85)';
+  ctx.lineWidth = 1;
+  ctx.fill();
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.ellipse(x + 0.5, y - 3, 1.6, 3, 0, 0, Math.PI * 2);
+  ctx.fillStyle = '#ffe066';
+  ctx.fill();
+  ctx.restore();
+}
+
+// City size: one small dot per size along the bottom edge (filled = reached, hollow = still to grow).
+function drawSize(ctx, city, x, y) {
+  const size = citySize(city);
+  const color = city.owner === null ? NEUTRAL_COLOR : PLAYERS[city.owner].color;
+  ctx.lineWidth = 1;
+  for (let i = 0; i < GROWTH.maxSize; i++) {
+    ctx.beginPath();
+    ctx.arc(x + (i - (GROWTH.maxSize - 1) / 2) * 6, y + 26, 2.2, 0, Math.PI * 2);
+    ctx.fillStyle = i < size ? '#fff6d8' : 'rgba(0,0,0,0.35)';
+    ctx.strokeStyle = i < size ? 'rgba(0,0,0,0.7)' : color;
+    ctx.fill();
+    ctx.stroke();
+  }
 }
 
 // Small building markers: walls = stone rim, market = coin, barracks = flag, watchtower = tower,
@@ -740,6 +909,29 @@ function drawCompass(ctx, x, y) {
   ctx.fill();
 }
 
+// Small eye (sentry): a light disc with a dark eye; green-tinted while resting until healed.
+function drawEye(ctx, x, y, heal) {
+  ctx.beginPath();
+  ctx.arc(x, y, 5.5, 0, Math.PI * 2);
+  ctx.fillStyle = heal ? '#c9f2d8' : '#eef2f6';
+  ctx.fill();
+  ctx.lineWidth = 1.2;
+  ctx.strokeStyle = 'rgba(0,0,0,0.75)';
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(x - 4, y);
+  ctx.quadraticCurveTo(x, y - 3.6, x + 4, y);
+  ctx.quadraticCurveTo(x, y + 3.6, x - 4, y);
+  ctx.closePath();
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = '#2a3340';
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(x, y, 1.5, 0, Math.PI * 2);
+  ctx.fillStyle = '#2a3340';
+  ctx.fill();
+}
+
 function drawUnit(ctx, u, x, y, selected, active) {
   const t = UNIT_TYPES[u.type];
   const p = PLAYERS[u.owner];
@@ -771,6 +963,8 @@ function drawUnit(ctx, u, x, y, selected, active) {
   if (u.fortified) drawShield(ctx, x + 11, y + 10);
   // exploring: a small compass at the bottom left
   if (u.explore) drawCompass(ctx, x - 11, y + 10);
+  // on watch: a small eye at the bottom left (a unit on watch has no explore order)
+  if (u.sentry) drawEye(ctx, x - 11, y + 10, u.sentry === 'heal');
   // HP bar
   const frac = u.hp / t.hp;
   ctx.fillStyle = 'rgba(0,0,0,0.6)';
