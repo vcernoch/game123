@@ -148,6 +148,9 @@ fieldset .seed-row + small { margin-left: 0; }
 .charge { color: #ffb74d; font-weight: 600; }
 .inspire { color: #f2c94c; }
 .resource { color: #f2c94c; }
+.trade.linked { color: #9fd89f; }
+.trade.cut { color: #ff9b8a; }
+.trade.none { opacity: 0.75; }
 .resource.ruin { color: #d9cbff; }
 kbd { font: 600 11px ui-monospace, monospace; background: #3c434f; color: var(--text); border-radius: 4px; padding: 1px 5px; border-bottom: 2px solid #20242c; }
 .hotkey { margin-right: 4px; opacity: 0.85; }

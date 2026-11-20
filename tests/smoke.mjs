@@ -369,6 +369,8 @@ try {
   if (!hasMarket) throw new Error('market was not built');
   const growth = await page.locator('.growth').first().textContent();
   if (!/^Size 1\/3 · grows in 5 turns$/.test(growth.trim())) throw new Error(`city panel growth line wrong: ${growth}`);
+  const trade = await page.locator('.trade.hub').first().textContent().catch(() => '');
+  if (!/Trade hub/.test(trade)) throw new Error(`city panel trade line wrong: ${trade}`);
   await page.screenshot({ path: 'artifacts/screenshot-city-panel.png' });
 
   // number key recruits in the selected city (the capital must be empty first)

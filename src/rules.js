@@ -263,6 +263,7 @@ export const ADVISOR = {
     capture:    { icon: '🏰', order: 3 },
     ruin:       { icon: '🏛', order: 4 },
     repair:     { icon: '🔧', order: 5 },
+    trade:      { icon: '🛤', order: 5.5 },
     recruit:    { icon: '⚑', order: 6 },
     build:      { icon: '🔨', order: 7 },
   },
@@ -284,6 +285,13 @@ export const GROWTH = {
   income: 1,
   captureLoss: 1,
   aiGoalBonus: 0.1, // the AI values a grown foreign city a bit more per size above 1
+};
+
+// Trade routes: an own city linked to an own capital by an unbroken chain of road tiles (own cities count
+// as links; neutral and enemy cities and tiles with an enemy unit break the chain) earns `income` extra gold.
+// The capital itself is the hub and earns nothing extra. Built roads join the network.
+export const TRADE = {
+  income: 1,
 };
 
 export const ECONOMY = {

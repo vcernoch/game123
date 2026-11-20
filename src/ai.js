@@ -4,7 +4,7 @@ import {
   reachable, attackTargets, previewAttack, moveUnit, attack, buyUnit,
   unitAt, getUnit, tileAt, fortify, difficultyOf, visibleTiles, exploredTiles, build, hasBuilding, unitCost, buildingCost, factionOf,
   threatTiles, cityAt, upgradeOptions, upgradeUnit, ruinBelieved, canPillage, pillage, isPillaged, repair, pillageTurnsLeft, territoryOwner,
-  swapPartners, swapUnits, canBuildRoad, buildRoad, roadLinks, citySize,
+  swapPartners, swapUnits, canBuildRoad, buildRoad, roadLinks, citySize, tradeTargets, cutsAt,
 } from './game.js';
 import { UNIT_TYPES, TERRAIN, ROADWORK, GROWTH } from './rules.js';
 
@@ -351,12 +351,12 @@ function tryBestAttack(state, unit, { safeOnly = false } = {}) {
 export function goalsFor(state, unit, know = aiKnowledge(state, unit.owner)) {
   const goals = [...ruinGoals(state, unit, know), ...repairGoals(state, unit)];
   if (UNIT_TYPES[unit.type].noCapture) return [...goals, ...exploreGoals(state, know)];
-  goals.push(...pillageGoals(state, unit, know));
+  goals.push(...pillageGoals(state, unit, know), ...blockadeGoals(state, unit, know));
   for (const c of state.cities) {
     if (c.owner !== unit.owner && know.knows(c.q, c.r)) goals.push({ q: c.q, r: c.r, w: (c.owner === null ? 1 : 1.3) + (citySize(c) - 1) * GROWTH.aiGoalBonus });
   }
   for (const u of state.units) if (u.owner !== unit.owner && know.sees(u.q, u.r)) goals.push({ q: u.q, r: u.r, w: 1.1, enemy: true });
-  return goals.some((g) => !g.ruin && !g.pillage && !g.repair) ? goals : [...goals, ...exploreGoals(state, know)];
+  return goals.some((g) => !g.ruin && !g.pillage && !g.repair && !g.blockade) ? goals : [...goals, ...exploreGoals(state, know)];
 }
 
 // Known unexplored ruins within a few turns' walk are worth a detour (scouts are made for this).
@@ -376,6 +376,20 @@ export function pillageGoals(state, unit, know) {
       && !cityAt(state, t.q, t.r))
     .filter((t) => { const o = territoryOwner(state, t.q, t.r); return o !== undefined && o !== null && o !== unit.owner; })
     .map((t) => ({ q: t.q, r: t.r, w: 0.95, pillage: true }));
+}
+
+// Known enemy road tiles close by where the unit would cut a working trade route (one blockader per route
+// is enough: a route another unit already cuts offers no goal). Melee units only – archers and catapults
+// standing alone on a road are easy prey.
+export const BLOCKADE_DETOUR = 3; // tiles
+export function blockadeGoals(state, unit, know) {
+  if (UNIT_TYPES[unit.type].range > 1) return [];
+  const targets = tradeTargets(state, unit);
+  if (!targets.length) return [];
+  return Object.values(state.tiles)
+    .filter((t) => t.road && distance(t, unit) <= BLOCKADE_DETOUR && know.knows(t.q, t.r)
+      && targets.some((x) => x.seen.has(key(t.q, t.r)) && cutsAt(state, x, t.q, t.r)))
+    .map((t) => ({ q: t.q, r: t.r, w: 0.85, blockade: true }));
 }
 
 // Own pillaged resources close by that would stay out of use for a while are worth walking back to and repairing.

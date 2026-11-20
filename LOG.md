@@ -2,6 +2,19 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-20 – Trade routes (v0.36.0)
+- **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.26.0–v0.36.0) is ahead of `main` (v0.25.0) – please merge it.
+- Starting state green (108 logic tests + smoke).
+- Phase 17 (living cities, own improvement), second task. Roads only made movement cheaper; the road network between cities meant nothing economically, and a raid deep in enemy land could only hit resources. Now roads carry trade, so holding the cities along a road and keeping it clear pays off.
+- `TRADE` in `rules.js` (`income` 1). In `game.js`: `tradeRoute(state, city)` → `null` (neutral) / `'hub'` (own capital, also a captured enemy capital) / `'linked'` / `'cut'` / `'none'` – a breadth-first search from the city along road tiles to an own capital; own cities are links, neutral and enemy cities break the chain, a tile with an enemy unit blocks it (`'cut'` = a road exists without the blockers). `cityIncome` adds +1 for a linked city (only with a state; computed, nothing stored). `tradeText`, `cutRoutes`, and for the AI `tradeTargets` / `cutsAt` / `routesCutBy`.
+- AI: `blockadeGoals` in `ai.js` – a melee unit (not archers/catapults, not scouts) gets a goal (w 0.85, within 3 tiles) on a known enemy road tile where standing would cut a working route; a route already cut by another unit offers none, so one blockader per route. City goals nearby still win, so blockades happen on roads between cities.
+- Advisor: new `trade` hint (🛤, after repair) when visible enemies alone cut a route – it points at the nearest one on the road. A blocker hidden in fog never shows in the advisor. Known limitation: the city panel/income still say "cut" when the blocker is hidden (the caravans don't arrive), which hints that someone is out there – accepted as a feature for now.
+- UI: city panel line "🛤 Trade route to the capital: +1 gold" / "Trade route cut: an enemy blocks the road" (red) / "No trade route: no road to the capital" / "Trade hub …" for own cities, also in the city tooltip. Help text updated.
+- Balance (20 AI-vs-AI games, Medium, 300 half-turns max): wins 7 : 11, 2 stalemates – the same two as without trade routes (6 : 12, 2). About 60 % of owned non-capital city-turns are linked, ~1 % cut. On the large map seed 5 the game in the "map sizes" test now runs 118 half-turns instead of 50, so that test takes ~5 s instead of ~2 s (the per-turn cost of the trade search is small – profiled).
+- No state structure change (`state.version` stays 26).
+- Tests: +3 logic (hub/linked/cut/none and texts, income change and its payout at turn start, own units don't block, a built road links again, own city as link vs neutral/enemy city, captured capital is a hub; advisor hint for a visible blocker but not a hidden one, then named once seen; AI blockade goals, archers excluded, one blockader per route, own routes ignored, a real AI turn steps onto the road and cuts it). Smoke test: the capital panel shows the trade hub line.
+- Status: `npm run check` green (111 logic tests + smoke).
+
 ## 2026-11-19 – City growth (v0.35.0)
 - **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.26.0–v0.35.0) is ahead of `main` (v0.25.0) – please merge it.
 - Starting state green (106 logic tests + smoke).

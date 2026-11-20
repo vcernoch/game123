@@ -104,6 +104,7 @@ Check off `[x]` when done. Add new ideas to the end of the relevant phase or to 
 
 ## Phase 17 – living cities (own improvements)
 - [x] City growth: a held city grows to size 2 after 5 of its owner's turns and to size 3 after 7 more (+1 gold per size above 1, dots on the tile); an enemy next to the city halts growth, a captured city loses a size; neutral cities don't grow; the AI values grown cities a bit more
+- [x] Trade routes: an own city linked to an own capital by an unbroken road chain (own cities are links, neutral/enemy cities aren't) earns +1 gold; an enemy unit on the road cuts it; built roads can link a city; the city panel shows the route, the advisor points at a visible blocker, AI melee units blockade nearby enemy roads
 
 ## Ideas (unordered)
 - Diplomacy with multiple AIs

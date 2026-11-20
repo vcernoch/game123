@@ -7,7 +7,7 @@ import {
   upgradeOptions, upgradeUnit, canDisband, disbandRefund, disbandUnit, chargeReady,
   updateSightings, lastSeen, lastSeenAt, lastSeenText, armyOverview, ARMY_STATUS, ruinBelieved,
   canExplore, setExplore, canPillage, pillage, isPillaged, pillageTurnsLeft, canRepair, repair,
-  rallyPath, setRally, clearRally, swapPartners, swapUnits, canBuildRoad, buildRoad, timelineFor, adviseTurn, suggestRecruit, growthText,
+  rallyPath, setRally, clearRally, swapPartners, swapUnits, canBuildRoad, buildRoad, timelineFor, adviseTurn, suggestRecruit, growthText, tradeText, tradeRoute,
 } from './game.js';
 import { createAnimator } from './anim.js';
 import { decideTap } from './input.js';
@@ -285,6 +285,7 @@ function updateHud() {
     html += `<h3>${city.name}</h3><p>Owner: ${owner}${city.capital ? ' · capital' : ''}</p>
       <p>Income +${ci.income} gold/turn · Garrison defense +${ci.defensePct} % · Healing +${ci.heal}</p>
       <p class="growth">${sizeText(city)}</p>`;
+    if (city.owner === 0) html += `<p class="trade ${tradeRoute(state, city)}">🛤 ${tradeText(state, city)}</p>`;
     const res = cityResources(state, city).filter((t) => exploredTiles(state, 0).has(key(t.q, t.r)));
     if (res.length) html += `<p class="resource">Resources: ${res.map((t) => RESOURCES[t.resource].name + (isPillaged(state, t) ? ` (🔥 pillaged, ${pillageTurnsLeft(state, t)} more)` : '')).join(', ')}</p>`;
     const built = (city.buildings || []).map((b) => `<span class="building">${BUILDINGS[b].symbol} ${BUILDINGS[b].name}</span>`);
@@ -710,7 +711,7 @@ function cityTipText(city) {
   const owner = city.owner === null ? 'neutral' : PLAYERS[city.owner].name;
   const gar = ci.garrison ? UNIT_TYPES[ci.garrison.type].name : 'no garrison';
   const bs = (city.buildings || []).map((b) => BUILDINGS[b].name).join(', ');
-  return `${city.name} (${owner}): +${ci.income} gold/turn · defense +${ci.defensePct} % · ${gar}${bs ? ` · ${bs}` : ''}\n${sizeText(city)}`;
+  return `${city.name} (${owner}): +${ci.income} gold/turn · defense +${ci.defensePct} % · ${gar}${bs ? ` · ${bs}` : ''}\n${sizeText(city)}${city.owner === 0 ? `\n${tradeText(state, city)}` : ''}`;
 }
 
 // City size line: own cities also show their growth progress; for others (the AI's progress is

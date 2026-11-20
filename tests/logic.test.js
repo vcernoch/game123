@@ -15,13 +15,13 @@ import {
   rallyPath, rallyTarget, canRally, setRally, clearRally, canSwap, swapPartners, swapUnits,
   canBuildRoad, buildRoad, roadLinks, canSentry, sentry, checkSentries, SENTRY_TEXT, volleyTarget, cityVolleys, animSpeedOf, nextAnimSpeed,
   unitTitle, heroName, hallOfFame, inspiredBy, inspireBonus, inspiredUnits, timelineFor, leadChanges, whose, adviseTurn, suggestRecruit,
-  citySize, growthLeft, citySieged, growthText, growCities,
+  citySize, growthLeft, citySieged, growthText, growCities, tradeRoute, tradeText, cutRoutes, routesCutBy,
 } from '../src/game.js';
 import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
   dangerMap, dangerPenalty, moveTowardsGoal, DANGER, unexploredLand, SCOUT_WHEN_UNKNOWN, aiKnowledge,
   upgradeSomething, UPGRADE_HORSE_RADIUS, strikeLinedUp, pillageGoals, PILLAGE_DETOUR, repairGoals, REPAIR_DETOUR,
-  relieveWounded, RELIEF_MIN_HP, layRoad,
+  relieveWounded, RELIEF_MIN_HP, layRoad, blockadeGoals, BLOCKADE_DETOUR,
 } from '../src/ai.js';
 import { decideTap } from '../src/input.js';
 import { SHORTCUTS, keyAction, recruitKey } from '../src/keys.js';
@@ -34,7 +34,7 @@ import { distance, key, neighbors } from '../src/hex.js';
 import {
   RESOURCES, FORTIFY, TERRITORY, ECONOMY, UNIT_TYPES, TERRAIN, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FLANK, HIGH_GROUND, CHARGE, REPAIR,
   UPGRADES, UPGRADE, DISBAND, RUINS, EXPLORE, PILLAGE,
-  SIGHTINGS, ROADWORK, SENTRY, VOLLEY, ANIM_SPEEDS, HEROES, INSPIRE, MILESTONES, ADVISOR, GROWTH,
+  SIGHTINGS, ROADWORK, SENTRY, VOLLEY, ANIM_SPEEDS, HEROES, INSPIRE, MILESTONES, ADVISOR, GROWTH, TRADE,
 } from '../src/rules.js';
 
 test('map is deterministic and starting cities are connected', () => {
@@ -4114,4 +4114,186 @@ test('city growth in real AI-vs-AI games: sizes stay in range, the AI values gro
   enemyCap.size = 3;
   const w3 = goalsFor(s, u).find((g) => g.q === enemyCap.q && g.r === enemyCap.r).w;
   assert.ok(Math.abs(w3 - w1 - 2 * GROWTH.aiGoalBonus) < 1e-9);
+});
+
+test('trade routes: road-linked cities earn gold, enemy units cut the road, neutral and enemy cities break it, built roads link', () => {
+  const s = createGame({ seed: 2, fog: false, happenings: false });
+  s.units = [];
+  const cap = s.cities.find((c) => c.capital && c.owner === 0);
+  const byId = (id) => s.cities.find((c) => c.id === id);
+  assert.equal(tradeRoute(s, cap), 'hub');
+  assert.equal(tradeRoute(s, byId(3)), null, 'neutral cities have no route');
+  assert.equal(tradeText(s, byId(3)), '');
+  assert.match(tradeText(s, cap), /^Trade hub/);
+  // a near city on the road earns the bonus as soon as it is ours
+  const city = byId(5);
+  city.owner = 0;
+  assert.equal(tradeRoute(s, city), 'linked');
+  const linkedIncome = cityIncome(city, s);
+  assert.equal(tradeText(s, city), `Trade route to the capital: +${TRADE.income} gold`);
+  assert.equal(cityInfo(s, city).income, cityIncome(city, s));
+  const inc = incomeOf(s, 0);
+
+  // enemy units on the city's road neighbours cut it; own units don't
+  const roadNs = neighbors(city.q, city.r).filter((n) => tileAt(s, n.q, n.r)?.road && !cityAt(s, n.q, n.r));
+  assert.ok(roadNs.length >= 1);
+  const own = spawnUnit(s, 'warrior', 0, roadNs[0].q, roadNs[0].r);
+  assert.equal(tradeRoute(s, city), 'linked', 'own units keep the road open');
+  s.units = [];
+  for (const n of roadNs) spawnUnit(s, 'warrior', 1, n.q, n.r);
+  assert.equal(tradeRoute(s, city), 'cut');
+  assert.equal(incomeOf(s, 0), inc - TRADE.income);
+  assert.equal(cityIncome(city, s), linkedIncome - TRADE.income);
+  assert.match(tradeText(s, city), /cut: an enemy blocks the road/);
+  assert.deepEqual(cutRoutes(s, 0).map((c) => c.id), [city.id]);
+  // the cut costs gold at the start of the turn; the route reopens when the enemy leaves
+  s.current = 1;
+  let g = s.gold[0];
+  endTurn(s);
+  assert.equal(s.gold[0] - g, incomeOf(s, 0));
+  s.units = [];
+  assert.equal(tradeRoute(s, city), 'linked');
+  assert.equal(own.owner, 0);
+
+  // no road at all: 'none'; a road built next to the city links it again
+  for (const n of roadNs) tileAt(s, n.q, n.r).road = false;
+  assert.equal(tradeRoute(s, city), 'none');
+  assert.match(tradeText(s, city), /No trade route/);
+  assert.deepEqual(cutRoutes(s, 0), []);
+  const builder = spawnUnit(s, 'warrior', 0, roadNs[0].q, roadNs[0].r);
+  builder.movesLeft = 1;
+  builder.hasAttacked = false;
+  s.current = 0;
+  s.gold[0] = 50;
+  if (territoryOwner(s, builder.q, builder.r) === 0) {
+    assert.ok(buildRoad(s, builder.id));
+  } else {
+    tileAt(s, builder.q, builder.r).road = true; // outside own territory: lay it by hand
+  }
+  for (const n of roadNs.slice(1)) tileAt(s, n.q, n.r).road = true;
+  assert.equal(tradeRoute(s, city), 'linked');
+  s.units = [];
+
+  // own cities are links, neutral and enemy cities break the chain
+  const far = byId(4);
+  far.owner = 0;
+  byId(6).owner = 0;
+  assert.equal(tradeRoute(s, far), 'none', 'the road runs through a neutral city');
+  byId(3).owner = 0;
+  assert.equal(tradeRoute(s, far), 'linked', 'through an own city it works');
+  byId(3).owner = 1;
+  assert.equal(tradeRoute(s, far), 'none', 'an enemy city breaks it too');
+  assert.equal(tradeRoute(s, city), 'linked', 'other routes are unaffected');
+  // a captured enemy capital is a hub for its new owner
+  const enemyCap = s.cities.find((c) => c.capital && c.owner === 1);
+  enemyCap.owner = 0;
+  assert.equal(tradeRoute(s, enemyCap), 'hub');
+  // the AI's cities follow the same rules
+  byId(3).owner = 1;
+  enemyCap.owner = 1;
+  assert.ok(['linked', 'none', 'cut'].includes(tradeRoute(s, byId(3))));
+  assert.equal(stateProblem(s), null);
+});
+
+test('trade routes: the advisor points at a visible enemy on the road, never at a hidden one', () => {
+  const s = createGame({ seed: 2, fog: true, happenings: false });
+  s.units = s.units.filter((u) => u.owner === 0);
+  const city = s.cities.find((c) => c.id === 5);
+  city.owner = 0;
+  const roadNs = neighbors(city.q, city.r).filter((n) => tileAt(s, n.q, n.r)?.road && !cityAt(s, n.q, n.r));
+  s.gold[0] = 0;
+  const blockers = roadNs.map((n) => spawnUnit(s, 'archer', 1, n.q, n.r));
+  // a guard in the city, so the city is guarded and sees its neighbours
+  spawnUnit(s, 'spearman', 0, city.q, city.r);
+  updateExplored(s);
+  let tips = adviseTurn(s, 0);
+  const tip = tips.find((t) => t.kind === 'trade');
+  assert.ok(tip, JSON.stringify(tips));
+  assert.equal(tip.icon, ADVISOR.kinds.trade.icon);
+  assert.equal(tip.cityId, city.id);
+  assert.ok(blockers.some((b) => b.q === tip.q && b.r === tip.r), 'the hint points at a blocker');
+  assert.equal(tip.text, `The trade route from ${city.name} is cut – drive the enemy Archer off the road (+${TRADE.income} gold).`);
+  // a blocker out of sight (on a bigger map): the route is cut but the advisor keeps quiet
+  const b = createGame({ seed: 4, size: 'large', fog: true, happenings: false });
+  b.units = b.units.filter((u) => u.owner === 0);
+  b.gold[0] = 0;
+  const linked = b.cities.find((c) => c.id === 3);
+  linked.owner = 0;
+  assert.equal(tradeRoute(b, linked), 'linked');
+  const seen = visibleTiles(b, 0);
+  const spot = Object.values(b.tiles).find((t) => {
+    if (!t.road || cityAt(b, t.q, t.r) || seen.has(key(t.q, t.r))) return false;
+    const e = spawnUnit(b, 'warrior', 1, t.q, t.r);
+    const cut = tradeRoute(b, linked) === 'cut';
+    b.units = b.units.filter((u) => u !== e);
+    return cut;
+  });
+  assert.ok(spot, 'some unseen road tile cuts the route');
+  const hidden = spawnUnit(b, 'warrior', 1, spot.q, spot.r);
+  assert.ok(!visibleTiles(b, 0).has(key(hidden.q, hidden.r)));
+  assert.equal(tradeRoute(b, linked), 'cut');
+  assert.deepEqual(cutRoutes(b, 0).map((c) => c.id), [linked.id]);
+  tips = adviseTurn(b, 0);
+  assert.ok(!tips.some((t) => t.kind === 'trade'), 'hidden blockers stay hidden');
+  // once it is seen, the advisor names it
+  const look = neighbors(spot.q, spot.r).find((n) => isPassable(b, n.q, n.r) && !unitAt(b, n.q, n.r) && !cityAt(b, n.q, n.r));
+  spawnUnit(b, 'scout', 0, look.q, look.r);
+  const seenTip = adviseTurn(b, 0).find((t) => t.kind === 'trade');
+  assert.ok(seenTip);
+  assert.deepEqual([seenTip.q, seenTip.r, seenTip.cityId], [spot.q, spot.r, linked.id]);
+});
+
+test('trade routes: the AI walks onto enemy roads to cut working routes, one blockader per route, melee only', () => {
+  const s = createGame({ seed: 2, fog: false, happenings: false });
+  s.units = [];
+  const city = s.cities.find((c) => c.id === 5);
+  city.owner = 0;
+  const [gate] = neighbors(city.q, city.r).filter((n) => tileAt(s, n.q, n.r)?.road && !cityAt(s, n.q, n.r));
+  // a raider two tiles from the gate tile
+  const spot = Object.values(s.tiles).find((t) => distance(t, gate) === 2 && isPassable(s, t.q, t.r) && !cityAt(s, t.q, t.r) && !t.road);
+  const raider = spawnUnit(s, 'warrior', 1, spot.q, spot.r);
+  assert.deepEqual(routesCutBy(s, raider, gate.q, gate.r).map((c) => c.id), [city.id]);
+  assert.deepEqual(routesCutBy(s, raider, spot.q, spot.r), [], 'not a road tile');
+  const know = aiKnowledge(s, 1);
+  const goals = blockadeGoals(s, raider, know);
+  assert.ok(goals.some((g) => g.q === gate.q && g.r === gate.r && g.blockade), JSON.stringify(goals));
+  assert.ok(goals.every((g) => distance(g, raider) <= BLOCKADE_DETOUR && routesCutBy(s, raider, g.q, g.r).length));
+  assert.ok(goalsFor(s, raider, know).some((g) => g.blockade));
+  // archers don't blockade
+  const archer = spawnUnit(s, 'archer', 1, spot.q, spot.r);
+  assert.deepEqual(blockadeGoals(s, archer, know), []);
+  s.units = s.units.filter((u) => u !== archer);
+  // standing on the gate it still counts (it doesn't block itself), so it stays put
+  raider.q = gate.q; raider.r = gate.r;
+  assert.equal(tradeRoute(s, city), 'cut');
+  assert.deepEqual(routesCutBy(s, raider, gate.q, gate.r).map((c) => c.id), [city.id]);
+  // a second unit gets no goal for a route that is already cut
+  const second = spawnUnit(s, 'warrior', 1, spot.q, spot.r);
+  assert.ok(!blockadeGoals(s, second, know).some((g) => routesCutBy(s, second, g.q, g.r).some((c) => c.id === city.id)));
+  // own routes are never a goal
+  s.units = [];
+  const own = spawnUnit(s, 'warrior', 0, spot.q, spot.r);
+  assert.deepEqual(blockadeGoals(s, own, aiKnowledge(s, 0)), []);
+  assert.deepEqual(routesCutBy(s, own, gate.q, gate.r), []);
+  // a real AI turn (bigger map): a raider next to the road, away from cities, steps onto it and cuts the route
+  const b = createGame({ seed: 4, size: 'large', fog: false, happenings: false });
+  b.units = [];
+  const town = b.cities.find((c) => c.id === 3);
+  town.owner = 0;
+  assert.equal(tradeRoute(b, town), 'linked');
+  const probe = { id: -1, owner: 1, type: 'warrior' };
+  const far = (t) => b.cities.every((c) => c.owner === 1 || distance(c, t) >= 3);
+  let pair = null;
+  for (const t of Object.values(b.tiles)) {
+    if (pair || !far(t) || !routesCutBy(b, probe, t.q, t.r).some((c) => c.id === town.id)) continue;
+    const n = neighbors(t.q, t.r).find((x) => isPassable(b, x.q, x.r) && !cityAt(b, x.q, x.r) && far(x) && !tileAt(b, x.q, x.r).road);
+    if (n) pair = { t, n };
+  }
+  assert.ok(pair, 'a road tile away from cities cuts the route');
+  const r2 = spawnUnit(b, 'warrior', 1, pair.n.q, pair.n.r);
+  b.current = 1;
+  b.gold[1] = 0;
+  r2.movesLeft = UNIT_TYPES.warrior.move; r2.hasAttacked = false;
+  runAITurn(b);
+  assert.equal(tradeRoute(b, town), 'cut', `raider at ${r2.q},${r2.r}, road ${pair.t.q},${pair.t.r}`);
 });

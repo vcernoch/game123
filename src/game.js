@@ -4,7 +4,7 @@ import { generateMap, hasRiverEdge } from './map.js';
 import {
   TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY, VISION, DIFFICULTY, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, ROAD_COST, RIVER, FLANK, HIGH_GROUND, CHARGE, INSPIRE,
   FACTIONS, NO_FACTION, MAP_SIZES, HAPPENINGS, FORTIFY, TERRITORY, RESOURCES,
-  UPGRADES, UPGRADE, DISBAND, SIGHTINGS, RUINS, EXPLORE, PILLAGE, REPAIR, ROADWORK, SENTRY, VOLLEY, ANIM_SPEEDS, HEROES, MILESTONES, ADVISOR, GROWTH,
+  UPGRADES, UPGRADE, DISBAND, SIGHTINGS, RUINS, EXPLORE, PILLAGE, REPAIR, ROADWORK, SENTRY, VOLLEY, ANIM_SPEEDS, HEROES, MILESTONES, ADVISOR, GROWTH, TRADE,
 } from './rules.js';
 import { createRng } from './rng.js';
 
@@ -534,7 +534,91 @@ export function cityIncome(city, state = null) {
   const market = hasBuilding(city, 'market') ? BUILDING_EFFECTS.marketIncome : 0;
   const temple = hasBuilding(city, 'temple') ? BUILDING_EFFECTS.templeIncome : 0;
   const mines = state ? cityResources(state, city).filter((t) => t.resource === 'gold' && !isPillaged(state, t)).length * RESOURCES.gold.income : 0;
-  return base + faction + market + temple + mines + (citySize(city) - 1) * GROWTH.income;
+  const trade = state && tradeRoute(state, city) === 'linked' ? TRADE.income : 0;
+  return base + faction + market + temple + mines + (citySize(city) - 1) * GROWTH.income + trade;
+}
+
+// ---------- trade routes ----------
+
+// Breadth-first search from the city along road tiles to an own capital. Own cities are links, neutral and
+// enemy cities are not; with `blockers` a tile with an enemy unit breaks the chain. `seen` (optional) collects
+// the visited road tiles – only those can matter for this route.
+function roadLinkedToCapital(state, city, blockers, seen = new Set()) {
+  seen.add(key(city.q, city.r));
+  const queue = [city];
+  for (let i = 0; i < queue.length; i++) {
+    const cur = queue[i];
+    for (const n of neighbors(cur.q, cur.r)) {
+      const k = key(n.q, n.r);
+      if (seen.has(k)) continue;
+      const t = state.tiles[k];
+      if (!t) continue;
+      const c = t.road || cityAt(state, n.q, n.r) ? cityAt(state, n.q, n.r) : null;
+      if (!t.road && !c) continue;
+      seen.add(k);
+      if (c && c.owner !== city.owner) continue;
+      if (blockers && blockers.has(k)) continue;
+      if (c && c.capital) return true;
+      queue.push(n);
+    }
+  }
+  return false;
+}
+
+// Trade route state of a city: null (neutral), 'hub' (an own capital), 'linked' (earns TRADE.income),
+// 'cut' (the road exists but enemy units stand on it) or 'none' (no road chain to an own capital).
+export function tradeRoute(state, city) {
+  if (city.owner === null) return null;
+  if (city.capital) return 'hub';
+  if (roadLinkedToCapital(state, city, tradeBlockers(state, city.owner))) return 'linked';
+  return roadLinkedToCapital(state, city, null) ? 'cut' : 'none';
+}
+
+// Tiles with units hostile to `player` (optionally leaving one unit out).
+function tradeBlockers(state, player, skipId = null) {
+  return new Set(state.units.filter((u) => u.owner !== player && u.id !== skipId).map((u) => key(u.q, u.r)));
+}
+
+// Foreign cities whose working trade route `unit` would cut by standing on tile q,r (the unit itself
+// doesn't count where it stands now). Used by the AI to pick blockade tiles.
+export function routesCutBy(state, unit, q, r) {
+  return tradeTargets(state, unit).filter((x) => x.seen.has(key(q, r)) && cutsAt(state, x, q, r)).map((x) => x.city);
+}
+
+// Foreign cities with a working route (not counting `unit`) and the road tiles their search touched.
+export function tradeTargets(state, unit) {
+  const out = [];
+  for (const c of state.cities) {
+    if (c.owner === null || c.owner === unit.owner || c.capital) continue;
+    const blockers = tradeBlockers(state, c.owner, unit.id);
+    const seen = new Set();
+    if (roadLinkedToCapital(state, c, blockers, seen)) out.push({ city: c, blockers, seen });
+  }
+  return out;
+}
+
+// Would a unit on q,r cut the route of target x (from tradeTargets)?
+export function cutsAt(state, x, q, r) {
+  const t = tileAt(state, q, r);
+  if (!t || !t.road || cityAt(state, q, r)) return false;
+  const blockers = new Set(x.blockers);
+  blockers.add(key(q, r));
+  return !roadLinkedToCapital(state, x.city, blockers);
+}
+
+// Trade route line for the city panel and tooltip (only for the viewer's own cities).
+export function tradeText(state, city) {
+  const r = tradeRoute(state, city);
+  if (r === 'hub') return 'Trade hub: roads bring gold from linked cities';
+  if (r === 'linked') return `Trade route to the capital: +${TRADE.income} gold`;
+  if (r === 'cut') return 'Trade route cut: an enemy blocks the road';
+  if (r === 'none') return 'No trade route: no road to the capital';
+  return '';
+}
+
+// Own cities whose trade route is cut by enemy units (for the advisor and the turn report).
+export function cutRoutes(state, player) {
+  return state.cities.filter((c) => c.owner === player && tradeRoute(state, c) === 'cut');
 }
 
 // ---------- city growth ----------
@@ -2409,6 +2493,18 @@ export function adviseTurn(state, player) {
         : `The ${RESOURCES[tile.resource].name.toLowerCase()} near ${city.name} is pillaged – a unit standing on it can repair it (${REPAIR.gold} gold).`,
       tile, now ? { unitId: on.id } : {});
     }
+  }
+
+  // a trade route cut by an enemy the player can see on the road (hidden blockers stay hidden)
+  const enemyKeys = new Set(enemies.map((e) => key(e.q, e.r)));
+  for (const c of cities) {
+    if (tradeRoute(state, c) !== 'cut' || roadLinkedToCapital(state, c, enemyKeys)) continue;
+    const onRoad = enemies.filter((e) => tileAt(state, e.q, e.r).road).sort((a, b) => distance(a, c) - distance(b, c) || a.id - b.id);
+    if (!onRoad.length) continue;
+    const e = onRoad[0];
+    add('trade', `The trade route from ${c.name} is cut – drive the enemy ${UNIT_TYPES[e.type].name} off the road (+${TRADE.income} gold).`,
+      e, { cityId: c.id });
+    break;
   }
 
   // gold to spend: recruit in a free city (naming the suggested type), otherwise build
