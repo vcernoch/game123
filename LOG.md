@@ -2,6 +2,19 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-20 – Unrest (v0.37.0)
+- **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.26.0–v0.37.0) is ahead of `main` (v0.25.0) – please merge it.
+- Starting state green (111 logic tests + smoke).
+- Phase 17 (living cities, own improvement), third task. Taking an enemy city paid off from the very next turn, so a quick raid on a city was always worth it and garrisons only mattered against a counterattack. Now a conquered city has to be pacified, which rewards leaving a unit inside.
+- `UNREST` in `rules.js` (`turns` 4, `garrisonCalm` 2). In `game.js`: `cityUnrest`, `unrestCalm`, `unrestTurnsLeft`, `unrestText`, `calmCities`. Capturing a city from another player sets `city.unrest = 4` (also when the old owner retakes it); a neutral city joins willingly. `cityIncome` is 0 and `growCities` skips the city while restless. At the start of the owner's turn (`endTurn`, before growth and income, so a calmed city pays the same turn) unrest drops by 1, by 2 with an own unit inside: 3 missed incomes without a garrison, 1 with one. The `capture` event carries `unrest`, a new `calm` event (replayable, `boon` sound) and a chronicle entry announce the end.
+- AI: `assignGarrisons` keeps a unit that stands in a restless city there even without a threat nearby.
+- Advisor: new `unrest` hint (✊, after repair) – an unguarded restless city a unit can walk into this turn, naming the nearest unit.
+- UI: a small flame on the roof of a restless city, "✊ Unrest: no income, no growth · calms in N turns (…)" in the city panel and tooltip, growth line "growth halted: unrest", trade line "+1 gold once the unrest ends", the start-of-turn bar says when a city accepted your rule. Help text updated.
+- Balance (20 AI-vs-AI games, Medium, 300 half-turns max): wins 6 : 12, 2 stalemates (without unrest 7 : 11, 2); 47 restless captures; about 1 % of owned non-capital city-turns are restless.
+- State structure: `state.version` 27 (optional `city.unrest`), trivial migration; `stateProblem` validates it.
+- Tests: +2 logic (neutral capture calm, enemy capture with replay, no income/growth, exact turns without and with garrison, pays on the calming turn, calm event/log/replay, enemy inside is no garrison, retaking restarts unrest, game over, texts, validation, migration; advisor hint and when it is absent, AI garrison kept in a real AI turn). Smoke test: a unit walks into an AI city, panel and tooltip show the unrest (`artifacts/screenshot-unrest.png`).
+- Status: `npm run check` green (113 logic tests + smoke).
+
 ## 2026-11-20 – Trade routes (v0.36.0)
 - **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.26.0–v0.36.0) is ahead of `main` (v0.25.0) – please merge it.
 - Starting state green (108 logic tests + smoke).

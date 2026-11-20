@@ -4,7 +4,7 @@ import {
   reachable, attackTargets, previewAttack, moveUnit, attack, buyUnit,
   unitAt, getUnit, tileAt, fortify, difficultyOf, visibleTiles, exploredTiles, build, hasBuilding, unitCost, buildingCost, factionOf,
   threatTiles, cityAt, upgradeOptions, upgradeUnit, ruinBelieved, canPillage, pillage, isPillaged, repair, pillageTurnsLeft, territoryOwner,
-  swapPartners, swapUnits, canBuildRoad, buildRoad, roadLinks, citySize, tradeTargets, cutsAt,
+  swapPartners, swapUnits, canBuildRoad, buildRoad, roadLinks, citySize, tradeTargets, cutsAt, cityUnrest,
 } from './game.js';
 import { UNIT_TYPES, TERRAIN, ROADWORK, GROWTH } from './rules.js';
 
@@ -158,8 +158,10 @@ export function assignGarrisons(state, me, know = aiKnowledge(state, me)) {
   const taken = new Set();
   for (const city of state.cities.filter((c) => c.owner === me)) {
     const threat = state.units.some((u) => u.owner !== me && know.sees(u.q, u.r) && distance(u, city) <= THREAT_RADIUS);
-    if (!threat) continue;
     const here = unitAt(state, city.q, city.r);
+    // a unit already inside a restless city stays as its garrison, so the city calms faster
+    const unrest = cityUnrest(city) > 0 && here && here.owner === me;
+    if (!threat && !unrest) continue;
     if (here && here.owner === me) {
       result.set(here.id, city);
       taken.add(here.id);

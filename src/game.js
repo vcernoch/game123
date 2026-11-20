@@ -4,7 +4,7 @@ import { generateMap, hasRiverEdge } from './map.js';
 import {
   TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY, VISION, DIFFICULTY, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, ROAD_COST, RIVER, FLANK, HIGH_GROUND, CHARGE, INSPIRE,
   FACTIONS, NO_FACTION, MAP_SIZES, HAPPENINGS, FORTIFY, TERRITORY, RESOURCES,
-  UPGRADES, UPGRADE, DISBAND, SIGHTINGS, RUINS, EXPLORE, PILLAGE, REPAIR, ROADWORK, SENTRY, VOLLEY, ANIM_SPEEDS, HEROES, MILESTONES, ADVISOR, GROWTH, TRADE,
+  UPGRADES, UPGRADE, DISBAND, SIGHTINGS, RUINS, EXPLORE, PILLAGE, REPAIR, ROADWORK, SENTRY, VOLLEY, ANIM_SPEEDS, HEROES, MILESTONES, ADVISOR, GROWTH, TRADE, UNREST,
 } from './rules.js';
 import { createRng } from './rng.js';
 
@@ -130,7 +130,7 @@ function countStat(state, name, player) {
   state.stats[name][player]++;
 }
 
-export const STATE_VERSION = 26;
+export const STATE_VERSION = 27;
 
 // Converts a saved state of an older version to the current one; returns null for an unknown format.
 export function migrateState(s) {
@@ -242,6 +242,10 @@ export function migrateState(s) {
     // city growth arrived in version 26 – every city starts at size 1
     for (const c of s.cities) { c.size = 1; c.growth = 0; }
     s.version = 26;
+  }
+  if (s.version === 26) {
+    // unrest arrived in version 27 – a missing `city.unrest` means the city is calm
+    s.version = 27;
   }
   return s.version === STATE_VERSION ? s : null;
 }
@@ -425,7 +429,15 @@ export function applyEvent(state, ev) {
     state.units.push({ ...ev.unit });
   } else if (ev.type === 'capture') {
     const c = state.cities.find((x) => x.id === ev.cityId);
-    if (c) { c.owner = ev.owner; delete c.rally; if (ev.size) { c.size = ev.size; c.growth = 0; } }
+    if (c) {
+      c.owner = ev.owner;
+      delete c.rally;
+      if (ev.size) { c.size = ev.size; c.growth = 0; }
+      if (ev.unrest) c.unrest = ev.unrest; else delete c.unrest;
+    }
+  } else if (ev.type === 'calm') {
+    const c = state.cities.find((x) => x.id === ev.cityId);
+    if (c) delete c.unrest;
   } else if (ev.type === 'grow') {
     const c = state.cities.find((x) => x.id === ev.cityId);
     if (c) { c.size = ev.size; c.growth = 0; }
@@ -529,6 +541,7 @@ export function terrainDefense(state, unit, tile) {
 
 // City income; with state, the owner's faction bonus is included too.
 export function cityIncome(city, state = null) {
+  if (cityUnrest(city) > 0) return 0; // a restless city pays nothing to its new owner
   const base = city.capital ? ECONOMY.capitalIncome : ECONOMY.cityIncome;
   const faction = state && city.owner !== null ? factionOf(state, city.owner).cityIncome || 0 : 0;
   const market = hasBuilding(city, 'market') ? BUILDING_EFFECTS.marketIncome : 0;
@@ -610,7 +623,7 @@ export function cutsAt(state, x, q, r) {
 export function tradeText(state, city) {
   const r = tradeRoute(state, city);
   if (r === 'hub') return 'Trade hub: roads bring gold from linked cities';
-  if (r === 'linked') return `Trade route to the capital: +${TRADE.income} gold`;
+  if (r === 'linked') return `Trade route to the capital: +${TRADE.income} gold${cityUnrest(city) ? ' once the unrest ends' : ''}`;
   if (r === 'cut') return 'Trade route cut: an enemy blocks the road';
   if (r === 'none') return 'No trade route: no road to the capital';
   return '';
@@ -619,6 +632,53 @@ export function tradeText(state, city) {
 // Own cities whose trade route is cut by enemy units (for the advisor and the turn report).
 export function cutRoutes(state, player) {
   return state.cities.filter((c) => c.owner === player && tradeRoute(state, c) === 'cut');
+}
+
+// ---------- unrest ----------
+// A city taken from another player resists its new owner: no income and no growth while `city.unrest` > 0.
+// Neutral cities join willingly. The counter drops at the start of each of the owner's turns – faster
+// with an own unit inside – so a conqueror who leaves a garrison gets the city working sooner.
+
+// Owner's turns of unrest left (0 = calm; a missing field counts as calm).
+export function cityUnrest(city) {
+  return Number.isInteger(city.unrest) && city.unrest > 0 ? city.unrest : 0;
+}
+
+// How much the unrest drops at the start of the owner's next turn.
+export function unrestCalm(state, city) {
+  const g = unitAt(state, city.q, city.r);
+  return g && g.owner === city.owner ? UNREST.garrisonCalm : 1;
+}
+
+// Owner's turns until the city is calm if the garrison situation stays as it is now (0 = calm).
+export function unrestTurnsLeft(state, city) {
+  return Math.ceil(cityUnrest(city) / unrestCalm(state, city));
+}
+
+// Unrest line for panels and tooltips ('' for a calm city).
+export function unrestText(state, city) {
+  if (!cityUnrest(city)) return '';
+  const left = unrestTurnsLeft(state, city);
+  const when = `calms in ${left} turn${left === 1 ? '' : 's'}`;
+  const g = unitAt(state, city.q, city.r);
+  const how = g && g.owner === city.owner ? 'the garrison keeps order' : 'a garrison would calm it faster';
+  return `Unrest: no income, no growth · ${when} (${how})`;
+}
+
+// At the start of a player's turn their restless cities calm down (before growth and income, so a city
+// that becomes calm pays the same turn). Returns the cities that became calm.
+export function calmCities(state, player) {
+  if (state.winner !== null) return [];
+  const calmed = [];
+  for (const city of state.cities.filter((c) => c.owner === player && cityUnrest(c) > 0)) {
+    city.unrest = Math.max(0, cityUnrest(city) - unrestCalm(state, city));
+    if (city.unrest > 0) continue;
+    delete city.unrest;
+    calmed.push(city);
+    emit(state, { type: 'calm', cityId: city.id, player });
+    addLog(state, `${PLAYERS[player].name}: ${city.name} accepted its new rulers`, { by: player, at: [city] });
+  }
+  return calmed;
 }
 
 // ---------- city growth ----------
@@ -650,6 +710,7 @@ export function growthText(state, city) {
   const base = `Size ${size}/${GROWTH.maxSize}`;
   if (city.owner === null) return `${base} · neutral cities don't grow`;
   if (size >= GROWTH.maxSize) return `${base} · fully grown`;
+  if (cityUnrest(city)) return `${base} · growth halted: unrest`;
   if (citySieged(state, city)) return `${base} · growth halted: enemy at the gates`;
   const left = growthLeft(city);
   return `${base} · grows in ${left} turn${left === 1 ? '' : 's'}`;
@@ -662,7 +723,7 @@ export function growCities(state, player) {
   const grown = [];
   for (const city of state.cities.filter((c) => c.owner === player)) {
     const size = citySize(city);
-    if (size >= GROWTH.maxSize || citySieged(state, city)) continue;
+    if (size >= GROWTH.maxSize || citySieged(state, city) || cityUnrest(city)) continue;
     city.growth = (city.growth || 0) + 1;
     if (city.growth < GROWTH.turns[size - 1]) continue;
     city.size = size + 1;
@@ -727,6 +788,7 @@ export function cityInfo(state, city) {
     heal: cityHeal(city),
     garrison: garrison && garrison.owner === city.owner ? garrison : null,
     size: citySize(city),
+    unrest: cityUnrest(city),
   };
 }
 
@@ -1616,7 +1678,9 @@ export function moveUnit(state, unitId, q, r) {
     delete city.rally; // the old owner's rally point means nothing to the new one
     city.size = Math.max(1, citySize(city) - GROWTH.captureLoss); // a conquered city shrinks …
     city.growth = 0; // … and starts growing anew
-    emit(state, { type: 'capture', cityId: city.id, owner: unit.owner, size: city.size });
+    if (prev !== null) city.unrest = UNREST.turns; // the people of a conquered city resist (neutral ones join willingly)
+    else delete city.unrest;
+    emit(state, { type: 'capture', cityId: city.id, owner: unit.owner, size: city.size, unrest: cityUnrest(city) });
     countStat(state, 'captures', unit.owner);
     const loot = factionOf(state, unit.owner).captureGold || 0;
     state.gold[unit.owner] += loot;
@@ -1946,6 +2010,7 @@ export function endTurn(state) {
     recoverPillaged(state);
     recordHistory(state);
   }
+  calmCities(state, state.current);
   growCities(state, state.current);
   state.gold[state.current] += incomeOf(state, state.current);
   for (const u of state.units.filter((x) => x.owner === state.current)) {
@@ -2495,6 +2560,15 @@ export function adviseTurn(state, player) {
     }
   }
 
+  // a restless city without a garrison that a unit can walk into this turn (nearest unit first)
+  unrest: for (const c of cities.filter((x) => cityUnrest(x) && !unitAt(state, x.q, x.r))) {
+    const near = mine.filter((u) => moves.get(u.id)?.has(key(c.q, c.r))).sort((a, b) => distance(a, c) - distance(b, c) || a.id - b.id);
+    if (!near.length) continue;
+    add('unrest', `${c.name} is in unrest – move ${unitTitle(near[0])} in as a garrison to calm it faster.`,
+      near[0], { unitId: near[0].id, cityId: c.id });
+    break unrest;
+  }
+
   // a trade route cut by an enemy the player can see on the road (hidden blockers stay hidden)
   const enemyKeys = new Set(enemies.map((e) => key(e.q, e.r)));
   for (const c of cities) {
@@ -2655,6 +2729,7 @@ export function stateProblem(s) {
     if (c.rally !== undefined && !(c.rally && s.tiles[key(c.rally.q, c.rally.r)])) return `bad rally point of ${c.name}`;
     if (c.size !== undefined && !(isInt(c.size) && c.size >= 1 && c.size <= GROWTH.maxSize)) return `bad size of ${c.name}`;
     if (c.growth !== undefined && !(isInt(c.growth) && c.growth >= 0 && c.growth < 100)) return `bad growth of ${c.name}`;
+    if (c.unrest !== undefined && !(isInt(c.unrest) && c.unrest >= 0 && c.unrest <= UNREST.turns)) return `bad unrest of ${c.name}`;
   }
   const taken = new Set();
   for (const u of s.units) {

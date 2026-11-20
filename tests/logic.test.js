@@ -16,6 +16,7 @@ import {
   canBuildRoad, buildRoad, roadLinks, canSentry, sentry, checkSentries, SENTRY_TEXT, volleyTarget, cityVolleys, animSpeedOf, nextAnimSpeed,
   unitTitle, heroName, hallOfFame, inspiredBy, inspireBonus, inspiredUnits, timelineFor, leadChanges, whose, adviseTurn, suggestRecruit,
   citySize, growthLeft, citySieged, growthText, growCities, tradeRoute, tradeText, cutRoutes, routesCutBy,
+  cityUnrest, unrestCalm, unrestTurnsLeft, unrestText, calmCities,
 } from '../src/game.js';
 import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
@@ -34,7 +35,7 @@ import { distance, key, neighbors } from '../src/hex.js';
 import {
   RESOURCES, FORTIFY, TERRITORY, ECONOMY, UNIT_TYPES, TERRAIN, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FLANK, HIGH_GROUND, CHARGE, REPAIR,
   UPGRADES, UPGRADE, DISBAND, RUINS, EXPLORE, PILLAGE,
-  SIGHTINGS, ROADWORK, SENTRY, VOLLEY, ANIM_SPEEDS, HEROES, INSPIRE, MILESTONES, ADVISOR, GROWTH, TRADE,
+  SIGHTINGS, ROADWORK, SENTRY, VOLLEY, ANIM_SPEEDS, HEROES, INSPIRE, MILESTONES, ADVISOR, GROWTH, TRADE, UNREST,
 } from '../src/rules.js';
 
 test('map is deterministic and starting cities are connected', () => {
@@ -4296,4 +4297,146 @@ test('trade routes: the AI walks onto enemy roads to cut working routes, one blo
   r2.movesLeft = UNIT_TYPES.warrior.move; r2.hasAttacked = false;
   runAITurn(b);
   assert.equal(tradeRoute(b, town), 'cut', `raider at ${r2.q},${r2.r}, road ${pair.t.q},${pair.t.r}`);
+});
+
+test('unrest: a city taken from the enemy pays nothing and does not grow until calm, a garrison calms it twice as fast', () => {
+  const s = createGame({ seed: 3, fog: false, happenings: false });
+  s.units = [];
+  const enemyCity = s.cities.find((c) => c.owner === 1 && !c.capital) || (() => {
+    const c = s.cities.find((x) => x.owner === null); c.owner = 1; return c;
+  })();
+  const neutral = s.cities.find((c) => c.owner === null && c.id !== enemyCity.id);
+  assert.equal(cityUnrest(enemyCity), 0);
+  assert.equal(unrestText(s, enemyCity), '');
+  // a neutral city joins willingly
+  const n1 = neighbors(neutral.q, neutral.r).find((n) => isPassable(s, n.q, n.r) && !cityAt(s, n.q, n.r));
+  const a = spawnUnit(s, 'warrior', 0, n1.q, n1.r);
+  a.movesLeft = 2;
+  assert.ok(moveUnit(s, a.id, neutral.q, neutral.r));
+  assert.equal(neutral.owner, 0);
+  assert.equal(cityUnrest(neutral), 0, 'no unrest after taking a neutral city');
+  assert.equal(drainEvents(s).find((e) => e.type === 'capture').unrest, 0);
+  // an enemy city resists
+  enemyCity.size = 2;
+  const income = cityIncome(enemyCity, s);
+  const n2 = neighbors(enemyCity.q, enemyCity.r).find((n) => isPassable(s, n.q, n.r) && !cityAt(s, n.q, n.r));
+  const b = spawnUnit(s, 'warrior', 0, n2.q, n2.r);
+  b.movesLeft = 2;
+  const before = cloneState(s);
+  assert.ok(moveUnit(s, b.id, enemyCity.q, enemyCity.r));
+  assert.equal(enemyCity.owner, 0);
+  assert.equal(cityUnrest(enemyCity), UNREST.turns);
+  const evs = drainEvents(s);
+  assert.equal(evs.find((e) => e.type === 'capture').unrest, UNREST.turns);
+  for (const e of evs) applyEvent(before, e);
+  assert.equal(before.cities.find((c) => c.id === enemyCity.id).unrest, UNREST.turns, 'the capture replays with unrest');
+  assert.equal(cityIncome(enemyCity, s), 0, 'no income in unrest');
+  assert.equal(cityInfo(s, enemyCity).income, 0);
+  assert.equal(cityInfo(s, enemyCity).unrest, UNREST.turns);
+  assert.match(growthText(s, enemyCity), /growth halted: unrest$/);
+  assert.ok(income > 0);
+  // with the conqueror inside it calms by 2 per own turn
+  assert.equal(unrestCalm(s, enemyCity), UNREST.garrisonCalm);
+  assert.equal(unrestTurnsLeft(s, enemyCity), Math.ceil(UNREST.turns / UNREST.garrisonCalm));
+  assert.equal(unrestText(s, enemyCity), `Unrest: no income, no growth · calms in 2 turns (the garrison keeps order)`);
+  // without a garrison by 1
+  b.q = n2.q; b.r = n2.r;
+  assert.equal(unrestCalm(s, enemyCity), 1);
+  assert.equal(unrestText(s, enemyCity), `Unrest: no income, no growth · calms in ${UNREST.turns} turns (a garrison would calm it faster)`);
+  // play whole rounds without a garrison: the city pays nothing for turns.length-1 turns, then pays at once
+  const paid = [];
+  for (let i = 0; i < UNREST.turns; i++) {
+    s.current = 1;
+    const g = s.gold[0];
+    const growth = enemyCity.growth;
+    endTurn(s);
+    paid.push(s.gold[0] - g);
+    if (i < UNREST.turns - 1) {
+      assert.equal(cityUnrest(enemyCity), UNREST.turns - 1 - i);
+      assert.equal(enemyCity.growth, growth, 'no growth in unrest');
+      assert.equal(paid[i], incomeOf(s, 0));
+    }
+  }
+  assert.equal(cityUnrest(enemyCity), 0);
+  assert.equal(enemyCity.unrest, undefined, 'a calm city drops the field');
+  assert.equal(paid[UNREST.turns - 1], incomeOf(s, 0), 'a city that calms pays the same turn');
+  assert.ok(cityIncome(enemyCity, s) > 0);
+  const calmEv = drainEvents(s).find((e) => e.type === 'calm');
+  assert.deepEqual(calmEv, { type: 'calm', cityId: enemyCity.id, player: 0 });
+  assert.match(s.log.map((l) => l.msg).join('|'), new RegExp(`${enemyCity.name} accepted its new rulers`));
+  const copy = cloneState(s); copy.cities.find((c) => c.id === enemyCity.id).unrest = 2;
+  applyEvent(copy, calmEv);
+  assert.equal(cityUnrest(copy.cities.find((c) => c.id === enemyCity.id)), 0, 'the calm event replays');
+  assert.equal(soundFor({ type: 'calm', player: 0 }, 0), 'boon');
+  // with a garrison: 4 → 2 → 0, pays on the second turn
+  enemyCity.unrest = UNREST.turns;
+  b.q = enemyCity.q; b.r = enemyCity.r;
+  assert.deepEqual(calmCities(s, 0), []);
+  assert.equal(cityUnrest(enemyCity), UNREST.turns - UNREST.garrisonCalm);
+  assert.deepEqual(calmCities(s, 0).map((c) => c.id), [enemyCity.id]);
+  assert.deepEqual(calmCities(s, 1), [], 'only the owner\'s cities calm');
+  // an enemy unit inside doesn't count as a garrison
+  enemyCity.unrest = 3;
+  b.owner = 1;
+  assert.equal(unrestCalm(s, enemyCity), 1);
+  b.owner = 0;
+  // the old owner retaking it suffers the same
+  s.units = s.units.filter((u) => u.id !== b.id);
+  enemyCity.unrest = 1;
+  const back = spawnUnit(s, 'warrior', 1, n2.q, n2.r);
+  s.current = 1; back.movesLeft = 2; back.hasAttacked = false;
+  assert.ok(moveUnit(s, back.id, enemyCity.q, enemyCity.r));
+  assert.equal(enemyCity.owner, 1);
+  assert.equal(cityUnrest(enemyCity), UNREST.turns, 'retaking a city also starts unrest anew');
+  // no calming after the game is over
+  const over = cloneState(s); over.winner = 0;
+  assert.deepEqual(calmCities(over, 1), []);
+  // validation and migration
+  assert.equal(stateProblem(s), null);
+  const bad = cloneState(s); bad.cities[0].unrest = UNREST.turns + 1;
+  assert.match(stateProblem(bad), /bad unrest/);
+  const bad2 = cloneState(s); bad2.cities[0].unrest = 'x';
+  assert.match(stateProblem(bad2), /bad unrest/);
+  const old = cloneState(createGame({ seed: 2 }));
+  old.version = 26;
+  const m = migrateState(old);
+  assert.equal(m.version, STATE_VERSION);
+  assert.ok(m.cities.every((c) => cityUnrest(c) === 0));
+});
+
+test('unrest: the advisor sends a unit into an unguarded restless city, the AI keeps a garrison in one', () => {
+  const s = createGame({ seed: 3, fog: false, happenings: false });
+  s.units = [];
+  const city = s.cities.find((c) => c.owner === null);
+  city.owner = 0;
+  city.unrest = 3;
+  const n = neighbors(city.q, city.r).find((x) => isPassable(s, x.q, x.r) && !cityAt(s, x.q, x.r));
+  const u = spawnUnit(s, 'warrior', 0, n.q, n.r);
+  u.movesLeft = 2;
+  s.gold[0] = 0;
+  const tip = adviseTurn(s, 0).find((t) => t.kind === 'unrest');
+  assert.ok(tip, 'unrest hint');
+  assert.equal(tip.unitId, u.id);
+  assert.equal(tip.cityId, city.id);
+  assert.equal(tip.text, `${city.name} is in unrest – move ${unitTitle(u)} in as a garrison to calm it faster.`);
+  // nobody can reach it → no hint; a garrison inside → no hint; a calm city → no hint
+  u.movesLeft = 0;
+  assert.ok(!adviseTurn(s, 0).some((t) => t.kind === 'unrest'));
+  u.movesLeft = 2;
+  moveUnit(s, u.id, city.q, city.r);
+  u.movesLeft = 2;
+  assert.ok(!adviseTurn(s, 0).some((t) => t.kind === 'unrest'));
+  // AI: a unit standing in its restless city is kept there even with no enemy around
+  const ai = s.cities.find((c) => c.owner === null && c.id !== city.id);
+  ai.owner = 1;
+  const g = spawnUnit(s, 'archer', 1, ai.q, ai.r);
+  s.units = s.units.filter((x) => x.owner === 1); // no threats anywhere
+  s.current = 1;
+  assert.ok(!assignGarrisons(s, 1).has(g.id), 'a calm city needs no garrison without a threat');
+  ai.unrest = 2;
+  assert.equal(assignGarrisons(s, 1).get(g.id), ai);
+  g.movesLeft = unitMove(s, g);
+  runAITurn(s);
+  const g2 = getUnit(s, g.id);
+  assert.ok(g2 && g2.q === ai.q && g2.r === ai.r, 'the AI garrison stayed in the restless city');
 });

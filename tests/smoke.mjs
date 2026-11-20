@@ -881,6 +881,41 @@ try {
   if (looted.ruin || !looted.gone || !looted.log.includes('explored ancient ruins')) throw new Error(`ruins: not looted ${JSON.stringify(looted)}`);
   await page.keyboard.press('Escape'); // the next sections start without a selection
 
+  // unrest: a player unit walks into an AI city; the city panel shows the unrest and the roof flame is drawn
+  const riot = await page.evaluate(async () => {
+    const hex = await import('./src/hex.js');
+    const rnd = await import('./src/render.js');
+    const g = await import('./src/game.js');
+    window.__game.newGame(321, { fog: false, happenings: false });
+    const st = window.__game.getState();
+    const city = st.cities.find((c) => !c.capital);
+    city.owner = 1;
+    const u = st.units.find((x) => x.owner === 0);
+    const from = Object.values(st.tiles).find((t) => hex.distance(t, city) === 1 && g.isPassable(st, t.q, t.r)
+      && !st.units.some((x) => x.q === t.q && x.r === t.r) && !st.cities.some((c) => c.q === t.q && c.r === t.r));
+    if (!from) return { error: 'no free tile next to the city' };
+    u.q = from.q; u.r = from.r; u.movesLeft = 2; u.hasAttacked = false; delete u.fortified;
+    window.__game.refresh();
+    const rect = document.getElementById('board').getBoundingClientRect();
+    const k = rect.width / rnd.canvasSize(st).w;
+    const pt = (p) => { const c = rnd.tileCenter(p.q, p.r); return { x: rect.left + c.x * k, y: rect.top + c.y * k }; };
+    return { id: city.id, name: city.name, at: pt(city), unit: pt(u) };
+  });
+  if (riot.error) throw new Error(`unrest: ${riot.error}`);
+  await page.mouse.click(riot.unit.x, riot.unit.y);
+  await page.mouse.click(riot.at.x, riot.at.y);
+  await page.waitForFunction(() => !window.__game.isBusy(), null, { timeout: 5000 });
+  await page.mouse.move(riot.unit.x, riot.unit.y);
+  await page.mouse.move(riot.at.x, riot.at.y);
+  const riotInfo = await page.evaluate((id) => ({ unrest: window.__game.getState().cities.find((c) => c.id === id).unrest,
+    line: document.querySelector('#info .unrest')?.textContent || '', tip: document.getElementById('tooltip').textContent }), riot.id);
+  if (riotInfo.unrest !== 4 || !riotInfo.line.startsWith('✊ Unrest: no income, no growth · calms in 2 turns (the garrison keeps order)')
+    || !riotInfo.tip.includes('Unrest: no income')) {
+    throw new Error(`unrest: ${JSON.stringify(riotInfo)}`);
+  }
+  await page.screenshot({ path: 'artifacts/screenshot-unrest.png' });
+  await page.keyboard.press('Escape');
+
   // pillage: a unit on the AI's gold mine plunders it with the panel button, another one on its horses with P
   const raid = await page.evaluate(async () => {
     const g = await import('./src/game.js');

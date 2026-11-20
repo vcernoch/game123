@@ -1,7 +1,7 @@
 // Canvas rendering. No game logic, only drawing the state.
 import { hexToPixel, hexCorners, pixelToHex, key, neighbors, DIRS } from './hex.js';
 import { TERRAIN, UNIT_TYPES, PLAYERS, NEUTRAL_COLOR, RANKS, GROWTH } from './rules.js';
-import { territoryMap, ruinBelieved, isPillaged, citySize } from './game.js';
+import { territoryMap, ruinBelieved, isPillaged, citySize, cityUnrest } from './game.js';
 
 export const HEX_SIZE = 32;
 const PAD = 8;
@@ -734,6 +734,31 @@ function drawCity(ctx, city) {
   }
   drawBuildings(ctx, city, c.x, c.y);
   drawSize(ctx, city, c.x, c.y);
+  if (cityUnrest(city)) drawUnrest(ctx, c.x + houses[0][0], c.y + houses[0][1] - 5);
+  ctx.restore();
+}
+
+// Unrest: a small flame on the roof of the first house (x, y = the roof top).
+function drawUnrest(ctx, x0, y0) {
+  ctx.save();
+  ctx.translate(x0, y0);
+  ctx.scale(1.3, 1.3);
+  const x = 0;
+  const y = 0;
+  ctx.beginPath();
+  ctx.moveTo(x, y + 1);
+  ctx.bezierCurveTo(x - 6, y - 2, x - 3, y - 7, x - 1, y - 11);
+  ctx.bezierCurveTo(x, y - 7, x + 3, y - 8, x + 2, y - 12);
+  ctx.bezierCurveTo(x + 6, y - 7, x + 6, y - 2, x, y + 1);
+  ctx.fillStyle = '#ff7a1a';
+  ctx.strokeStyle = 'rgba(90,20,0,0.85)';
+  ctx.lineWidth = 1;
+  ctx.fill();
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.ellipse(x + 0.5, y - 3, 1.6, 3, 0, 0, Math.PI * 2);
+  ctx.fillStyle = '#ffe066';
+  ctx.fill();
   ctx.restore();
 }
 

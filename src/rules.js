@@ -263,6 +263,7 @@ export const ADVISOR = {
     capture:    { icon: '🏰', order: 3 },
     ruin:       { icon: '🏛', order: 4 },
     repair:     { icon: '🔧', order: 5 },
+    unrest:     { icon: '✊', order: 5.2 },
     trade:      { icon: '🛤', order: 5.5 },
     recruit:    { icon: '⚑', order: 6 },
     build:      { icon: '🔨', order: 7 },
@@ -292,6 +293,13 @@ export const GROWTH = {
 // The capital itself is the hub and earns nothing extra. Built roads join the network.
 export const TRADE = {
   income: 1,
+};
+
+// Unrest: a city taken from another player (not a neutral one) resists its new owner for a while –
+// no income and no growth. Each of the owner's turns calms it by 1, by `garrisonCalm` with an own unit inside.
+export const UNREST = {
+  turns: 4,
+  garrisonCalm: 2,
 };
 
 export const ECONOMY = {
