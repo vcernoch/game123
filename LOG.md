@@ -2,6 +2,19 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-21 – City focus (v0.38.0)
+- **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". Thanks for merging v0.37.0 into `main`; `dev` now holds only v0.38.0 on top of it.
+- Starting state green (113 logic tests + smoke). `dev` was fast-forwarded to the merge commit on `main` first (no force).
+- Phase 17 was done, so I opened phase 18 (city management, own improvement). Cities had no decision of their own besides buildings: every city simply grew and paid. Now the player chooses what each city works towards, which makes growth, sieges and frontier cities a trade-off.
+- `FOCUS` in `rules.js` (`kinds` balanced / commerce / granary / fortress with `gold`, `growth`, `defBonus`; `aiThreat` 3). In `game.js`: `focusOf`, `cityFocus`, `setFocus` (own city, own turn, free, emits a replayable `focus` event), `focusText`. `cityIncome` adds the focus gold (never below 0; a restless city still pays 0), `growCities` adds the focus growth rate (0 = halted), `growthLeft`/`growthText` follow it ("growth halted: commerce focus"), `cityDefenseMult` multiplies by the fortress bonus (siege engines ignore it like walls, via `defenseValue`). Income and growth are worked out at the owner's turn start, so the focus left at the end of a turn is the one that counts – switching mid-turn gains nothing. A captured city loses its focus (also in replay).
+- AI: `pickFocus` / `setFocuses` in `ai.js`, run at the end of the AI turn – fortress with a visible enemy within 3 tiles, balanced while restless or besieged, granary while it can grow, commerce once fully grown.
+- Advisor: new low-priority `focus` hint (after build) – a fully grown city not on Commerce, or a Fortress with no visible enemy within 3 tiles.
+- UI: "Focus" section with four buttons in the city panel (current one outlined), focus line in the panel and city tooltip, key C cycles it, a small badge right of the size dots on own cities (coin / ear of grain / tower; the AI's focus stays hidden, though a fortress shows in its defense %). Focus events of the AI are not animated. Help text updated.
+- Balance (20 AI-vs-AI games, Normal, both sides use focus, 300 half-turns max): wins 9 : 9, 2 stalemates, ~68 half-turns per game (without focus 8 : 11, 1, ~61). Focus share of owned city-turns: commerce 59 %, granary 21 %, fortress 19 %, balanced 2 %.
+- State structure: `state.version` 28 (optional `city.focus`, never stored as 'balanced' or on neutral cities), trivial migration; `stateProblem` validates it.
+- Tests: +2 logic (commerce income and halted growth, granary halves the wait, fortress defense vs. siege, income floor, who may set it, event + replay + sound, balanced removes the field, capture resets it incl. replay, validation, migration; AI picks per situation, `setFocuses` idempotent, a real 30-turn AI game keeps valid focuses and leaves the player's cities alone; advisor hints and when absent; C key). Smoke test: panel button sets Granary (growth line says 3 turns, no gold spent, `artifacts/screenshot-focus.png`), C cycles to Fortress, Balanced clears it.
+- Status: `npm run check` green (115 logic tests + smoke).
+
 ## 2026-11-20 – Unrest (v0.37.0)
 - **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.26.0–v0.37.0) is ahead of `main` (v0.25.0) – please merge it.
 - Starting state green (111 logic tests + smoke).

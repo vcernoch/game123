@@ -265,6 +265,7 @@ export const ADVISOR = {
     repair:     { icon: '🔧', order: 5 },
     unrest:     { icon: '✊', order: 5.2 },
     trade:      { icon: '🛤', order: 5.5 },
+    focus:      { icon: '⚖', order: 8 },
     recruit:    { icon: '⚑', order: 6 },
     build:      { icon: '🔨', order: 7 },
   },
@@ -300,6 +301,22 @@ export const TRADE = {
 export const UNREST = {
   turns: 4,
   garrisonCalm: 2,
+};
+
+// City focus: every own city works towards one goal, chosen by its owner at any time on their turn.
+// `gold` is added to the city's income (a city never pays less than 0; a restless one pays nothing anyway),
+// `growth` = growth progress per owner's turn (0 = growth halted), `defBonus` = extra garrison defense
+// (siege engines ignore it, as they ignore walls). Income and growth are worked out at the start of the
+// owner's turn, so the focus left at the end of a turn is the one that counts. A captured city goes back
+// to `balanced`. The AI fortifies a city with a visible enemy within `aiThreat` tiles.
+export const FOCUS = {
+  kinds: {
+    balanced: { name: 'Balanced', icon: '⚖', gold: 0, growth: 1, defBonus: 0, desc: 'no bonus, no cost' },
+    commerce: { name: 'Commerce', icon: '💰', gold: 1, growth: 0, defBonus: 0, desc: '+1 gold, but the city stops growing' },
+    granary: { name: 'Granary', icon: '🌾', gold: -1, growth: 2, defBonus: 0, desc: 'grows twice as fast, −1 gold' },
+    fortress: { name: 'Fortress', icon: '🏯', gold: -1, growth: 1, defBonus: 0.2, desc: 'garrison defense +20 %, −1 gold' },
+  },
+  aiThreat: 3,
 };
 
 export const ECONOMY = {

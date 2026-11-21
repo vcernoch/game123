@@ -25,6 +25,8 @@ export const SHORTCUTS = [
     match: (k) => k === 's' || k === 'S' },
   { keys: 'G', text: 'set the rally point of the selected city: units recruited there march to it', action: () => ({ type: 'rally' }),
     match: (k) => k === 'g' || k === 'G' },
+  { keys: 'C', text: 'change the focus of the selected city (balanced → commerce → granary → fortress)', action: () => ({ type: 'focus' }),
+    match: (k) => k === 'c' || k === 'C' },
   { keys: 'D', text: 'disband the selected unit (press twice; in an own city it returns some gold)', action: () => ({ type: 'disband' }),
     match: (k) => k === 'd' || k === 'D' },
   { keys: 'A', text: 'change the animation speed (normal → fast → off)', action: () => ({ type: 'animSpeed' }),

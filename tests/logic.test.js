@@ -16,13 +16,13 @@ import {
   canBuildRoad, buildRoad, roadLinks, canSentry, sentry, checkSentries, SENTRY_TEXT, volleyTarget, cityVolleys, animSpeedOf, nextAnimSpeed,
   unitTitle, heroName, hallOfFame, inspiredBy, inspireBonus, inspiredUnits, timelineFor, leadChanges, whose, adviseTurn, suggestRecruit,
   citySize, growthLeft, citySieged, growthText, growCities, tradeRoute, tradeText, cutRoutes, routesCutBy,
-  cityUnrest, unrestCalm, unrestTurnsLeft, unrestText, calmCities,
+  cityUnrest, unrestCalm, unrestTurnsLeft, unrestText, calmCities, focusOf, cityFocus, setFocus, focusText,
 } from '../src/game.js';
 import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
   dangerMap, dangerPenalty, moveTowardsGoal, DANGER, unexploredLand, SCOUT_WHEN_UNKNOWN, aiKnowledge,
   upgradeSomething, UPGRADE_HORSE_RADIUS, strikeLinedUp, pillageGoals, PILLAGE_DETOUR, repairGoals, REPAIR_DETOUR,
-  relieveWounded, RELIEF_MIN_HP, layRoad, blockadeGoals, BLOCKADE_DETOUR,
+  relieveWounded, RELIEF_MIN_HP, layRoad, blockadeGoals, BLOCKADE_DETOUR, pickFocus, setFocuses,
 } from '../src/ai.js';
 import { decideTap } from '../src/input.js';
 import { SHORTCUTS, keyAction, recruitKey } from '../src/keys.js';
@@ -35,7 +35,7 @@ import { distance, key, neighbors } from '../src/hex.js';
 import {
   RESOURCES, FORTIFY, TERRITORY, ECONOMY, UNIT_TYPES, TERRAIN, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FLANK, HIGH_GROUND, CHARGE, REPAIR,
   UPGRADES, UPGRADE, DISBAND, RUINS, EXPLORE, PILLAGE,
-  SIGHTINGS, ROADWORK, SENTRY, VOLLEY, ANIM_SPEEDS, HEROES, INSPIRE, MILESTONES, ADVISOR, GROWTH, TRADE, UNREST,
+  SIGHTINGS, ROADWORK, SENTRY, VOLLEY, ANIM_SPEEDS, HEROES, INSPIRE, MILESTONES, ADVISOR, GROWTH, TRADE, UNREST, FOCUS,
 } from '../src/rules.js';
 
 test('map is deterministic and starting cities are connected', () => {
@@ -4439,4 +4439,153 @@ test('unrest: the advisor sends a unit into an unguarded restless city, the AI k
   runAITurn(s);
   const g2 = getUnit(s, g.id);
   assert.ok(g2 && g2.q === ai.q && g2.r === ai.r, 'the AI garrison stayed in the restless city');
+});
+
+test('city focus: commerce, granary and fortress change income, growth and defense; the event replays; capture resets it', () => {
+  const s = createGame({ seed: 3, fog: false, happenings: false });
+  s.units = [];
+  const cap = s.cities.find((c) => c.owner === 0 && c.capital);
+  const neutral = s.cities.find((c) => c.owner === null);
+  assert.equal(focusOf(cap), 'balanced');
+  assert.equal(focusOf(neutral), 'balanced');
+  assert.equal(focusText(cap), `⚖ Focus: Balanced (no bonus, no cost)`);
+  const base = cityIncome(cap, s);
+  // who may set it
+  assert.ok(!setFocus(s, cap.id, 'nonsense'));
+  assert.ok(!setFocus(s, cap.id, 'balanced'), 'already balanced');
+  assert.ok(!setFocus(s, neutral.id, 'commerce'), 'not own city');
+  s.current = 1;
+  assert.ok(!setFocus(s, cap.id, 'commerce'), 'not on the enemy turn');
+  s.current = 0;
+  // commerce: +1 gold, no growth
+  const before = cloneState(s);
+  assert.ok(setFocus(s, cap.id, 'commerce'));
+  assert.equal(cap.focus, 'commerce');
+  assert.equal(cityIncome(cap, s), base + FOCUS.kinds.commerce.gold);
+  assert.equal(cityInfo(s, cap).focus, 'commerce');
+  assert.equal(growthLeft(cap), null);
+  assert.equal(growthText(s, cap), 'Size 1/3 · growth halted: commerce focus');
+  const evs = drainEvents(s);
+  assert.deepEqual(evs, [{ type: 'focus', cityId: cap.id, focus: 'commerce' }]);
+  for (const e of evs) applyEvent(before, e);
+  assert.equal(before.cities.find((c) => c.id === cap.id).focus, 'commerce', 'the focus replays');
+  assert.equal(soundFor(evs[0]), 'click');
+  for (let i = 0; i < 6; i++) { endTurn(s); endTurn(s); }
+  assert.equal(citySize(cap), 1, 'commerce halts growth');
+  assert.equal(cap.growth || 0, 0);
+  // granary: twice as fast, -1 gold; the income is paid at the start of the owner's turn
+  assert.ok(setFocus(s, cap.id, 'granary'));
+  assert.equal(cityIncome(cap, s), base + FOCUS.kinds.granary.gold);
+  assert.equal(growthLeft(cap), Math.ceil(GROWTH.turns[0] / 2));
+  assert.equal(growthText(s, cap), `Size 1/3 · grows in ${Math.ceil(GROWTH.turns[0] / 2)} turns`);
+  let turns = 0;
+  while (citySize(cap) === 1 && turns < 20) { endTurn(s); const g = s.gold[1]; endTurn(s); turns++; assert.ok(g >= 0); }
+  assert.equal(turns, Math.ceil(GROWTH.turns[0] / 2), 'granary halves the wait');
+  // balanced again: the event carries 'balanced' and the field disappears
+  const b2 = cloneState(s);
+  assert.ok(setFocus(s, cap.id, 'balanced'));
+  assert.equal(cap.focus, undefined);
+  for (const e of drainEvents(s)) applyEvent(b2, e);
+  assert.equal(b2.cities.find((c) => c.id === cap.id).focus, undefined);
+  // fortress: +20 % garrison defense, not against siege engines, -1 gold
+  const g = spawnUnit(s, 'warrior', 0, cap.q, cap.r);
+  const n = neighbors(cap.q, cap.r).find((x) => isPassable(s, x.q, x.r) && !cityAt(s, x.q, x.r));
+  const foe = spawnUnit(s, 'warrior', 1, n.q, n.r);
+  const cat = { ...foe, type: 'catapult' };
+  const plain = defenseValue(s, g, foe);
+  const vsSiege = defenseValue(s, g, cat);
+  const pct = cityInfo(s, cap).defensePct;
+  assert.ok(setFocus(s, cap.id, 'fortress'));
+  assert.ok(Math.abs(defenseValue(s, g, foe) - plain * (1 + FOCUS.kinds.fortress.defBonus)) < 1e-9);
+  assert.ok(Math.abs(defenseValue(s, g, cat) - vsSiege) < 1e-9, 'siege engines ignore the fortress');
+  assert.ok(cityInfo(s, cap).defensePct > pct);
+  assert.equal(cityIncome(cap, s), cityIncome(b2.cities.find((c) => c.id === cap.id), b2) + FOCUS.kinds.fortress.gold);
+  assert.match(growthText(s, cap), /growth halted: enemy at the gates/);
+  // income never goes below zero
+  const poor = { ...neutral, owner: 0, capital: false, buildings: [], focus: 'granary', unrest: undefined };
+  assert.ok(cityIncome(poor, s) >= 0);
+  // capture resets the focus (also in replay)
+  s.current = 1;
+  foe.movesLeft = 2;
+  s.units = s.units.filter((u) => u.id !== g.id);
+  const b3 = cloneState(s);
+  assert.ok(moveUnit(s, foe.id, cap.q, cap.r));
+  assert.equal(cap.owner, 1);
+  assert.equal(cap.focus, undefined, 'a captured city goes back to balanced');
+  for (const e of drainEvents(s)) applyEvent(b3, e);
+  assert.equal(b3.cities.find((c) => c.id === cap.id).focus, undefined);
+  // validation and migration
+  const v = cloneState(s);
+  v.cities[0].owner = 0; v.cities[0].focus = 'fortress';
+  assert.equal(stateProblem(v), null);
+  v.cities[0].focus = 'castle';
+  assert.match(stateProblem(v), /bad focus/);
+  v.cities[0].focus = 'balanced';
+  assert.match(stateProblem(v), /bad focus/, 'balanced is stored as no field');
+  v.cities[0].focus = 'commerce'; v.cities[0].owner = null;
+  assert.match(stateProblem(v), /bad focus/, 'neutral cities have no focus');
+  const old = cloneState(createGame({ seed: 2 }));
+  old.version = 27;
+  assert.equal(migrateState(old).version, STATE_VERSION);
+  assert.equal(STATE_VERSION, 28);
+});
+
+test('city focus: the AI picks fortress, granary or commerce; the advisor flags a wasted focus; C cycles it', () => {
+  const s = createGame({ seed: 3, fog: false, happenings: false });
+  s.units = [];
+  const aiCap = s.cities.find((c) => c.owner === 1 && c.capital);
+  s.current = 1;
+  const know = aiKnowledge(s, 1);
+  assert.equal(pickFocus(s, 1, aiCap, know), 'granary', 'a small calm city grows');
+  aiCap.size = GROWTH.maxSize;
+  assert.equal(pickFocus(s, 1, aiCap, know), 'commerce', 'a fully grown one trades');
+  const far = Object.values(s.tiles).find((t) => isPassable(s, t.q, t.r) && !cityAt(s, t.q, t.r) && distance(t, aiCap) === FOCUS.aiThreat);
+  const foe = spawnUnit(s, 'warrior', 0, far.q, far.r);
+  assert.equal(pickFocus(s, 1, aiCap, know), 'fortress', 'an enemy near: fortress');
+  aiCap.size = 1;
+  foe.q = 0; foe.r = 0;
+  const stillFar = distance(foe, aiCap) > FOCUS.aiThreat;
+  if (stillFar) {
+    aiCap.unrest = 2;
+    assert.equal(pickFocus(s, 1, aiCap, know), 'balanced', 'a restless city waits');
+    delete aiCap.unrest;
+  }
+  s.units = s.units.filter((u) => u.id !== foe.id);
+  assert.ok(setFocuses(s, 1, know) >= 1);
+  assert.equal(focusOf(aiCap), 'granary');
+  assert.equal(setFocuses(s, 1, know), 0, 'nothing changes the second time');
+  // a real AI turn leaves every own city with a sensible focus, and the player's cities untouched
+  const t = createGame({ seed: 5, fog: true, happenings: false });
+  for (let i = 0; i < 30 && t.winner === null; i++) {
+    endTurn(t);
+    runAITurn(t);
+    for (const c of t.cities.filter((x) => x.owner === 1)) assert.ok(FOCUS.kinds[focusOf(c)]);
+    for (const c of t.cities.filter((x) => x.owner === 0)) assert.equal(c.focus, undefined);
+    assert.equal(stateProblem(t), null);
+    t.events = [];
+    if (t.winner === null) endTurn(t);
+    t.current = 0;
+  }
+  // advisor: a fully grown city that isn't on commerce, an idle fortress
+  const a = createGame({ seed: 3, fog: false, happenings: false });
+  a.units = [];
+  a.gold[0] = 0;
+  const cap = a.cities.find((c) => c.owner === 0 && c.capital);
+  assert.ok(!adviseTurn(a, 0).some((x) => x.kind === 'focus'));
+  cap.size = GROWTH.maxSize;
+  let tip = adviseTurn(a, 0).find((x) => x.kind === 'focus');
+  assert.equal(tip.text, `${cap.name} is fully grown – switch its focus from Balanced to Commerce (+1 gold a turn).`);
+  assert.equal(tip.cityId, cap.id);
+  setFocus(a, cap.id, 'commerce');
+  assert.ok(!adviseTurn(a, 0).some((x) => x.kind === 'focus'));
+  cap.size = 1;
+  setFocus(a, cap.id, 'fortress');
+  tip = adviseTurn(a, 0).find((x) => x.kind === 'focus');
+  assert.equal(tip.text, `No enemy in sight near ${cap.name} – its Fortress focus costs 1 gold a turn.`);
+  const n = neighbors(cap.q, cap.r).find((x) => isPassable(a, x.q, x.r) && !cityAt(a, x.q, x.r));
+  spawnUnit(a, 'warrior', 1, n.q, n.r);
+  assert.ok(!adviseTurn(a, 0).some((x) => x.kind === 'focus'), 'an enemy in sight: the fortress is no waste');
+  // keyboard
+  assert.deepEqual(keyAction('c'), { type: 'focus' });
+  assert.deepEqual(keyAction('C'), { type: 'focus' });
 });

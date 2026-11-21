@@ -4,7 +4,7 @@ import { generateMap, hasRiverEdge } from './map.js';
 import {
   TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY, VISION, DIFFICULTY, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, ROAD_COST, RIVER, FLANK, HIGH_GROUND, CHARGE, INSPIRE,
   FACTIONS, NO_FACTION, MAP_SIZES, HAPPENINGS, FORTIFY, TERRITORY, RESOURCES,
-  UPGRADES, UPGRADE, DISBAND, SIGHTINGS, RUINS, EXPLORE, PILLAGE, REPAIR, ROADWORK, SENTRY, VOLLEY, ANIM_SPEEDS, HEROES, MILESTONES, ADVISOR, GROWTH, TRADE, UNREST,
+  UPGRADES, UPGRADE, DISBAND, SIGHTINGS, RUINS, EXPLORE, PILLAGE, REPAIR, ROADWORK, SENTRY, VOLLEY, ANIM_SPEEDS, HEROES, MILESTONES, ADVISOR, GROWTH, TRADE, UNREST, FOCUS,
 } from './rules.js';
 import { createRng } from './rng.js';
 
@@ -130,7 +130,7 @@ function countStat(state, name, player) {
   state.stats[name][player]++;
 }
 
-export const STATE_VERSION = 27;
+export const STATE_VERSION = 28;
 
 // Converts a saved state of an older version to the current one; returns null for an unknown format.
 export function migrateState(s) {
@@ -246,6 +246,10 @@ export function migrateState(s) {
   if (s.version === 26) {
     // unrest arrived in version 27 – a missing `city.unrest` means the city is calm
     s.version = 27;
+  }
+  if (s.version === 27) {
+    // city focus arrived in version 28 – a missing `city.focus` means balanced
+    s.version = 28;
   }
   return s.version === STATE_VERSION ? s : null;
 }
@@ -432,9 +436,13 @@ export function applyEvent(state, ev) {
     if (c) {
       c.owner = ev.owner;
       delete c.rally;
+      delete c.focus;
       if (ev.size) { c.size = ev.size; c.growth = 0; }
       if (ev.unrest) c.unrest = ev.unrest; else delete c.unrest;
     }
+  } else if (ev.type === 'focus') {
+    const c = state.cities.find((x) => x.id === ev.cityId);
+    if (c) { if (ev.focus === 'balanced') delete c.focus; else c.focus = ev.focus; }
   } else if (ev.type === 'calm') {
     const c = state.cities.find((x) => x.id === ev.cityId);
     if (c) delete c.unrest;
@@ -548,7 +556,35 @@ export function cityIncome(city, state = null) {
   const temple = hasBuilding(city, 'temple') ? BUILDING_EFFECTS.templeIncome : 0;
   const mines = state ? cityResources(state, city).filter((t) => t.resource === 'gold' && !isPillaged(state, t)).length * RESOURCES.gold.income : 0;
   const trade = state && tradeRoute(state, city) === 'linked' ? TRADE.income : 0;
-  return base + faction + market + temple + mines + (citySize(city) - 1) * GROWTH.income + trade;
+  return Math.max(0, base + faction + market + temple + mines + (citySize(city) - 1) * GROWTH.income + trade + cityFocus(city).gold);
+}
+
+// ---------- city focus ----------
+
+// Focus id of a city ('balanced' when missing, unknown or neutral).
+export function focusOf(city) {
+  return city.owner !== null && FOCUS.kinds[city.focus] ? city.focus : 'balanced';
+}
+
+// Focus settings of a city (see FOCUS in rules.js).
+export function cityFocus(city) {
+  return FOCUS.kinds[focusOf(city)];
+}
+
+// The current player sets the focus of an own city. Returns false when nothing changed.
+export function setFocus(state, cityId, focus) {
+  const city = state.cities.find((c) => c.id === cityId);
+  if (!city || !FOCUS.kinds[focus] || city.owner !== state.current || state.winner !== null) return false;
+  if (focusOf(city) === focus) return false;
+  if (focus === 'balanced') delete city.focus; else city.focus = focus;
+  emit(state, { type: 'focus', cityId, focus });
+  return true;
+}
+
+// Focus line for panels and tooltips.
+export function focusText(city) {
+  const f = cityFocus(city);
+  return `${f.icon} Focus: ${f.name} (${f.desc})`;
 }
 
 // ---------- trade routes ----------
@@ -689,10 +725,12 @@ export function citySize(city) {
 }
 
 // Owner's turns still needed to reach the next size (null at the largest size or for a neutral city).
+// A commerce focus halts growth (null too); a granary halves the wait.
 export function growthLeft(city) {
   const size = citySize(city);
-  if (city.owner === null || size >= GROWTH.maxSize) return null;
-  return Math.max(1, GROWTH.turns[size - 1] - (city.growth || 0));
+  const rate = cityFocus(city).growth;
+  if (city.owner === null || size >= GROWTH.maxSize || !rate) return null;
+  return Math.max(1, Math.ceil((GROWTH.turns[size - 1] - (city.growth || 0)) / rate));
 }
 
 // An enemy unit next to the city halts its growth (a siege).
@@ -712,6 +750,7 @@ export function growthText(state, city) {
   if (size >= GROWTH.maxSize) return `${base} · fully grown`;
   if (cityUnrest(city)) return `${base} · growth halted: unrest`;
   if (citySieged(state, city)) return `${base} · growth halted: enemy at the gates`;
+  if (!cityFocus(city).growth) return `${base} · growth halted: ${cityFocus(city).name.toLowerCase()} focus`;
   const left = growthLeft(city);
   return `${base} · grows in ${left} turn${left === 1 ? '' : 's'}`;
 }
@@ -723,8 +762,9 @@ export function growCities(state, player) {
   const grown = [];
   for (const city of state.cities.filter((c) => c.owner === player)) {
     const size = citySize(city);
-    if (size >= GROWTH.maxSize || citySieged(state, city) || cityUnrest(city)) continue;
-    city.growth = (city.growth || 0) + 1;
+    const rate = cityFocus(city).growth;
+    if (size >= GROWTH.maxSize || !rate || citySieged(state, city) || cityUnrest(city)) continue;
+    city.growth = (city.growth || 0) + rate;
     if (city.growth < GROWTH.turns[size - 1]) continue;
     city.size = size + 1;
     city.growth = 0;
@@ -752,8 +792,9 @@ export function citySight(city) {
 }
 
 // Garrison defense multiplier in an own city (city + walls, if any).
+// A fortress focus adds its bonus (siege engines ignore both, see defenseValue).
 export function cityDefenseMult(city) {
-  return (1 + CITY_DEF_BONUS) * (hasBuilding(city, 'walls') ? 1 + BUILDING_EFFECTS.wallsDefense : 1);
+  return (1 + CITY_DEF_BONUS) * (hasBuilding(city, 'walls') ? 1 + BUILDING_EFFECTS.wallsDefense : 1) * (1 + cityFocus(city).defBonus);
 }
 
 // Unit cost when recruiting in the given city (barracks and the owner's faction make it cheaper).
@@ -789,6 +830,7 @@ export function cityInfo(state, city) {
     garrison: garrison && garrison.owner === city.owner ? garrison : null,
     size: citySize(city),
     unrest: cityUnrest(city),
+    focus: focusOf(city),
   };
 }
 
@@ -1676,6 +1718,7 @@ export function moveUnit(state, unitId, q, r) {
     const prev = city.owner;
     city.owner = unit.owner;
     delete city.rally; // the old owner's rally point means nothing to the new one
+    delete city.focus; // … nor does their focus
     city.size = Math.max(1, citySize(city) - GROWTH.captureLoss); // a conquered city shrinks …
     city.growth = 0; // … and starts growing anew
     if (prev !== null) city.unrest = UNREST.turns; // the people of a conquered city resist (neutral ones join willingly)
@@ -2581,6 +2624,18 @@ export function adviseTurn(state, player) {
     break;
   }
 
+  // a city focus that only costs gold: a fully grown city that isn't on commerce, a fortress with no
+  // visible enemy near (one hint at most)
+  const grown = cities.find((c) => citySize(c) >= GROWTH.maxSize && !cityUnrest(c) && focusOf(c) !== 'commerce' && focusOf(c) !== 'fortress');
+  const idleFort = cities.find((c) => focusOf(c) === 'fortress' && !enemies.some((e) => distance(c, e) <= ADVISOR.dangerRange));
+  if (grown) {
+    add('focus', `${grown.name} is fully grown – switch its focus from ${cityFocus(grown).name} to Commerce (+${FOCUS.kinds.commerce.gold} gold a turn).`,
+      grown, { cityId: grown.id, focus: 'commerce' });
+  } else if (idleFort) {
+    add('focus', `No enemy in sight near ${idleFort.name} – its Fortress focus costs ${-FOCUS.kinds.fortress.gold} gold a turn.`,
+      idleFort, { cityId: idleFort.id, focus: 'balanced' });
+  }
+
   // gold to spend: recruit in a free city (naming the suggested type), otherwise build
   // (keeping enough for a recruit later)
   const free = cities.find((c) => !unitAt(state, c.q, c.r)
@@ -2729,6 +2784,7 @@ export function stateProblem(s) {
     if (c.rally !== undefined && !(c.rally && s.tiles[key(c.rally.q, c.rally.r)])) return `bad rally point of ${c.name}`;
     if (c.size !== undefined && !(isInt(c.size) && c.size >= 1 && c.size <= GROWTH.maxSize)) return `bad size of ${c.name}`;
     if (c.growth !== undefined && !(isInt(c.growth) && c.growth >= 0 && c.growth < 100)) return `bad growth of ${c.name}`;
+    if (c.focus !== undefined && !(Object.hasOwn(FOCUS.kinds, c.focus) && c.focus !== 'balanced' && c.owner !== null)) return `bad focus of ${c.name}`;
     if (c.unrest !== undefined && !(isInt(c.unrest) && c.unrest >= 0 && c.unrest <= UNREST.turns)) return `bad unrest of ${c.name}`;
   }
   const taken = new Set();

@@ -169,6 +169,7 @@ export function createAnimator(redraw, isVisible = () => true, onShow = () => {}
     if (ev.type === 'spawn') return see(ev.unit);
     if (ev.type === 'fortify' || ev.type === 'upgrade') return see(getUnit(st, ev.unitId));
     if (ev.type === 'volley') return see(ev) || see(st.cities.find((c) => c.id === ev.cityId));
+    if (ev.type === 'focus') return false; // a city's focus is the owner's secret – nothing to watch
     if (ev.type === 'disband' || ev.type === 'ruin' || ev.type === 'pillage' || ev.type === 'repair' || ev.type === 'road') return see(ev);
     return true;
   }

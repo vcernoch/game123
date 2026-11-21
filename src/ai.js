@@ -5,8 +5,9 @@ import {
   unitAt, getUnit, tileAt, fortify, difficultyOf, visibleTiles, exploredTiles, build, hasBuilding, unitCost, buildingCost, factionOf,
   threatTiles, cityAt, upgradeOptions, upgradeUnit, ruinBelieved, canPillage, pillage, isPillaged, repair, pillageTurnsLeft, territoryOwner,
   swapPartners, swapUnits, canBuildRoad, buildRoad, roadLinks, citySize, tradeTargets, cutsAt, cityUnrest,
+  focusOf, setFocus, citySieged,
 } from './game.js';
-import { UNIT_TYPES, TERRAIN, ROADWORK, GROWTH } from './rules.js';
+import { UNIT_TYPES, TERRAIN, ROADWORK, GROWTH, FOCUS } from './rules.js';
 
 // What the AI knows about the map. On hard it sees everything, otherwise only what it has explored and sees.
 export function aiKnowledge(state, me) {
@@ -57,6 +58,28 @@ export function runAITurn(state) {
   recruit(state, me);
   buildSomething(state, me);
   layRoad(state, me, know);
+  setFocuses(state, me, know);
+}
+
+// The focus the AI wants for an own city: a fortress when a visible enemy is near, a granary while the
+// city can still grow (not restless, not besieged), commerce once it is fully grown; balanced otherwise.
+export function pickFocus(state, me, city, know = aiKnowledge(state, me)) {
+  const threatened = state.units.some((u) => u.owner !== me && know.sees(u.q, u.r) && distance(u, city) <= FOCUS.aiThreat);
+  if (threatened) return 'fortress';
+  if (cityUnrest(city)) return 'balanced';
+  if (citySize(city) >= GROWTH.maxSize) return 'commerce';
+  return citySieged(state, city) ? 'balanced' : 'granary';
+}
+
+// Sets the focus of every own city at the end of the AI's turn (that's when it counts). Returns the
+// number of cities whose focus changed.
+export function setFocuses(state, me, know = aiKnowledge(state, me)) {
+  let changed = 0;
+  for (const city of state.cities.filter((c) => c.owner === me)) {
+    const want = pickFocus(state, me, city, know);
+    if (want !== focusOf(city) && setFocus(state, city.id, want)) changed++;
+  }
+  return changed;
 }
 
 // Road building: with spare gold, one idle unit a turn lays a road in own territory where it joins the

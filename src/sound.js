@@ -22,6 +22,7 @@ export function soundFor(ev, viewer = 0) {
     case 'volley': return 'hit';
     case 'grow': return 'boon';
     case 'calm': return 'boon';
+    case 'focus': return 'click';
     case 'happening': {
       const good = ev.kind === 'harvest' || ev.suppressed;
       return (ev.player === viewer) === good ? 'boon' : 'bane';

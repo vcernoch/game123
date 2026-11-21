@@ -152,6 +152,9 @@ fieldset .seed-row + small { margin-left: 0; }
 .trade.cut { color: #ff9b8a; }
 .trade.none { opacity: 0.75; }
 .unrest { color: #ffb36b; }
+.focus-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 8px; }
+.focus-btns button { padding-left: 6px; padding-right: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.focus-btns button.on { outline: 2px solid var(--text); outline-offset: 1px; font-weight: 700; }
 .resource.ruin { color: #d9cbff; }
 kbd { font: 600 11px ui-monospace, monospace; background: #3c434f; color: var(--text); border-radius: 4px; padding: 1px 5px; border-bottom: 2px solid #20242c; }
 .hotkey { margin-right: 4px; opacity: 0.85; }

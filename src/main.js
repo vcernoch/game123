@@ -7,7 +7,7 @@ import {
   upgradeOptions, upgradeUnit, canDisband, disbandRefund, disbandUnit, chargeReady,
   updateSightings, lastSeen, lastSeenAt, lastSeenText, armyOverview, ARMY_STATUS, ruinBelieved,
   canExplore, setExplore, canPillage, pillage, isPillaged, pillageTurnsLeft, canRepair, repair,
-  rallyPath, setRally, clearRally, swapPartners, swapUnits, canBuildRoad, buildRoad, timelineFor, adviseTurn, suggestRecruit, growthText, tradeText, tradeRoute, unrestText,
+  rallyPath, setRally, clearRally, swapPartners, swapUnits, canBuildRoad, buildRoad, timelineFor, adviseTurn, suggestRecruit, growthText, tradeText, tradeRoute, unrestText, focusOf, focusText, setFocus,
 } from './game.js';
 import { createAnimator } from './anim.js';
 import { decideTap } from './input.js';
@@ -19,7 +19,7 @@ import { SHORTCUTS, keyAction, recruitKey } from './keys.js';
 import { render, canvasSize, pickHex, tileCenter } from './render.js';
 import { key } from './hex.js';
 import {
-  UNIT_TYPES, TERRAIN, PLAYERS, DIFFICULTY, BUILDINGS, RANKS, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FORTIFY, TERRITORY, ECONOMY, RESOURCES, HIGH_GROUND, CHARGE, INSPIRE, RUINS, PILLAGE, REPAIR, ROADWORK, SENTRY,
+  UNIT_TYPES, TERRAIN, PLAYERS, DIFFICULTY, BUILDINGS, RANKS, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FORTIFY, TERRITORY, ECONOMY, RESOURCES, HIGH_GROUND, CHARGE, INSPIRE, RUINS, PILLAGE, REPAIR, ROADWORK, SENTRY, FOCUS,
 } from './rules.js';
 
 const SAVE_KEY = 'game123-save';
@@ -287,6 +287,7 @@ function updateHud() {
       <p class="growth">${sizeText(city)}</p>`;
     if (city.owner === 0 && unrestText(state, city)) html += `<p class="unrest">✊ ${unrestText(state, city)}</p>`;
     if (city.owner === 0) html += `<p class="trade ${tradeRoute(state, city)}">🛤 ${tradeText(state, city)}</p>`;
+    if (city.owner === 0 && (state.current !== 0 || busy())) html += `<p class="focus">${focusText(city)}</p>`;
     const res = cityResources(state, city).filter((t) => exploredTiles(state, 0).has(key(t.q, t.r)));
     if (res.length) html += `<p class="resource">Resources: ${res.map((t) => RESOURCES[t.resource].name + (isPillaged(state, t) ? ` (🔥 pillaged, ${pillageTurnsLeft(state, t)} more)` : '')).join(', ')}</p>`;
     const built = (city.buildings || []).map((b) => `<span class="building">${BUILDINGS[b].symbol} ${BUILDINGS[b].name}</span>`);
@@ -304,6 +305,7 @@ function updateHud() {
       html += '</div>';
       if (pick) html += `<p class="hint suggest">★ Suggested: ${UNIT_TYPES[pick.type].name} – ${pick.reason}.</p>`;
       if (blocked) html += '<p class="hint">The city is occupied – move the unit out first.</p>';
+      html += focusPanel(city);
       html += rallyPanel(city);
       const todo = Object.entries(BUILDINGS).filter(([b]) => !hasBuilding(city, b));
       if (todo.length) {
@@ -412,6 +414,26 @@ function rallyPanel(city) {
   }
   html += '<p class="hint">Set a flag and every unit recruited here walks there on its own.</p>';
   return `${html}<button data-rally class="secondary wide-btn" title="Pick a tile on the map (G)">🚩 Set rally point</button>`;
+}
+
+// City focus: one button per kind, the current one pressed (C cycles through them).
+function focusPanel(city) {
+  const now = focusOf(city);
+  let html = '<h4>Focus</h4><div class="focus-btns">';
+  for (const [id, f] of Object.entries(FOCUS.kinds)) {
+    html += `<button data-focus="${id}" class="secondary${id === now ? ' on' : ''}" aria-pressed="${id === now}" title="${f.name}: ${f.desc} (C)">${f.icon} ${f.name}</button>`;
+  }
+  return `${html}</div><p class="hint focus">${focusText(city)}</p>`;
+}
+
+// Sets the selected own city's focus (panel button), or with no id moves on to the next kind (C).
+function focusSelected(id = null) {
+  const city = state.cities.find((c) => c.id === selectedCityId);
+  if (!city || city.owner !== 0 || state.current !== 0 || busy()) return;
+  const ids = Object.keys(FOCUS.kinds);
+  const next = id || ids[(ids.indexOf(focusOf(city)) + 1) % ids.length];
+  if (setFocus(state, city.id, next)) { undoStack = []; drainEvents(state); sound.play('click'); save(); }
+  draw();
 }
 
 // Starts picking the rally point of the selected own city (G / panel button); pressing again cancels.
@@ -712,7 +734,7 @@ function cityTipText(city) {
   const owner = city.owner === null ? 'neutral' : PLAYERS[city.owner].name;
   const gar = ci.garrison ? UNIT_TYPES[ci.garrison.type].name : 'no garrison';
   const bs = (city.buildings || []).map((b) => BUILDINGS[b].name).join(', ');
-  return `${city.name} (${owner}): +${ci.income} gold/turn · defense +${ci.defensePct} % · ${gar}${bs ? ` · ${bs}` : ''}\n${sizeText(city)}${city.owner === 0 ? `\n${tradeText(state, city)}` : ''}${city.owner === 0 && unrestText(state, city) ? `\n${unrestText(state, city)}` : ''}`;
+  return `${city.name} (${owner}): +${ci.income} gold/turn · defense +${ci.defensePct} % · ${gar}${bs ? ` · ${bs}` : ''}\n${sizeText(city)}${city.owner === 0 ? `\n${tradeText(state, city)}` : ''}${city.owner === 0 && unrestText(state, city) ? `\n${unrestText(state, city)}` : ''}${city.owner === 0 ? `\n${focusText(city)}` : ''}`;
 }
 
 // City size line: own cities also show their growth progress; for others (the AI's progress is
@@ -1032,6 +1054,8 @@ $('info').addEventListener('click', (ev) => {
     draw();
     return;
   }
+  const fBtn = ev.target.closest('button[data-focus]');
+  if (fBtn) { focusSelected(fBtn.dataset.focus); return; }
   if (ev.target.closest('button[data-swap]')) { startSwapPick(); return; }
   if (ev.target.closest('button[data-fortify]')) { fortifySelected(); return; }
   if (ev.target.closest('button[data-explore]')) { exploreSelected(); return; }
@@ -1080,6 +1104,7 @@ window.addEventListener('keydown', (ev) => {
   else if (act.type === 'threats') toggleThreats();
   else if (act.type === 'animSpeed') cycleAnimSpeed();
   else if (act.type === 'rally') startRallyPick();
+  else if (act.type === 'focus') focusSelected();
   else if (act.type === 'swap') startSwapPick();
   else if (act.type === 'escape') {
     if (busy()) { anim.skip(); return; }

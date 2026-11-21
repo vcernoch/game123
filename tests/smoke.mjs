@@ -373,6 +373,27 @@ try {
   if (!/Trade hub/.test(trade)) throw new Error(`city panel trade line wrong: ${trade}`);
   await page.screenshot({ path: 'artifacts/screenshot-city-panel.png' });
 
+  // city focus: the panel button sets it, the growth line follows, C cycles on, Balanced resets it
+  const focusGold0 = await page.evaluate(() => window.__game.getState().gold[0]);
+  await page.locator('button[data-focus="granary"]').click();
+  const foc = await page.evaluate(() => ({
+    focus: window.__game.getState().cities.find((c) => c.owner === 0 && c.capital).focus,
+    pressed: document.querySelector('button[data-focus].on')?.dataset.focus,
+    hint: document.querySelector('.hint.focus')?.textContent,
+    growth: document.querySelector('.growth')?.textContent,
+    gold: window.__game.getState().gold[0],
+  }));
+  if (foc.focus !== 'granary' || foc.pressed !== 'granary' || !/Granary/.test(foc.hint || '') || !/grows in 3 turns/.test(foc.growth || '') || foc.gold !== focusGold0) {
+    throw new Error(`city focus button: ${JSON.stringify(foc)}`);
+  }
+  await page.screenshot({ path: 'artifacts/screenshot-focus.png' });
+  await page.keyboard.press('c');
+  const cycled = await page.evaluate(() => window.__game.getState().cities.find((c) => c.owner === 0 && c.capital).focus);
+  if (cycled !== 'fortress') throw new Error(`key C did not cycle the focus: ${cycled}`);
+  await page.locator('button[data-focus="balanced"]').click();
+  const reset = await page.evaluate(() => window.__game.getState().cities.find((c) => c.owner === 0 && c.capital).focus);
+  if (reset !== undefined) throw new Error(`balanced focus is stored: ${reset}`);
+
   // number key recruits in the selected city (the capital must be empty first)
   await page.evaluate(() => {
     const st = window.__game.getState();

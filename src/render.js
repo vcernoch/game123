@@ -1,7 +1,7 @@
 // Canvas rendering. No game logic, only drawing the state.
 import { hexToPixel, hexCorners, pixelToHex, key, neighbors, DIRS } from './hex.js';
 import { TERRAIN, UNIT_TYPES, PLAYERS, NEUTRAL_COLOR, RANKS, GROWTH } from './rules.js';
-import { territoryMap, ruinBelieved, isPillaged, citySize, cityUnrest } from './game.js';
+import { territoryMap, ruinBelieved, isPillaged, citySize, cityUnrest, focusOf } from './game.js';
 
 export const HEX_SIZE = 32;
 const PAD = 8;
@@ -735,6 +735,45 @@ function drawCity(ctx, city) {
   drawBuildings(ctx, city, c.x, c.y);
   drawSize(ctx, city, c.x, c.y);
   if (cityUnrest(city)) drawUnrest(ctx, c.x + houses[0][0], c.y + houses[0][1] - 5);
+  if (city.owner === 0) drawFocus(ctx, focusOf(city), c.x + 15, c.y + 25); // the AI's focus stays its secret
+  ctx.restore();
+}
+
+// City focus badge right of the size dots (nothing for balanced): commerce = gold coin,
+// granary = green disc with an ear of grain, fortress = small grey tower.
+function drawFocus(ctx, focus, x, y) {
+  if (focus === 'balanced') return;
+  ctx.save();
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = 'rgba(0,0,0,0.75)';
+  if (focus === 'fortress') {
+    ctx.fillStyle = '#b9b4a8';
+    ctx.beginPath();
+    ctx.moveTo(x - 4, y + 4);
+    ctx.lineTo(x - 4, y - 4);
+    for (const dx of [-4, -1.5, 1.5]) { ctx.lineTo(x + dx, y - 6); ctx.lineTo(x + dx + 1.3, y - 6); ctx.lineTo(x + dx + 1.3, y - 4); ctx.lineTo(x + dx + 2.5, y - 4); }
+    ctx.lineTo(x + 4, y - 6);
+    ctx.lineTo(x + 4, y + 4);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+  } else {
+    ctx.beginPath();
+    ctx.arc(x, y, 4.5, 0, Math.PI * 2);
+    ctx.fillStyle = focus === 'commerce' ? '#f2c84b' : '#7fbf4d';
+    ctx.fill();
+    ctx.stroke();
+    ctx.strokeStyle = focus === 'commerce' ? 'rgba(120,80,0,0.9)' : '#f4e7a1';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    if (focus === 'commerce') {
+      ctx.arc(x, y, 2.3, 0, Math.PI * 2);
+    } else {
+      ctx.moveTo(x, y + 3); ctx.lineTo(x, y - 3);
+      for (const dy of [-2, 0, 2]) { ctx.moveTo(x, y + dy); ctx.lineTo(x - 2, y + dy - 1.5); ctx.moveTo(x, y + dy); ctx.lineTo(x + 2, y + dy - 1.5); }
+    }
+    ctx.stroke();
+  }
   ctx.restore();
 }
 

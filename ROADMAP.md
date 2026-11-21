@@ -107,5 +107,8 @@ Check off `[x]` when done. Add new ideas to the end of the relevant phase or to 
 - [x] Trade routes: an own city linked to an own capital by an unbroken road chain (own cities are links, neutral/enemy cities aren't) earns +1 gold; an enemy unit on the road cuts it; built roads can link a city; the city panel shows the route, the advisor points at a visible blocker, AI melee units blockade nearby enemy roads
 - [x] Unrest: a city taken from the enemy (not a neutral one) pays no gold and doesn't grow until it calms – 4 of its new owner's turns, 2 with an own garrison inside; a flame on the roof, the city panel and tooltip count down, the advisor sends a unit in, the AI keeps its conquerors in place
 
+## Phase 18 – city management (own improvements)
+- [x] City focus (C): each own city is Balanced, Commerce (+1 gold, no growth), Granary (grows twice as fast, −1 gold) or Fortress (garrison +20 % defense, −1 gold; catapults ignore it); a badge on the tile, panel buttons, advisor flags a wasted focus, the AI fortifies threatened cities, grows small ones and trades in grown ones
+
 ## Ideas (unordered)
 - Diplomacy with multiple AIs
