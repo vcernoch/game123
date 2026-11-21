@@ -27,6 +27,8 @@ export const SHORTCUTS = [
     match: (k) => k === 'g' || k === 'G' },
   { keys: 'C', text: 'change the focus of the selected city (balanced → commerce → granary → fortress)', action: () => ({ type: 'focus' }),
     match: (k) => k === 'c' || k === 'C' },
+  { keys: 'L', text: 'levy a free Warrior in the selected city (size 2+; the city loses a size)', action: () => ({ type: 'levy' }),
+    match: (k) => k === 'l' || k === 'L' },
   { keys: 'D', text: 'disband the selected unit (press twice; in an own city it returns some gold)', action: () => ({ type: 'disband' }),
     match: (k) => k === 'd' || k === 'D' },
   { keys: 'A', text: 'change the animation speed (normal → fast → off)', action: () => ({ type: 'animSpeed' }),

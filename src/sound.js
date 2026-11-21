@@ -23,6 +23,7 @@ export function soundFor(ev, viewer = 0) {
     case 'grow': return 'boon';
     case 'calm': return 'boon';
     case 'focus': return 'click';
+    case 'levy': return null; // the spawn right after it plays the recruit sound
     case 'happening': {
       const good = ev.kind === 'harvest' || ev.suppressed;
       return (ev.player === viewer) === good ? 'boon' : 'bane';

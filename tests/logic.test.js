@@ -17,12 +17,13 @@ import {
   unitTitle, heroName, hallOfFame, inspiredBy, inspireBonus, inspiredUnits, timelineFor, leadChanges, whose, adviseTurn, suggestRecruit,
   citySize, growthLeft, citySieged, growthText, growCities, tradeRoute, tradeText, cutRoutes, routesCutBy,
   cityUnrest, unrestCalm, unrestTurnsLeft, unrestText, calmCities, focusOf, cityFocus, setFocus, focusText,
+  levy, canLevy, levyProblem,
 } from '../src/game.js';
 import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
   dangerMap, dangerPenalty, moveTowardsGoal, DANGER, unexploredLand, SCOUT_WHEN_UNKNOWN, aiKnowledge,
   upgradeSomething, UPGRADE_HORSE_RADIUS, strikeLinedUp, pillageGoals, PILLAGE_DETOUR, repairGoals, REPAIR_DETOUR,
-  relieveWounded, RELIEF_MIN_HP, layRoad, blockadeGoals, BLOCKADE_DETOUR, pickFocus, setFocuses,
+  relieveWounded, RELIEF_MIN_HP, layRoad, blockadeGoals, BLOCKADE_DETOUR, pickFocus, setFocuses, shouldLevy,
 } from '../src/ai.js';
 import { decideTap } from '../src/input.js';
 import { SHORTCUTS, keyAction, recruitKey } from '../src/keys.js';
@@ -35,7 +36,7 @@ import { distance, key, neighbors } from '../src/hex.js';
 import {
   RESOURCES, FORTIFY, TERRITORY, ECONOMY, UNIT_TYPES, TERRAIN, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FLANK, HIGH_GROUND, CHARGE, REPAIR,
   UPGRADES, UPGRADE, DISBAND, RUINS, EXPLORE, PILLAGE,
-  SIGHTINGS, ROADWORK, SENTRY, VOLLEY, ANIM_SPEEDS, HEROES, INSPIRE, MILESTONES, ADVISOR, GROWTH, TRADE, UNREST, FOCUS,
+  SIGHTINGS, ROADWORK, SENTRY, VOLLEY, ANIM_SPEEDS, HEROES, INSPIRE, MILESTONES, ADVISOR, GROWTH, TRADE, UNREST, FOCUS, LEVY,
 } from '../src/rules.js';
 
 test('map is deterministic and starting cities are connected', () => {
@@ -2823,7 +2824,7 @@ test('repair: the AI walks back to its pillaged resources and repairs them', () 
   assert.ok(!repairGoals(s, h).some((g) => g.q === tile.q && g.r === tile.r), 'recovers soon anyway');
   // real AI-vs-AI games: pillaged resources get repaired now and then, the state stays consistent
   let repairs = 0;
-  for (const seed of [2, 3, 4, 6, 9, 10]) {
+  for (const seed of [2, 3, 4, 6, 9, 10, 12, 14]) {
     const g = createGame({ seed, happenings: false });
     for (let i = 0; i < 80 && g.winner === null; i++) {
       runAITurn(g);
@@ -4588,4 +4589,121 @@ test('city focus: the AI picks fortress, granary or commerce; the advisor flags 
   // keyboard
   assert.deepEqual(keyAction('c'), { type: 'focus' });
   assert.deepEqual(keyAction('C'), { type: 'focus' });
+});
+
+test('levy: a grown city trades a size for a free warrior; who can\'t; the events replay; rally point; key L', () => {
+  const s = createGame({ seed: 3, fog: false, happenings: false });
+  s.units = [];
+  const cap = s.cities.find((c) => c.owner === 0 && c.capital);
+  const aiCap = s.cities.find((c) => c.owner === 1 && c.capital);
+  const neutral = s.cities.find((c) => c.owner === null);
+  // who can't
+  assert.equal(levyProblem(s, cap), `the city must be size ${LEVY.minSize} or more`);
+  assert.ok(!levy(s, cap.id));
+  cap.size = 3;
+  cap.growth = 4;
+  assert.equal(levyProblem(s, neutral), 'not your city');
+  assert.equal(levyProblem(s, aiCap), 'not your city');
+  cap.unrest = 2;
+  assert.equal(levyProblem(s, cap), 'the city is in unrest');
+  delete cap.unrest;
+  const blocker = spawnUnit(s, 'scout', 0, cap.q, cap.r);
+  assert.equal(levyProblem(s, cap), 'the city is occupied');
+  s.units = s.units.filter((u) => u.id !== blocker.id);
+  s.current = 1;
+  assert.ok(!canLevy(s, cap), 'not on the enemy turn');
+  s.current = 0;
+  assert.ok(canLevy(s, cap));
+  drainEvents(s);
+  // the levy: free, one size less, growth starts anew, a raw warrior that can't act this turn
+  const before = cloneState(s);
+  const gold = s.gold[0];
+  const income = cityIncome(cap, s);
+  assert.ok(levy(s, cap.id));
+  assert.equal(s.gold[0], gold, 'free');
+  assert.equal(citySize(cap), 2);
+  assert.equal(cap.growth, 0);
+  assert.equal(cityIncome(cap, s), income - GROWTH.income);
+  const w = unitAt(s, cap.q, cap.r);
+  assert.equal(w.type, LEVY.type);
+  assert.equal(w.owner, 0);
+  assert.equal(w.hp, UNIT_TYPES[LEVY.type].hp);
+  assert.equal(w.xp, 0);
+  assert.equal(w.movesLeft, 0);
+  assert.ok(!levy(s, cap.id), 'the city is occupied now');
+  assert.match(logFor(s, 0).at(-1).msg, new RegExp(`levied a Warrior in ${cap.name} \\(size 2\\)`));
+  const evs = drainEvents(s);
+  assert.deepEqual(evs.map((e) => e.type), ['levy', 'spawn']);
+  assert.equal(soundFor(evs[0]), null);
+  assert.equal(soundFor(evs[1]), 'recruit');
+  for (const e of evs) applyEvent(before, e);
+  const bc = before.cities.find((c) => c.id === cap.id);
+  assert.equal(bc.size, 2);
+  assert.equal(bc.growth, 0);
+  assert.ok(unitAt(before, cap.q, cap.r), 'the levy replays');
+  // academy experience is not given, a size-1 city never goes lower, game over blocks it
+  s.units = [];
+  cap.buildings = [...(cap.buildings || []), 'academy'];
+  // rally point: the levied unit marches like a recruit
+  const flag = neighbors(cap.q, cap.r).find((x) => isPassable(s, x.q, x.r) && !cityAt(s, x.q, x.r));
+  assert.ok(setRally(s, cap.id, flag.q, flag.r));
+  assert.ok(levy(s, cap.id));
+  const w2 = unitAt(s, cap.q, cap.r);
+  assert.equal(w2.xp, 0, 'no academy experience for levied units');
+  assert.deepEqual(w2.goto, { q: flag.q, r: flag.r });
+  assert.equal(citySize(cap), 1);
+  s.units = [];
+  assert.equal(levyProblem(s, cap), `the city must be size ${LEVY.minSize} or more`);
+  cap.size = 2;
+  s.winner = 1;
+  assert.equal(levyProblem(s, cap), 'the game is over');
+  assert.ok(!levy(s, cap.id), 'game over');
+  s.winner = null;
+  assert.equal(stateProblem(s), null);
+  // keyboard
+  assert.deepEqual(keyAction('l'), { type: 'levy' });
+  assert.deepEqual(keyAction('L'), { type: 'levy' });
+});
+
+test('levy: the AI levies only in an emergency, the advisor suggests it when gold runs out', () => {
+  const s = createGame({ seed: 3, fog: false, happenings: false });
+  s.units = [];
+  const aiCap = s.cities.find((c) => c.owner === 1 && c.capital);
+  s.current = 1;
+  aiCap.size = 2;
+  s.gold[1] = 0;
+  assert.ok(!shouldLevy(s, 1, aiCap), 'no enemy in sight: no levy');
+  const near = Object.values(s.tiles).find((t) => isPassable(s, t.q, t.r) && !cityAt(s, t.q, t.r) && distance(t, aiCap) === LEVY.aiThreat);
+  const foe = spawnUnit(s, 'horseman', 0, near.q, near.r);
+  assert.ok(shouldLevy(s, 1, aiCap));
+  s.gold[1] = 50;
+  assert.ok(!shouldLevy(s, 1, aiCap), 'with gold it recruits instead');
+  s.gold[1] = 0;
+  aiCap.size = 1;
+  assert.ok(!shouldLevy(s, 1, aiCap), 'too small');
+  aiCap.size = 2;
+  // a real AI turn levies a defender
+  for (const c of s.cities.filter((x) => x.owner === 1 && x.id !== aiCap.id)) c.size = 1;
+  runAITurn(s);
+  const def = unitAt(s, aiCap.q, aiCap.r);
+  assert.ok(def && def.owner === 1 && def.type === LEVY.type, 'the AI levied a defender');
+  assert.equal(citySize(aiCap), 1);
+  assert.ok(drainEvents(s).some((e) => e.type === 'levy'));
+  // advisor: an unguarded grown city with an enemy near and no gold for any recruit
+  const a = createGame({ seed: 3, fog: false, happenings: false });
+  a.units = [];
+  const cap = a.cities.find((c) => c.owner === 0 && c.capital);
+  const n = Object.values(a.tiles).find((t) => isPassable(a, t.q, t.r) && !cityAt(a, t.q, t.r) && distance(t, cap) === 2);
+  spawnUnit(a, 'warrior', 1, n.q, n.r);
+  a.gold[0] = 0;
+  let tip = adviseTurn(a, 0).find((x) => x.kind === 'undefended');
+  assert.ok(!/levy/.test(tip.text), 'a size-1 city can\'t levy');
+  cap.size = 2;
+  tip = adviseTurn(a, 0).find((x) => x.kind === 'undefended');
+  assert.equal(tip.text, `${cap.name} is unguarded – an enemy Warrior is 2 tiles away. No gold to recruit – levy a Warrior there (costs a size).`);
+  assert.equal(tip.levy, true);
+  a.gold[0] = 100;
+  tip = adviseTurn(a, 0).find((x) => x.kind === 'undefended');
+  assert.ok(!/levy/.test(tip.text) && !tip.levy, 'with gold the advisor doesn\'t suggest a levy');
+  assert.ok(foe);
 });

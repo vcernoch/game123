@@ -4,7 +4,7 @@ import { generateMap, hasRiverEdge } from './map.js';
 import {
   TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY, VISION, DIFFICULTY, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, ROAD_COST, RIVER, FLANK, HIGH_GROUND, CHARGE, INSPIRE,
   FACTIONS, NO_FACTION, MAP_SIZES, HAPPENINGS, FORTIFY, TERRITORY, RESOURCES,
-  UPGRADES, UPGRADE, DISBAND, SIGHTINGS, RUINS, EXPLORE, PILLAGE, REPAIR, ROADWORK, SENTRY, VOLLEY, ANIM_SPEEDS, HEROES, MILESTONES, ADVISOR, GROWTH, TRADE, UNREST, FOCUS,
+  UPGRADES, UPGRADE, DISBAND, SIGHTINGS, RUINS, EXPLORE, PILLAGE, REPAIR, ROADWORK, SENTRY, VOLLEY, ANIM_SPEEDS, HEROES, MILESTONES, ADVISOR, GROWTH, TRADE, UNREST, FOCUS, LEVY,
 } from './rules.js';
 import { createRng } from './rng.js';
 
@@ -446,7 +446,7 @@ export function applyEvent(state, ev) {
   } else if (ev.type === 'calm') {
     const c = state.cities.find((x) => x.id === ev.cityId);
     if (c) delete c.unrest;
-  } else if (ev.type === 'grow') {
+  } else if (ev.type === 'grow' || ev.type === 'levy') {
     const c = state.cities.find((x) => x.id === ev.cityId);
     if (c) { c.size = ev.size; c.growth = 0; }
   } else if (ev.type === 'happening') {
@@ -1864,6 +1864,36 @@ export function buyUnit(state, cityId, type) {
   return true;
 }
 
+// ---------- levy ----------
+// A grown city can trade a size for a free warrior on its tile – an emergency defence when gold runs out.
+
+// Why the city can't levy right now (a short text for the panel), or null when it can.
+export function levyProblem(state, city) {
+  if (state.winner !== null) return 'the game is over';
+  if (!city || city.owner === null || city.owner !== state.current) return 'not your city';
+  if (cityUnrest(city)) return 'the city is in unrest';
+  if (citySize(city) < LEVY.minSize) return `the city must be size ${LEVY.minSize} or more`;
+  if (unitAt(state, city.q, city.r)) return 'the city is occupied';
+  return null;
+}
+
+export function canLevy(state, city) {
+  return levyProblem(state, city) === null;
+}
+
+// The current player levies a unit in an own city: the city shrinks, the unit appears like a recruit.
+export function levy(state, cityId) {
+  const city = state.cities.find((c) => c.id === cityId);
+  if (!canLevy(state, city)) return false;
+  city.size = Math.max(1, citySize(city) - LEVY.sizeCost);
+  city.growth = 0;
+  emit(state, { type: 'levy', cityId, size: city.size, player: city.owner });
+  const goal = rallyTarget(state, city);
+  spawnUnit(state, LEVY.type, city.owner, city.q, city.r, 0, goal ? { goto: goal } : {});
+  addLog(state, `${PLAYERS[city.owner].name}: levied a ${UNIT_TYPES[LEVY.type].name} in ${city.name} (size ${city.size})`, { by: city.owner, at: [city] });
+  return true;
+}
+
 // ---------- rally points ----------
 // city.rally = { q, r }: units recruited in the city get a move order to that tile (see buyUnit),
 // so a stream of recruits walks to the front without a click each. Player-only comfort – the AI moves
@@ -2535,8 +2565,11 @@ export function adviseTurn(state, player) {
     }
   }
   if (worst) {
-    add('undefended', `${worst.c.name} is unguarded – an enemy ${UNIT_TYPES[worst.e.type].name} is ${worst.d} tile${worst.d === 1 ? '' : 's'} away.`,
-      worst.c, { cityId: worst.c.id });
+    // no gold for any recruit there? a grown city can still levy a warrior
+    const broke = Object.keys(UNIT_TYPES).every((t) => gold < unitCost(state, worst.c, t));
+    const levyTip = broke && canLevy(state, worst.c) ? ` No gold to recruit – levy a ${UNIT_TYPES[LEVY.type].name} there (costs a size).` : '';
+    add('undefended', `${worst.c.name} is unguarded – an enemy ${UNIT_TYPES[worst.e.type].name} is ${worst.d} tile${worst.d === 1 ? '' : 's'} away.${levyTip}`,
+      worst.c, { cityId: worst.c.id, ...(levyTip ? { levy: true } : {}) });
   }
 
   // a sure kill without losing the attacker (weakest target first)

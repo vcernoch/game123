@@ -7,7 +7,7 @@ import {
   upgradeOptions, upgradeUnit, canDisband, disbandRefund, disbandUnit, chargeReady,
   updateSightings, lastSeen, lastSeenAt, lastSeenText, armyOverview, ARMY_STATUS, ruinBelieved,
   canExplore, setExplore, canPillage, pillage, isPillaged, pillageTurnsLeft, canRepair, repair,
-  rallyPath, setRally, clearRally, swapPartners, swapUnits, canBuildRoad, buildRoad, timelineFor, adviseTurn, suggestRecruit, growthText, tradeText, tradeRoute, unrestText, focusOf, focusText, setFocus,
+  rallyPath, setRally, clearRally, swapPartners, swapUnits, canBuildRoad, buildRoad, timelineFor, adviseTurn, suggestRecruit, growthText, tradeText, tradeRoute, unrestText, focusOf, focusText, setFocus, levy, levyProblem,
 } from './game.js';
 import { createAnimator } from './anim.js';
 import { decideTap } from './input.js';
@@ -19,7 +19,7 @@ import { SHORTCUTS, keyAction, recruitKey } from './keys.js';
 import { render, canvasSize, pickHex, tileCenter } from './render.js';
 import { key } from './hex.js';
 import {
-  UNIT_TYPES, TERRAIN, PLAYERS, DIFFICULTY, BUILDINGS, RANKS, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FORTIFY, TERRITORY, ECONOMY, RESOURCES, HIGH_GROUND, CHARGE, INSPIRE, RUINS, PILLAGE, REPAIR, ROADWORK, SENTRY, FOCUS,
+  UNIT_TYPES, TERRAIN, PLAYERS, DIFFICULTY, BUILDINGS, RANKS, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FORTIFY, TERRITORY, ECONOMY, RESOURCES, HIGH_GROUND, CHARGE, INSPIRE, RUINS, PILLAGE, REPAIR, ROADWORK, SENTRY, FOCUS, LEVY,
 } from './rules.js';
 
 const SAVE_KEY = 'game123-save';
@@ -305,6 +305,7 @@ function updateHud() {
       html += '</div>';
       if (pick) html += `<p class="hint suggest">★ Suggested: ${UNIT_TYPES[pick.type].name} – ${pick.reason}.</p>`;
       if (blocked) html += '<p class="hint">The city is occupied – move the unit out first.</p>';
+      html += levyButton(city);
       html += focusPanel(city);
       html += rallyPanel(city);
       const todo = Object.entries(BUILDINGS).filter(([b]) => !hasBuilding(city, b));
@@ -414,6 +415,22 @@ function rallyPanel(city) {
   }
   html += '<p class="hint">Set a flag and every unit recruited here walks there on its own.</p>';
   return `${html}<button data-rally class="secondary wide-btn" title="Pick a tile on the map (G)">🚩 Set rally point</button>`;
+}
+
+// Levy: a free warrior for a size of the city (L). Disabled with the reason when not possible.
+function levyButton(city) {
+  if ((city.size || 1) < LEVY.minSize) return ''; // a small city can't levy – no need to show it
+  const why = levyProblem(state, city);
+  const name = UNIT_TYPES[LEVY.type].name;
+  const tip = why ? `Can't levy: ${why}` : `A free ${name} now – the city drops to size ${Math.max(1, city.size - LEVY.sizeCost)} and starts growing anew (L)`;
+  return `<button data-levy class="secondary wide-btn levy" ${why ? 'disabled' : ''} title="${tip}">⚑ Levy ${name} <small>free · −${LEVY.sizeCost} size</small></button>`
+    + (why === 'the city is in unrest' ? `<p class="hint levy-why">Levy: ${why}.</p>` : '');
+}
+
+// Levies a warrior in the selected own city (panel button / L).
+function levySelected() {
+  if (busy() || !selectedCityId || state.current !== 0) return;
+  if (levy(state, selectedCityId)) { undoStack = []; sound.play('recruit'); afterAction(); }
 }
 
 // City focus: one button per kind, the current one pressed (C cycles through them).
@@ -1056,6 +1073,7 @@ $('info').addEventListener('click', (ev) => {
   }
   const fBtn = ev.target.closest('button[data-focus]');
   if (fBtn) { focusSelected(fBtn.dataset.focus); return; }
+  if (ev.target.closest('button[data-levy]')) { levySelected(); return; }
   if (ev.target.closest('button[data-swap]')) { startSwapPick(); return; }
   if (ev.target.closest('button[data-fortify]')) { fortifySelected(); return; }
   if (ev.target.closest('button[data-explore]')) { exploreSelected(); return; }
@@ -1105,6 +1123,7 @@ window.addEventListener('keydown', (ev) => {
   else if (act.type === 'animSpeed') cycleAnimSpeed();
   else if (act.type === 'rally') startRallyPick();
   else if (act.type === 'focus') focusSelected();
+  else if (act.type === 'levy') levySelected();
   else if (act.type === 'swap') startSwapPick();
   else if (act.type === 'escape') {
     if (busy()) { anim.skip(); return; }

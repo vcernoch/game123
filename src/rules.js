@@ -319,6 +319,12 @@ export const FOCUS = {
   aiThreat: 3,
 };
 
+// Levy: an own city of at least `minSize` calls up a free unit of `type` on its tile at the price of
+// `sizeCost` sizes (its growth progress starts anew). Not while the city is restless. The levied unit is a
+// raw recruit (no academy experience) but follows the city's rally point. The AI levies only in a city with
+// a visible enemy within `aiThreat` tiles when it can't afford any recruit there.
+export const LEVY = { type: 'warrior', minSize: 2, sizeCost: 1, aiThreat: 3 };
+
 export const ECONOMY = {
   startGold: 20,
   capitalIncome: 5,

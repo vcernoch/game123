@@ -2,6 +2,18 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-21 – Levy (v0.39.0)
+- **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.38.0–v0.39.0) is ahead of `main` (v0.37.0) – please merge it.
+- Starting state green (115 logic tests + smoke).
+- Phase 18 (city management, own improvement), second task. A city's size was only ever income; when the treasury was empty an attacked city had no answer. Now population can be turned into soldiers in an emergency – at a lasting price, since the lost size costs gold every turn and takes 5–7 turns to regrow.
+- `LEVY` in `rules.js` (`type` warrior, `minSize` 2, `sizeCost` 1, `aiThreat` 3). In `game.js`: `levyProblem` (reason text or null: game over, not own city / not own turn, unrest, too small, occupied), `canLevy`, `levy` – the city loses a size, growth progress resets, a `levy` event (replayable through the same branch as `grow`) is followed by a normal `spawn`; the warrior is free, raw (no academy XP), can't act this turn and gets the city's rally point order. Chronicle entry.
+- AI: `shouldLevy` in `ai.js` – in `recruit` (both calls), when nothing is affordable, the city is empty and grown, and a visible enemy is within 3 tiles. About one levy per AI-vs-AI game (12 games: 12 levies; wins 5 : 5, 2 stalemates – the same split as without it).
+- Advisor: the unguarded-city hint adds "No gold to recruit – levy a Warrior there (costs a size)." (and `levy: true`) when the player can't afford any unit and the city can levy.
+- UI: "⚑ Levy Warrior · free · −1 size" button under the recruit buttons, shown only in cities of size 2+ (disabled with a reason in the tooltip; a restless city also gets a hint line); key L; a floater "⚑ levy −1 size" when it is seen; help text updated. No state structure change (`state.version` stays 28).
+- Test adjusted (not weakened): "repair: the AI walks back …" asserts that at least one repair happens in real AI-vs-AI games on six seeds; repairs are rare (~0.5 per game) and the levies changed those games so none happened. The same assertion now runs on eight seeds (+12, +14).
+- Tests: +2 logic (every reason, free, size and growth, income drop, raw warrior that can't act, event order, sound, replay, rally point, no academy XP, game over, key L; AI only in an emergency – no enemy / gold / too small – and a real AI turn levying a defender; advisor text with and without gold). Smoke test: a size-2 capital shows the button, clicking it gives a free warrior and size 1, the button disappears (`artifacts/screenshot-levy.png`).
+- Status: `npm run check` green (117 logic tests + smoke).
+
 ## 2026-11-21 – City focus (v0.38.0)
 - **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". Thanks for merging v0.37.0 into `main`; `dev` now holds only v0.38.0 on top of it.
 - Starting state green (113 logic tests + smoke). `dev` was fast-forwarded to the merge commit on `main` first (no force).

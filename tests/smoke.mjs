@@ -412,6 +412,30 @@ try {
   });
   if (recruited !== 'archer') throw new Error(`key 2 did not recruit an archer: ${recruited}`);
 
+  // levy: a size-2 capital shows the button; it gives a free warrior and the city drops to size 1
+  await page.evaluate(() => {
+    const st = window.__game.getState();
+    const c = st.cities.find((x) => x.owner === 0 && x.capital);
+    st.units = st.units.filter((u) => u.q !== c.q || u.r !== c.r);
+    c.size = 2;
+    window.__game.refresh();
+  });
+  await page.mouse.click(capPt.x, capPt.y);
+  const levyBtn = page.locator('button[data-levy]');
+  if (!(await levyBtn.count()) || await levyBtn.isDisabled()) throw new Error('levy button missing or disabled in a size-2 city');
+  await levyBtn.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: 'artifacts/screenshot-levy.png' });
+  const levyGold = await page.evaluate(() => window.__game.getState().gold[0]);
+  await levyBtn.click();
+  await page.waitForFunction(() => !window.__game.isBusy(), null, { timeout: 5000 });
+  const levied = await page.evaluate(() => {
+    const st = window.__game.getState();
+    const c = st.cities.find((x) => x.owner === 0 && x.capital);
+    const u = st.units.find((x) => x.q === c.q && x.r === c.r);
+    return { type: u && u.type, size: c.size, gold: st.gold[0], btn: !!document.querySelector('button[data-levy]') };
+  });
+  if (levied.type !== 'warrior' || levied.size !== 1 || levied.gold !== levyGold || levied.btn) throw new Error(`levy: ${JSON.stringify(levied)}`);
+
   // ? opens the shortcut overlay, Esc closes it
   await page.keyboard.press('?');
   if (!(await page.evaluate(() => document.getElementById('keys-dialog').open))) throw new Error('? did not open the shortcuts');

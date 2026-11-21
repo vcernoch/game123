@@ -5,9 +5,9 @@ import {
   unitAt, getUnit, tileAt, fortify, difficultyOf, visibleTiles, exploredTiles, build, hasBuilding, unitCost, buildingCost, factionOf,
   threatTiles, cityAt, upgradeOptions, upgradeUnit, ruinBelieved, canPillage, pillage, isPillaged, repair, pillageTurnsLeft, territoryOwner,
   swapPartners, swapUnits, canBuildRoad, buildRoad, roadLinks, citySize, tradeTargets, cutsAt, cityUnrest,
-  focusOf, setFocus, citySieged,
+  focusOf, setFocus, citySieged, canLevy, levy,
 } from './game.js';
-import { UNIT_TYPES, TERRAIN, ROADWORK, GROWTH, FOCUS } from './rules.js';
+import { UNIT_TYPES, TERRAIN, ROADWORK, GROWTH, FOCUS, LEVY } from './rules.js';
 
 // What the AI knows about the map. On hard it sees everything, otherwise only what it has explored and sees.
 export function aiKnowledge(state, me) {
@@ -510,10 +510,19 @@ export function pickRecruit(state, me, city) {
 }
 
 function recruit(state, me) {
+  let know = null;
   for (const city of state.cities.filter((c) => c.owner === me)) {
     if (unitAt(state, city.q, city.r)) continue;
     const type = pickRecruit(state, me, city);
     if (type) buyUnit(state, city.id, type);
+    else if (shouldLevy(state, me, city, know || (know = aiKnowledge(state, me)))) levy(state, city.id);
   }
+}
+
+// Levy only in an emergency: an empty grown city, a visible enemy close by and no gold for any recruit.
+export function shouldLevy(state, me, city, know = aiKnowledge(state, me)) {
+  if (!canLevy(state, city) || city.owner !== me) return false;
+  if (Object.keys(UNIT_TYPES).some((t) => state.gold[me] >= unitCost(state, city, t))) return false;
+  return state.units.some((u) => u.owner !== me && know.sees(u.q, u.r) && distance(u, city) <= LEVY.aiThreat);
 }
 

@@ -131,6 +131,9 @@ export function createAnimator(redraw, isVisible = () => true, onShow = () => {}
       }
       addFloater(to, `−${ev.damage} ▣`, '#ff8a5b');
       await tween(PAUSE_MS, () => {});
+    } else if (ev.type === 'levy') {
+      const c = st.cities.find((x) => x.id === ev.cityId);
+      if (c) addFloater(tileCenter(c.q, c.r), '⚑ levy −1 size', '#e8d3a6');
     } else if (ev.type === 'disband') {
       addFloater(tileCenter(ev.q, ev.r), ev.refund ? `✖ disbanded +${ev.refund}` : '✖ disbanded', '#e8e2d0');
       await tween(PAUSE_MS, () => {});
@@ -169,6 +172,7 @@ export function createAnimator(redraw, isVisible = () => true, onShow = () => {}
     if (ev.type === 'spawn') return see(ev.unit);
     if (ev.type === 'fortify' || ev.type === 'upgrade') return see(getUnit(st, ev.unitId));
     if (ev.type === 'volley') return see(ev) || see(st.cities.find((c) => c.id === ev.cityId));
+    if (ev.type === 'levy') return see(st.cities.find((c) => c.id === ev.cityId));
     if (ev.type === 'focus') return false; // a city's focus is the owner's secret – nothing to watch
     if (ev.type === 'disband' || ev.type === 'ruin' || ev.type === 'pillage' || ev.type === 'repair' || ev.type === 'road') return see(ev);
     return true;

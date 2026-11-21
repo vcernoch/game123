@@ -109,6 +109,7 @@ Check off `[x]` when done. Add new ideas to the end of the relevant phase or to 
 
 ## Phase 18 – city management (own improvements)
 - [x] City focus (C): each own city is Balanced, Commerce (+1 gold, no growth), Granary (grows twice as fast, −1 gold) or Fortress (garrison +20 % defense, −1 gold; catapults ignore it); a badge on the tile, panel buttons, advisor flags a wasted focus, the AI fortifies threatened cities, grows small ones and trades in grown ones
+- [x] Levy (⚑ / L): an own city of size 2+ that isn't restless calls up a free Warrior on its tile and loses a size (growth starts anew); follows the rally point; the advisor's unguarded-city hint suggests it when there's no gold to recruit, the AI levies in an empty threatened city with an empty treasury
 
 ## Ideas (unordered)
 - Diplomacy with multiple AIs
