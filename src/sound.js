@@ -12,6 +12,7 @@ export function soundFor(ev, viewer = 0) {
     case 'capture': return ev.owner === viewer ? 'capture' : 'lose';
     case 'build': return 'build';
     case 'fortify': return 'fortify';
+    case 'march': return 'step';
     case 'upgrade': return 'promote';
     case 'disband': return 'disband';
     case 'spawn': return 'recruit';

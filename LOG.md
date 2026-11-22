@@ -2,6 +2,19 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-22 – Forced march (v0.41.0)
+- **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.38.0–v0.41.0) is ahead of `main` (v0.37.0) – please merge it.
+- Starting state green (119 logic tests + smoke).
+- Phase 18 was done, so I opened phase 19 (manoeuvre, own improvement). Movement was fixed per type, so a defender one tile short of a threatened city simply arrived too late. Now a unit can push on at a price – a real trade-off between tempo, HP and striking power.
+- `FORCED_MARCH` in `rules.js` (`bonus` 1, `hpCost` 2, `aiHpShare` 0.6). In `game.js`: `forcedMarchProblem` (reason or null: game over, not your turn, already marched, already acted – moved, attacked or spent moves –, too weak), `canForceMarch`, `forceMarch` (+1 move, −2 HP, `unit.marched` and `moved` – so no healing at the end of the turn –, leaves fortify/watch/move order/exploring; replayable `march` event), `marchReach` (reach with a march, nothing changed). `attackTargets` is empty for a marched unit. `endTurn` clears `marched` for the player ending the turn (after healing), so it lives for one turn only. `unitSummary.forcedMarch`.
+- AI: `assignGarrisons` – when no unit reaches a threatened unguarded city, it picks a non-siege unit with ≥ 60 % HP that reaches it with a march (`result.marches`); `holdCity` marches first. In 12 AI-vs-AI games (Normal, 300 half-turns max) the situation never came up (0 marches; wins 5 : 7), so it is a rare emergency move – balance is unchanged.
+- Advisor: the unguarded-city hint adds "A forced march (🥾) gets your Warrior there in time (−2 HP)." (and `marchUnitId`) when no unit reaches the city normally but one would with a march.
+- UI: "🥾 Forced march +1 move · −2 HP · no attack" button in the unit panel (its tooltip counts the extra tiles in reach), key M (also in the `?` overlay), a "🥾 Forced march: …" line on a marched unit, a small boot drawn on it, "forced march" tag in the unit tooltip, a floater when it's seen, step sound. Help text updated.
+- State structure: `state.version` 30 (optional `unit.marched`), trivial migration; `stateProblem` validates it.
+- Test adjusted (not weakened): the recruit orders test pinned `STATE_VERSION` to 29 – it now checks `>= 29`, and the new test pins 30.
+- Tests: +2 logic (every reason, HP and moves, larger reach equals the marched reach, no attack, fortify/watch/order cleared, event + replay + sound, walking to a tile only the march reaches, no healing, flag cleared at turn end, march again next turn, never below 1 HP, validation, migration, key M; AI garrison by march in a real AI turn, no march when wounded or without threat; advisor tip and its absence when a unit reaches the city normally). Smoke test: an archer in the capital marches from the panel – HP 6, move 3, panel line, button gone (`artifacts/screenshot-march.png`).
+- Status: `npm run check` green (121 logic tests + smoke).
+
 ## 2026-11-22 – Recruit orders (v0.40.0)
 - **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.38.0–v0.40.0) is ahead of `main` (v0.37.0) – please merge it.
 - Starting state green (117 logic tests + smoke).

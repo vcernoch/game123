@@ -19,6 +19,7 @@ import {
   cityUnrest, unrestCalm, unrestTurnsLeft, unrestText, calmCities, focusOf, cityFocus, setFocus, focusText,
   levy, canLevy, levyProblem,
   recruitOrderProblem, setRecruitOrder, clearRecruitOrder, recruitOrderBlocker, recruitOrderText, fillRecruitOrders,
+  forcedMarchProblem, canForceMarch, forceMarch, marchReach, attackTargets,
 } from '../src/game.js';
 import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
@@ -37,7 +38,7 @@ import { distance, key, neighbors } from '../src/hex.js';
 import {
   RESOURCES, FORTIFY, TERRITORY, ECONOMY, UNIT_TYPES, TERRAIN, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FLANK, HIGH_GROUND, CHARGE, REPAIR,
   UPGRADES, UPGRADE, DISBAND, RUINS, EXPLORE, PILLAGE,
-  SIGHTINGS, ROADWORK, SENTRY, VOLLEY, ANIM_SPEEDS, HEROES, INSPIRE, MILESTONES, ADVISOR, GROWTH, TRADE, UNREST, FOCUS, LEVY,
+  SIGHTINGS, ROADWORK, SENTRY, VOLLEY, ANIM_SPEEDS, HEROES, INSPIRE, MILESTONES, ADVISOR, GROWTH, TRADE, UNREST, FOCUS, LEVY, FORCED_MARCH,
 } from '../src/rules.js';
 
 test('map is deterministic and starting cities are connected', () => {
@@ -4828,7 +4829,8 @@ test('recruit orders: who may order, bought at the owner\'s turn start once ther
   assert.match(stateProblem(neutralOrder), /bad order/);
   const old = JSON.parse(JSON.stringify(createGame({ seed: 3 })));
   old.version = 28;
-  assert.equal(migrateState(old).version, STATE_VERSION);  assert.equal(STATE_VERSION, 29);
+  assert.equal(migrateState(old).version, STATE_VERSION);
+  assert.ok(STATE_VERSION >= 29, 'recruit orders arrived in version 29');
 });
 
 test('recruit orders: in a real game against the AI only the player has orders and the state stays valid', () => {
@@ -4853,4 +4855,171 @@ test('recruit orders: in a real game against the AI only the player has orders a
     assert.ok(s.cities.every((c) => !c.order || c.owner === 0), 'only the player has orders');
   }
   assert.ok(bought >= 2, `several orders were fulfilled (${bought})`);
+});
+
+// A plains tile with plains around it, away from cities – a clean place to test movement.
+function openPlains(s, avoid = []) {
+  return Object.values(s.tiles).find((t) => t.terrain === 'plains' && !cityAt(s, t.q, t.r) && !t.road
+    && s.cities.every((c) => distance(c, t) >= 3) && avoid.every((a) => distance(a, t) >= 4)
+    && neighbors(t.q, t.r).every((n) => tileAt(s, n.q, n.r) && isPassable(s, n.q, n.r)));
+}
+
+test('forced march: +1 move for 2 HP, no attack and no healing this turn; who can\'t; replay, validation, key M', () => {
+  const s = createGame({ seed: 3, fog: false, happenings: false });
+  s.units = [];
+  const spot = openPlains(s);
+  const w = spawnUnit(s, 'warrior', 0, spot.q, spot.r);
+  w.movesLeft = unitMove(s, w);
+  w.hasAttacked = false;
+  w.hp = 7;
+  const foeTile = neighbors(spot.q, spot.r)[0];
+  const foe = spawnUnit(s, 'warrior', 1, foeTile.q, foeTile.r);
+  // who can't
+  assert.equal(forcedMarchProblem(s, null), 'no unit');
+  assert.equal(forcedMarchProblem(s, foe), 'not your turn');
+  assert.deepEqual(marchReach(s, foe), new Map());
+  w.hp = FORCED_MARCH.hpCost;
+  assert.equal(forcedMarchProblem(s, w), 'too weak to march');
+  w.hp = 7;
+  w.hasAttacked = true;
+  assert.equal(forcedMarchProblem(s, w), 'it has already acted this turn');
+  w.hasAttacked = false;
+  w.movesLeft -= 1;
+  assert.equal(forcedMarchProblem(s, w), 'it has already acted this turn');
+  w.movesLeft += 1;
+  assert.ok(canForceMarch(s, w));
+  assert.ok(attackTargets(s, w).length, 'the enemy next to it could be attacked');
+  // the reach with a march is larger and is exactly what the unit gets after marching
+  const normal = reachable(s, w);
+  const marchMap = marchReach(s, w);
+  assert.ok(marchMap.size > normal.size);
+  for (const k of normal.keys()) assert.ok(marchMap.has(k));
+  w.fortified = true;
+  w.sentry = 'watch';
+  w.goto = { q: spot.q, r: spot.r };
+  drainEvents(s);
+  const before = cloneState(s);
+  assert.ok(forceMarch(s, w.id));
+  assert.equal(w.hp, 7 - FORCED_MARCH.hpCost);
+  assert.equal(w.movesLeft, unitMove(s, w) + FORCED_MARCH.bonus);
+  assert.ok(w.marched && w.moved);
+  assert.ok(!w.fortified && !w.sentry && !w.goto, 'the march ends fortify, watch and move orders');
+  assert.deepEqual([...reachable(s, w).keys()].sort(), [...marchMap.keys()].sort());
+  assert.deepEqual(attackTargets(s, w), [], 'no attack after a forced march');
+  assert.ok(!attack(s, w.id, foe.id));
+  assert.equal(forcedMarchProblem(s, w), 'already on a forced march');
+  assert.ok(!forceMarch(s, w.id));
+  assert.ok(!canFortify(s, w));
+  assert.ok(unitSummary(s, w).forcedMarch);
+  const evs = drainEvents(s);
+  assert.deepEqual(evs.map((e) => e.type), ['march']);
+  assert.equal(evs[0].hpCost, FORCED_MARCH.hpCost);
+  assert.equal(soundFor(evs[0]), 'step');
+  applyEvent(before, evs[0]);
+  const bw = getUnit(before, w.id);
+  assert.deepEqual([bw.hp, bw.movesLeft, bw.marched, !!bw.fortified], [w.hp, w.movesLeft, true, false], 'the march replays');
+  // it really walks farther: a tile only the march reaches
+  const far = [...marchMap.keys()].find((k) => !normal.has(k));
+  const [fq, fr] = far.split(',').map(Number);
+  assert.ok(moveUnit(s, w.id, fq, fr));
+  assert.equal(stateProblem(JSON.parse(JSON.stringify(s))), null);
+  // the end of the turn: no healing, the march is over; next turn it may march again
+  const hp = w.hp;
+  endTurn(s);
+  assert.equal(w.hp, hp, 'no healing after a forced march');
+  assert.equal(w.marched, undefined);
+  endTurn(s);
+  assert.ok(canForceMarch(s, w));
+  // never below 1 HP: a unit with hpCost + 1 HP may march and keeps 1
+  w.hp = FORCED_MARCH.hpCost + 1;
+  assert.ok(forceMarch(s, w.id));
+  assert.equal(w.hp, 1);
+  // game over blocks it
+  const g = createGame({ seed: 3, fog: false, happenings: false });
+  const gu = g.units.find((u) => u.owner === 0);
+  g.winner = 1;
+  assert.equal(forcedMarchProblem(g, gu), 'the game is over');
+  // validation and migration
+  const bad = JSON.parse(JSON.stringify(createGame({ seed: 3 })));
+  bad.units[0].marched = 'yes';
+  assert.match(stateProblem(bad), /bad forced march/);
+  const old = JSON.parse(JSON.stringify(createGame({ seed: 3 })));
+  old.version = 29;
+  assert.equal(migrateState(old).version, STATE_VERSION);
+  assert.equal(STATE_VERSION, 30);
+  // key M
+  assert.deepEqual(keyAction('m'), { type: 'march' });
+  assert.deepEqual(keyAction('M'), { type: 'march' });
+});
+
+// Puts an own unit where it reaches `city` only with a forced march and an enemy within 2 tiles of the city.
+function marchSetup(s, owner, city) {
+  const foeOwner = 1 - owner;
+  for (const t of Object.values(s.tiles)) {
+    if (!isPassable(s, t.q, t.r) || cityAt(s, t.q, t.r) || distance(t, city) < 3 || distance(t, city) > 4) continue;
+    const u = spawnUnit(s, 'warrior', owner, t.q, t.r);
+    u.movesLeft = unitMove(s, u);
+    u.hasAttacked = false;
+    const k = key(city.q, city.r);
+    if (!reachable(s, u).has(k) && marchReach(s, u).has(k)) {
+      // the enemy on the far side of the city, so it neither blocks the way nor stops the unit
+      const foeTile = Object.values(s.tiles).find((x) => isPassable(s, x.q, x.r) && !cityAt(s, x.q, x.r)
+        && distance(x, city) === 2 && distance(x, t) >= 5);
+      if (foeTile) {
+        const foe = spawnUnit(s, 'horseman', foeOwner, foeTile.q, foeTile.r);
+        if (!reachable(s, u).has(k) && marchReach(s, u).has(k)) return { unit: u, foe };
+        s.units = s.units.filter((x) => x.id !== foe.id);
+      }
+    }
+    s.units = s.units.filter((x) => x.id !== u.id);
+  }
+  return null;
+}
+
+test('forced march: the AI marches a defender into a threatened city it could not reach otherwise; the advisor suggests it', () => {
+  const s = createGame({ seed: 3, fog: false, happenings: false });
+  s.units = [];
+  s.current = 1;
+  s.gold[1] = 0;
+  for (const c of s.cities) c.size = 1; // no levy either – only the march can save the city
+  const aiCap = s.cities.find((c) => c.owner === 1 && c.capital);
+  const set = marchSetup(s, 1, aiCap);
+  assert.ok(set, 'found a spot three moves away');
+  const g = assignGarrisons(s, 1);
+  assert.equal(g.get(set.unit.id), aiCap);
+  assert.ok(g.marches.has(set.unit.id));
+  runAITurn(s);
+  const def = unitAt(s, aiCap.q, aiCap.r);
+  assert.ok(def && def.id === set.unit.id, 'the AI marched into its capital');
+  assert.ok(def.marched);
+  assert.equal(def.hp, UNIT_TYPES.warrior.hp - FORCED_MARCH.hpCost);
+  assert.ok(drainEvents(s).some((e) => e.type === 'march'));
+  // a wounded unit doesn't march, and nobody marches without a threat
+  const w = createGame({ seed: 3, fog: false, happenings: false });
+  w.units = [];
+  w.current = 1;
+  const wCap = w.cities.find((c) => c.owner === 1 && c.capital);
+  const ws = marchSetup(w, 1, wCap);
+  ws.unit.hp = Math.floor(UNIT_TYPES.warrior.hp * FORCED_MARCH.aiHpShare) - 1;
+  assert.ok(!assignGarrisons(w, 1).has(ws.unit.id), 'too wounded to march');
+  ws.unit.hp = UNIT_TYPES.warrior.hp;
+  w.units = w.units.filter((u) => u.id !== ws.foe.id);
+  assert.equal(assignGarrisons(w, 1).marches.size, 0, 'no threat, no march');
+  // advisor: the unguarded-city hint names the unit a forced march gets there
+  const a = createGame({ seed: 3, fog: false, happenings: false });
+  a.units = [];
+  const cap = a.cities.find((c) => c.owner === 0 && c.capital);
+  const as = marchSetup(a, 0, cap);
+  assert.ok(as);
+  const tip = adviseTurn(a, 0).find((t) => t.kind === 'undefended');
+  assert.ok(tip);
+  assert.equal(tip.marchUnitId, as.unit.id);
+  assert.match(tip.text, new RegExp(`A forced march \\(🥾\\) gets your Warrior there in time \\(−${FORCED_MARCH.hpCost} HP\\)\\.`));
+  // once a unit can walk in normally, the hint says nothing about marching
+  const helper = neighbors(cap.q, cap.r).find((n) => isPassable(a, n.q, n.r) && !unitAt(a, n.q, n.r));
+  const h = spawnUnit(a, 'warrior', 0, helper.q, helper.r);
+  h.movesLeft = unitMove(a, h);
+  h.hasAttacked = false;
+  const tip2 = adviseTurn(a, 0).find((t) => t.kind === 'undefended');
+  assert.ok(tip2 && !/forced march/.test(tip2.text) && tip2.marchUnitId === undefined);
 });

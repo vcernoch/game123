@@ -933,6 +933,23 @@ function drawBuildings(ctx, city, x, y) {
   }
 }
 
+// A small boot (forced march): shaft, then the foot pointing right.
+function drawBoot(ctx, x, y) {
+  ctx.beginPath();
+  ctx.moveTo(x - 4, y - 6);
+  ctx.lineTo(x + 1, y - 6);
+  ctx.lineTo(x + 1, y);
+  ctx.lineTo(x + 5, y + 1);
+  ctx.quadraticCurveTo(x + 6, y + 4, x + 4, y + 5);
+  ctx.lineTo(x - 4, y + 5);
+  ctx.closePath();
+  ctx.fillStyle = '#c79a5b';
+  ctx.fill();
+  ctx.lineWidth = 1.2;
+  ctx.strokeStyle = 'rgba(0,0,0,0.75)';
+  ctx.stroke();
+}
+
 function drawShield(ctx, x, y) {
   ctx.beginPath();
   ctx.moveTo(x - 5, y - 5);
@@ -1019,6 +1036,8 @@ function drawUnit(ctx, u, x, y, selected, active) {
   }
   // fortified: a small shield at the bottom right
   if (u.fortified) drawShield(ctx, x + 11, y + 10);
+  // forced march: a small boot at the bottom right (a marching unit can't be fortified)
+  if (u.marched) drawBoot(ctx, x + 11, y + 10);
   // exploring: a small compass at the bottom left
   if (u.explore) drawCompass(ctx, x - 11, y + 10);
   // on watch: a small eye at the bottom left (a unit on watch has no explore order)

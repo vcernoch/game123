@@ -131,6 +131,8 @@ export function createAnimator(redraw, isVisible = () => true, onShow = () => {}
       }
       addFloater(to, `−${ev.damage} ▣`, '#ff8a5b');
       await tween(PAUSE_MS, () => {});
+    } else if (ev.type === 'march') {
+      addFloater(tileCenter(ev.q, ev.r), `🥾 forced march −${ev.hpCost} HP`, '#e8d3a6');
     } else if (ev.type === 'levy') {
       const c = st.cities.find((x) => x.id === ev.cityId);
       if (c) addFloater(tileCenter(c.q, c.r), '⚑ levy −1 size', '#e8d3a6');
@@ -171,6 +173,7 @@ export function createAnimator(redraw, isVisible = () => true, onShow = () => {}
     if (ev.type === 'capture') return see(st.cities.find((c) => c.id === ev.cityId));
     if (ev.type === 'spawn') return see(ev.unit);
     if (ev.type === 'fortify' || ev.type === 'upgrade') return see(getUnit(st, ev.unitId));
+    if (ev.type === 'march') return see(ev);
     if (ev.type === 'volley') return see(ev) || see(st.cities.find((c) => c.id === ev.cityId));
     if (ev.type === 'levy') return see(st.cities.find((c) => c.id === ev.cityId));
     if (ev.type === 'focus') return false; // a city's focus is the owner's secret – nothing to watch

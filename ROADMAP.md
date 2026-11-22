@@ -112,5 +112,8 @@ Check off `[x]` when done. Add new ideas to the end of the relevant phase or to 
 - [x] Levy (⚑ / L): an own city of size 2+ that isn't restless calls up a free Warrior on its tile and loses a size (growth starts anew); follows the rally point; the advisor's unguarded-city hint suggests it when there's no gold to recruit, the AI levies in an empty threatened city with an empty treasury
 - [x] Recruit orders (⏳): a city that can't recruit now (no gold, or occupied) takes an order instead – the dashed order buttons or number keys; it is bought by itself at the start of the next own turn with gold and a free tile (after income and random events), an hourglass marks the city, the banner reports it; recruiting there fulfils it, capture removes it
 
+## Phase 19 – manoeuvre (own improvements)
+- [x] Forced march (🥾 / M): a unit that hasn't moved or attacked gets +1 move this turn for 2 HP (needs more than 2 HP), but can't attack and doesn't heal at the end of the turn; a boot on the unit, the button tooltip counts the extra tiles; the AI marches a healthy unit into an unguarded threatened city it couldn't reach otherwise, the advisor's unguarded-city hint names the unit a march gets there
+
 ## Ideas (unordered)
 - Diplomacy with multiple AIs

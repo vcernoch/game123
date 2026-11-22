@@ -94,6 +94,11 @@ export const ROAD_COST = 0.5;
 // Fortify: a unit that hasn't moved or attacked this turn digs in. It gets extra defense until
 // it moves or attacks again (the bonus also applies to its counterattack defense).
 export const FORTIFY = { defBonus: 0.25 };
+// Forced march: a unit that hasn't moved or attacked this turn pushes on for `bonus` extra move points,
+// pays `hpCost` HP (never below 1 – it needs more than hpCost HP) and can't attack this turn; it doesn't heal
+// at the end of the turn. The AI marches a unit to an unguarded threatened city it couldn't reach otherwise,
+// only with at least `aiHpShare` of its HP.
+export const FORCED_MARCH = { bonus: 1, hpCost: 2, aiHpShare: 0.6 };
 
 // Rivers flow along hex edges. Crossing a river costs extra movement (a bridge = road on both sides
 // is free) and a unit attacked in melee across a river gets a defense bonus.

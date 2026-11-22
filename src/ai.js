@@ -5,9 +5,9 @@ import {
   unitAt, getUnit, tileAt, fortify, difficultyOf, visibleTiles, exploredTiles, build, hasBuilding, unitCost, buildingCost, factionOf,
   threatTiles, cityAt, upgradeOptions, upgradeUnit, ruinBelieved, canPillage, pillage, isPillaged, repair, pillageTurnsLeft, territoryOwner,
   swapPartners, swapUnits, canBuildRoad, buildRoad, roadLinks, citySize, tradeTargets, cutsAt, cityUnrest,
-  focusOf, setFocus, citySieged, canLevy, levy,
+  focusOf, setFocus, citySieged, canLevy, levy, marchReach, forceMarch,
 } from './game.js';
-import { UNIT_TYPES, TERRAIN, ROADWORK, GROWTH, FOCUS, LEVY } from './rules.js';
+import { UNIT_TYPES, TERRAIN, ROADWORK, GROWTH, FOCUS, LEVY, FORCED_MARCH } from './rules.js';
 
 // What the AI knows about the map. On hard it sees everything, otherwise only what it has explored and sees.
 export function aiKnowledge(state, me) {
@@ -36,7 +36,7 @@ export function runAITurn(state) {
     const unit = getUnit(state, id);
     if (!unit) continue;
     if (garrisons.has(id)) {
-      holdCity(state, unit, garrisons.get(id));
+      holdCity(state, unit, garrisons.get(id), garrisons.marches.has(id));
     } else if (isWounded(unit) && enemiesNear(state, unit, know, 3).length) {
       relieveWounded(state, unit, know, garrisons);
       const u = getUnit(state, id);
@@ -176,8 +176,10 @@ function enemiesNear(state, unit, know, radius) {
 // Threatened own cities (a visible enemy within THREAT_RADIUS tiles) get a garrison:
 // either a unit already standing there, or the nearest unit that can get there this turn.
 // Returns a Map unit id -> city.
+// `result.marches` holds the ids of garrisons that only get there with a forced march.
 export function assignGarrisons(state, me, know = aiKnowledge(state, me)) {
   const result = new Map();
+  result.marches = new Set();
   const taken = new Set();
   for (const city of state.cities.filter((c) => c.owner === me)) {
     const threat = state.units.some((u) => u.owner !== me && know.sees(u.q, u.r) && distance(u, city) <= THREAT_RADIUS);
@@ -198,6 +200,16 @@ export function assignGarrisons(state, me, know = aiKnowledge(state, me)) {
       const cost = reachable(state, u).get(key(city.q, city.r));
       if (cost !== undefined && cost < bestCost) { bestCost = cost; best = u; }
     }
+    if (!best) {
+      // nobody gets there in time – a healthy unit may force-march into the city instead
+      for (const u of state.units) {
+        if (u.owner !== me || taken.has(u.id) || UNIT_TYPES[u.type].siege) continue;
+        if (u.hp < UNIT_TYPES[u.type].hp * FORCED_MARCH.aiHpShare) continue;
+        const cost = marchReach(state, u).get(key(city.q, city.r));
+        if (cost !== undefined && cost < bestCost) { bestCost = cost; best = u; }
+      }
+      if (best) result.marches.add(best.id);
+    }
     if (best) {
       result.set(best.id, city);
       taken.add(best.id);
@@ -207,7 +219,8 @@ export function assignGarrisons(state, me, know = aiKnowledge(state, me)) {
 }
 
 // Garrison: moves into the city and stays; attacks from the city as usual (measured: a passive garrison played worse).
-function holdCity(state, unit, city) {
+function holdCity(state, unit, city, march = false) {
+  if (march) forceMarch(state, unit.id);
   if (unit.q !== city.q || unit.r !== city.r) moveUnit(state, unit.id, city.q, city.r);
   const u = getUnit(state, unit.id);
   if (u && !tryBestAttack(state, u)) fortify(state, u.id); // nothing to hit – dig in (only works if it hasn't moved)

@@ -142,6 +142,7 @@ fieldset .seed-row + small { margin-left: 0; }
 .row-btns { display: flex; gap: 8px; margin-top: 10px; }
 .row-btns button { flex: 1; }
 .fortified { color: #cfe3ff; }
+.march { color: #e8c48f; }
 .pillaged { color: #ffb36b; }
 #end-turn.armed { background: #e07a3a; color: #fff; }
 .disband { margin-bottom: 10px; }

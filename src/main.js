@@ -2,7 +2,7 @@
 import {
   createGame, reachable, attackTargets, moveUnit, attack, buyUnit, endTurn,
   unitAt, cityAt, getUnit, incomeOf, previewAttack, tileAt, pathTo, nextActiveUnit, cityInfo,
-  cloneState, drainEvents, migrateState, logFor, turnReport, reportText, reportIsBad, isUndoableMove, canFortify, fortify, canSentry, sentry, SENTRY_TEXT, animSpeedOf, nextAnimSpeed, activeUnits, territoryOwner, cityResources, unitSummary, planRoute, setOrder, runOrders, cancelOrder, visibleTiles, exploredTiles, build, unitCost, hasBuilding,
+  cloneState, drainEvents, migrateState, logFor, turnReport, reportText, reportIsBad, isUndoableMove, canFortify, fortify, canForceMarch, forceMarch, marchReach, canSentry, sentry, SENTRY_TEXT, animSpeedOf, nextAnimSpeed, activeUnits, territoryOwner, cityResources, unitSummary, planRoute, setOrder, runOrders, cancelOrder, visibleTiles, exploredTiles, build, unitCost, hasBuilding,
   rankOf, rankMult, buildingCost, inspiredUnits, unitMove, factionOf, riverDefense, flankers, zocTiles, threatTiles, exportGame, importGame, saveFileName, parseSeed, restartOptions,
   upgradeOptions, upgradeUnit, canDisband, disbandRefund, disbandUnit, chargeReady,
   updateSightings, lastSeen, lastSeenAt, lastSeenText, armyOverview, ARMY_STATUS, ruinBelieved,
@@ -19,7 +19,7 @@ import { SHORTCUTS, keyAction, recruitKey } from './keys.js';
 import { render, canvasSize, pickHex, tileCenter } from './render.js';
 import { key } from './hex.js';
 import {
-  UNIT_TYPES, TERRAIN, PLAYERS, DIFFICULTY, BUILDINGS, RANKS, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FORTIFY, TERRITORY, ECONOMY, RESOURCES, HIGH_GROUND, CHARGE, INSPIRE, RUINS, PILLAGE, REPAIR, ROADWORK, SENTRY, FOCUS, LEVY,
+  UNIT_TYPES, TERRAIN, PLAYERS, DIFFICULTY, BUILDINGS, RANKS, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FORTIFY, FORCED_MARCH, TERRITORY, ECONOMY, RESOURCES, HIGH_GROUND, CHARGE, INSPIRE, RUINS, PILLAGE, REPAIR, ROADWORK, SENTRY, FOCUS, LEVY,
 } from './rules.js';
 
 const SAVE_KEY = 'game123-save';
@@ -241,6 +241,11 @@ function updateHud() {
     if (u.owner === 0 && !busy() && canBuildRoad(state, u, { affordable: false })) {
       const ok = canBuildRoad(state, u);
       html += `<button data-road class="secondary wide-btn" ${ok ? '' : 'disabled'} title="Lay a road on this tile of your territory: moving between road tiles costs ½; costs ${ROADWORK.gold} gold and ends the unit's turn (B)">🛤 Build road (${ROADWORK.gold} gold)</button>`;
+    }
+    if (u.marched) html += `<p class="march">🥾 Forced march: +${FORCED_MARCH.bonus} move, no attack and no healing this turn</p>`;
+    if (u.owner === 0 && !busy() && canForceMarch(state, u)) {
+      const extra = marchReach(state, u).size - reachable(state, u).size;
+      html += `<button data-march class="secondary wide-btn" title="Push on: +${FORCED_MARCH.bonus} move this turn for ${FORCED_MARCH.hpCost} HP; the unit can't attack and won't heal this turn${extra > 0 ? ` (${extra} more tile${extra === 1 ? '' : 's'} in reach)` : ''} (M)">🥾 Forced march <small>+${FORCED_MARCH.bonus} move · −${FORCED_MARCH.hpCost} HP · no attack</small></button>`;
     }
     if (u.fortified) html += `<p class="fortified">⛨ Fortified: +${Math.round(FORTIFY.defBonus * 100)} % defense until it moves or attacks</p>`;
     if (u.sentry && u.owner === 0) {
@@ -750,7 +755,7 @@ function showTooltip(ev, hex) {
 
 function unitTipText(u) {
   const s = unitSummary(state, u);
-  const tags = [s.rank !== RANKS[0].name ? s.rank : '', s.fortified ? 'fortified' : '', s.marching ? 'marching' : '', s.exploring ? 'exploring' : '', s.sentry && s.owner === 0 ? (s.sentry === 'heal' ? 'resting' : 'on watch') : ''].filter(Boolean);
+  const tags = [s.rank !== RANKS[0].name ? s.rank : '', s.fortified ? 'fortified' : '', s.forcedMarch ? 'forced march' : '', s.marching ? 'marching' : '', s.exploring ? 'exploring' : '', s.sentry && s.owner === 0 ? (s.sentry === 'heal' ? 'resting' : 'on watch') : ''].filter(Boolean);
   if (s.kills) tags.push(`${s.kills} kill${s.kills === 1 ? '' : 's'}`);
   return `${PLAYERS[s.owner].name}: ${s.hero ? `${s.hero} the ${s.name}` : s.name}${tags.length ? ` (${tags.join(', ')})` : ''} · HP ${s.hp}/${s.maxHp}\n`
     + `Attack ${fmt(s.attack)} · Defense ${fmt(s.defense)}${s.notes.length ? ` (${s.notes.join(', ')})` : ''} · Range ${s.range} · Move ${s.move}`;
@@ -1095,6 +1100,7 @@ $('info').addEventListener('click', (ev) => {
   }
   if (ev.target.closest('button[data-swap]')) { startSwapPick(); return; }
   if (ev.target.closest('button[data-fortify]')) { fortifySelected(); return; }
+  if (ev.target.closest('button[data-march]')) { marchSelected(); return; }
   if (ev.target.closest('button[data-explore]')) { exploreSelected(); return; }
   if (ev.target.closest('button[data-sentry]')) { sentrySelected(); return; }
   if (ev.target.closest('button[data-pillage]')) { pillageSelected(); return; }
@@ -1130,6 +1136,7 @@ window.addEventListener('keydown', (ev) => {
   else if (act.type === 'nextUnit') selectNextUnit();
   else if (act.type === 'undo') undoMove();
   else if (act.type === 'fortify') fortifySelected();
+  else if (act.type === 'march') marchSelected();
   else if (act.type === 'explore') exploreSelected();
   else if (act.type === 'sentry') sentrySelected();
   else if (act.type === 'pillage') pillageSelected();
@@ -1227,6 +1234,16 @@ function fortifySelected() {
   afterAction(null); // no animation needed – the shield appears right away
   sound.play('fortify');
   selectNextUnit();
+}
+
+// Forced march for the selected unit (M / button in the panel): it stays selected with its larger reach.
+function marchSelected() {
+  if (busy() || state.winner !== null) return;
+  const u = selectedUnit();
+  if (!u || u.owner !== 0 || !forceMarch(state, u.id)) return;
+  undoStack = [];
+  afterAction(null); // the HP loss shows at once; a floater would only repeat the panel
+  sound.play('step');
 }
 
 // Puts the selected unit on watch (W / button in the panel) and moves on to the next unit that can act.

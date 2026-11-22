@@ -476,6 +476,33 @@ try {
   }
   await page.evaluate(() => window.__game.showNotice([])); // the banner would shift the map for the clicks below
 
+  // forced march: the archer in the capital (made ready for the test) pushes on for +1 move and 2 HP
+  await page.evaluate(() => {
+    const st = window.__game.getState();
+    const c = st.cities.find((x) => x.owner === 0 && x.capital);
+    const u = st.units.find((x) => x.q === c.q && x.r === c.r);
+    u.movesLeft = 2; u.hasAttacked = false; u.moved = false; u.hp = 8;
+    window.__game.refresh();
+  });
+  await page.keyboard.press('Escape');
+  await page.mouse.click(capPt.x, capPt.y);
+  const marchBtn = page.locator('#info button[data-march]');
+  if (!(await marchBtn.count())) throw new Error('forced march button missing for a fresh unit');
+  await marchBtn.click();
+  const marched = await page.evaluate(() => {
+    const st = window.__game.getState();
+    const c = st.cities.find((x) => x.owner === 0 && x.capital);
+    const u = st.units.find((x) => x.q === c.q && x.r === c.r);
+    return { hp: u.hp, moves: u.movesLeft, marched: u.marched, line: document.querySelector('#info .march')?.textContent || '',
+      btn: !!document.querySelector('#info button[data-march]') };
+  });
+  if (marched.hp !== 6 || marched.moves !== 3 || marched.marched !== true || !/Forced march: \+1 move/.test(marched.line) || marched.btn) {
+    throw new Error(`forced march: ${JSON.stringify(marched)}`);
+  }
+  await page.locator('#info .march').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: 'artifacts/screenshot-march.png' });
+  await page.evaluate(() => window.scrollTo(0, 0));
+
   // ? opens the shortcut overlay, Esc closes it
   await page.keyboard.press('?');
   if (!(await page.evaluate(() => document.getElementById('keys-dialog').open))) throw new Error('? did not open the shortcuts');

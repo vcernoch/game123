@@ -4,7 +4,7 @@ import { generateMap, hasRiverEdge } from './map.js';
 import {
   TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY, VISION, DIFFICULTY, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, ROAD_COST, RIVER, FLANK, HIGH_GROUND, CHARGE, INSPIRE,
   FACTIONS, NO_FACTION, MAP_SIZES, HAPPENINGS, FORTIFY, TERRITORY, RESOURCES,
-  UPGRADES, UPGRADE, DISBAND, SIGHTINGS, RUINS, EXPLORE, PILLAGE, REPAIR, ROADWORK, SENTRY, VOLLEY, ANIM_SPEEDS, HEROES, MILESTONES, ADVISOR, GROWTH, TRADE, UNREST, FOCUS, LEVY,
+  UPGRADES, UPGRADE, DISBAND, SIGHTINGS, RUINS, EXPLORE, PILLAGE, REPAIR, ROADWORK, SENTRY, VOLLEY, FORCED_MARCH, ANIM_SPEEDS, HEROES, MILESTONES, ADVISOR, GROWTH, TRADE, UNREST, FOCUS, LEVY,
 } from './rules.js';
 import { createRng } from './rng.js';
 
@@ -130,7 +130,7 @@ function countStat(state, name, player) {
   state.stats[name][player]++;
 }
 
-export const STATE_VERSION = 29;
+export const STATE_VERSION = 30;
 
 // Converts a saved state of an older version to the current one; returns null for an unknown format.
 export function migrateState(s) {
@@ -254,6 +254,10 @@ export function migrateState(s) {
   if (s.version === 28) {
     // recruit orders arrived in version 29 – a missing `city.order` means none
     s.version = 29;
+  }
+  if (s.version === 29) {
+    // forced march arrived in version 30 – a missing `unit.marched` means the unit didn't march
+    s.version = 30;
   }
   return s.version === STATE_VERSION ? s : null;
 }
@@ -430,6 +434,9 @@ export function applyEvent(state, ev) {
     }
     if (ev.killed) removeUnit(state, ev.defenderId);
     if (ev.died) removeUnit(state, ev.attackerId);
+  } else if (ev.type === 'march') {
+    const u = getUnit(state, ev.unitId);
+    if (u) { u.marched = true; u.moved = true; u.hp = ev.hp; u.movesLeft = ev.movesLeft; delete u.fortified; delete u.sentry; }
   } else if (ev.type === 'fortify') {
     const u = getUnit(state, ev.unitId);
     if (u) { u.fortified = true; delete u.sentry; }
@@ -1390,6 +1397,46 @@ export function checkSentries(state, player) {
   return out;
 }
 
+// ---------- forced march ----------
+
+// Why the unit can't force-march now (a short reason), or null if it can.
+export function forcedMarchProblem(state, unit) {
+  if (!unit) return 'no unit';
+  if (state.winner !== null) return 'the game is over';
+  if (unit.owner !== state.current) return 'not your turn';
+  if (unit.marched) return 'already on a forced march';
+  if (unit.moved || unit.hasAttacked || unit.movesLeft < unitMove(state, unit)) return 'it has already acted this turn';
+  if (unit.hp <= FORCED_MARCH.hpCost) return 'too weak to march';
+  return null;
+}
+
+export const canForceMarch = (state, unit) => forcedMarchProblem(state, unit) === null;
+
+// Forced march: +FORCED_MARCH.bonus move points now for FORCED_MARCH.hpCost HP; the unit can't attack this turn
+// and won't heal at its end (it counts as moved). Leaves fortify, watch, move orders and exploring.
+// Emits a replayable 'march' event.
+export function forceMarch(state, unitId) {
+  const unit = getUnit(state, unitId);
+  if (!canForceMarch(state, unit)) return false;
+  unit.marched = true;
+  unit.moved = true;
+  unit.hp -= FORCED_MARCH.hpCost;
+  unit.movesLeft += FORCED_MARCH.bonus;
+  delete unit.fortified;
+  delete unit.sentry;
+  delete unit.goto;
+  delete unit.explore;
+  emit(state, { type: 'march', unitId: unit.id, q: unit.q, r: unit.r, hp: unit.hp, hpCost: FORCED_MARCH.hpCost, movesLeft: unit.movesLeft });
+  return true;
+}
+
+// Tiles the unit could reach with a forced march (Map key -> cost), without changing anything.
+// Empty if it can't march.
+export function marchReach(state, unit) {
+  if (!canForceMarch(state, unit)) return new Map();
+  return searchMoves(state, { ...unit, movesLeft: unit.movesLeft + FORCED_MARCH.bonus }).result;
+}
+
 // Can the unit fortify now? Only an own unit of the current player that hasn't moved or attacked this turn.
 export function canFortify(state, unit) {
   return !!unit && unit.owner === state.current && state.winner === null
@@ -1411,7 +1458,7 @@ export function fortify(state, unitId) {
 }
 
 export function attackTargets(state, unit) {
-  if (unit.hasAttacked) return [];
+  if (unit.hasAttacked || unit.marched) return [];
   const range = UNIT_TYPES[unit.type].range;
   return state.units.filter((u) => u.owner !== unit.owner && distance(unit, u) <= range);
 }
@@ -1606,6 +1653,7 @@ export function unitSummary(state, unit) {
     rank: RANKS[rankOf(unit)].name,
     xp: unit.xp || 0,
     fortified: !!unit.fortified,
+    forcedMarch: !!unit.marched,
     marching: !!unit.goto,
     exploring: !!unit.explore,
     sentry: unit.sentry || null,
@@ -2149,6 +2197,7 @@ export function endTurn(state) {
     const restHeal = territoryOwner(state, u.q, u.r) === u.owner ? TERRITORY.healIdle : ECONOMY.healIdle;
     const heal = city && city.owner === u.owner ? cityHeal(city) : u.moved ? 0 : restHeal;
     u.hp = Math.min(UNIT_TYPES[u.type].hp, u.hp + heal);
+    delete u.marched; // a forced march lasts only for the turn it was made in
   }
   state.current = (state.current + 1) % PLAYERS.length;
   if (state.current === 0) {
@@ -2642,8 +2691,13 @@ export function adviseTurn(state, player) {
     // no gold for any recruit there? a grown city can still levy a warrior
     const broke = Object.keys(UNIT_TYPES).every((t) => gold < unitCost(state, worst.c, t));
     const levyTip = broke && canLevy(state, worst.c) ? ` No gold to recruit – levy a ${UNIT_TYPES[LEVY.type].name} there (costs a size).` : '';
-    add('undefended', `${worst.c.name} is unguarded – an enemy ${UNIT_TYPES[worst.e.type].name} is ${worst.d} tile${worst.d === 1 ? '' : 's'} away.${levyTip}`,
-      worst.c, { cityId: worst.c.id, ...(levyTip ? { levy: true } : {}) });
+    // nobody reaches the city this turn, but a forced march would get a unit there
+    const cityKey = key(worst.c.q, worst.c.r);
+    const marcher = [...moves.values()].some((m) => m.has(cityKey)) ? null
+      : mine.find((u) => marchReach(state, u).has(cityKey));
+    const marchTip = marcher ? ` A forced march (🥾) gets ${marcher.name ? '' : 'your '}${unitTitle(marcher)} there in time (−${FORCED_MARCH.hpCost} HP).` : '';
+    add('undefended', `${worst.c.name} is unguarded – an enemy ${UNIT_TYPES[worst.e.type].name} is ${worst.d} tile${worst.d === 1 ? '' : 's'} away.${marchTip}${levyTip}`,
+      worst.c, { cityId: worst.c.id, ...(levyTip ? { levy: true } : {}), ...(marcher ? { marchUnitId: marcher.id } : {}) });
   }
 
   // a sure kill without losing the attacker (weakest target first)
@@ -2903,6 +2957,7 @@ export function stateProblem(s) {
     if (taken.has(k)) return `two units on ${k}`;
     taken.add(k);
     if (!Number.isFinite(u.hp) || u.hp <= 0) return `unit ${u.id} has no HP`;
+    if (u.marched !== undefined && u.marched !== true) return `unit ${u.id} has a bad forced march`;
     if (u.sentry !== undefined && u.sentry !== 'watch' && u.sentry !== 'heal') return `unit ${u.id} has a bad watch order`;
     if (u.name !== undefined && !(typeof u.name === 'string' && u.name.length > 0 && u.name.length <= 40)) return `unit ${u.id} has a bad name`;
     if (u.kills !== undefined && !(isInt(u.kills) && u.kills >= 0)) return `unit ${u.id} has bad kills`;

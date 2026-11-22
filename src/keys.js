@@ -1,6 +1,6 @@
 // Keyboard shortcuts: one table drives both the key handling and the `?` overlay, so they can't
 // disagree. Pure module without DOM.
-import { UNIT_TYPES } from './rules.js';
+import { UNIT_TYPES, FORCED_MARCH } from './rules.js';
 
 const RECRUIT_TYPES = Object.keys(UNIT_TYPES);
 
@@ -12,6 +12,8 @@ export const SHORTCUTS = [
   { keys: 'Shift + Enter', text: 'end the turn right away', action: () => ({ type: 'endTurn', force: true }),
     match: (k, shift) => k === 'Enter' && shift },
   { keys: 'F', text: 'fortify the selected unit', action: () => ({ type: 'fortify' }), match: (k) => k === 'f' || k === 'F' },
+  { keys: 'M', text: `forced march: the selected unit gets +${FORCED_MARCH.bonus} move this turn for ${FORCED_MARCH.hpCost} HP, but can't attack or heal`, action: () => ({ type: 'march' }),
+    match: (k) => k === 'm' || k === 'M' },
   { keys: 'W', text: 'sentry: the selected unit keeps watch (a wounded one rests until healed) and Tab skips it until an enemy comes near',
     action: () => ({ type: 'sentry' }), match: (k) => k === 'w' || k === 'W' },
   { keys: 'X', text: 'send the selected unit exploring the fog on its own', action: () => ({ type: 'explore' }), match: (k) => k === 'x' || k === 'X' },
