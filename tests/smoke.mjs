@@ -436,6 +436,46 @@ try {
   });
   if (levied.type !== 'warrior' || levied.size !== 1 || levied.gold !== levyGold || levied.btn) throw new Error(`levy: ${JSON.stringify(levied)}`);
 
+  // recruit order: the occupied capital turns its recruit buttons into ⏳ order buttons; key 1 switches the
+  // order, pressing the ordered button cancels it; at the start of the next turn the order is bought
+  await page.locator('button[data-order="archer"]').click();
+  const ordered = await page.evaluate(() => ({
+    order: window.__game.getState().cities.find((c) => c.owner === 0 && c.capital).order,
+    line: document.querySelector('.recruit-order')?.textContent || '',
+    pressed: document.querySelector('button[data-order="archer"]')?.getAttribute('aria-pressed'),
+  }));
+  if (ordered.order !== 'archer' || !/Ordered: Archer.*waits until the city tile is free/.test(ordered.line) || ordered.pressed !== 'true') {
+    throw new Error(`recruit order button: ${JSON.stringify(ordered)}`);
+  }
+  await page.locator('.recruit-order').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: 'artifacts/screenshot-order.png' });
+  await page.keyboard.press('1');
+  const switched = await page.evaluate(() => window.__game.getState().cities.find((c) => c.owner === 0 && c.capital).order);
+  if (switched !== 'warrior') throw new Error(`key 1 did not switch the order: ${switched}`);
+  await page.locator('button[data-order="warrior"]').click();
+  const cancelled = await page.evaluate(() => window.__game.getState().cities.find((c) => c.owner === 0 && c.capital).order);
+  if (cancelled !== undefined) throw new Error(`pressing the ordered button did not cancel it: ${cancelled}`);
+  await page.locator('button[data-order="archer"]').click();
+  await page.evaluate(() => {
+    const st = window.__game.getState();
+    const c = st.cities.find((x) => x.owner === 0 && x.capital);
+    st.units = st.units.filter((u) => u.q !== c.q || u.r !== c.r); // the levied warrior leaves (test shortcut)
+    st.gold[0] = Math.max(st.gold[0], 40);
+    window.__game.refresh();
+  });
+  await page.evaluate(() => window.__game.endTurn());
+  await page.waitForFunction(() => window.__game.getState().current === 0 && !window.__game.isBusy(), null, { timeout: 20000 });
+  const fulfilled = await page.evaluate(() => {
+    const st = window.__game.getState();
+    const c = st.cities.find((x) => x.owner === 0 && x.capital);
+    const u = st.units.find((x) => x.q === c.q && x.r === c.r);
+    return { type: u && u.type, order: c.order, notice: document.getElementById('notice').textContent };
+  });
+  if (fulfilled.type !== 'archer' || fulfilled.order !== undefined || !/Archer recruited in .* as ordered/.test(fulfilled.notice)) {
+    throw new Error(`recruit order not bought at the turn start: ${JSON.stringify(fulfilled)}`);
+  }
+  await page.evaluate(() => window.__game.showNotice([])); // the banner would shift the map for the clicks below
+
   // ? opens the shortcut overlay, Esc closes it
   await page.keyboard.press('?');
   if (!(await page.evaluate(() => document.getElementById('keys-dialog').open))) throw new Error('? did not open the shortcuts');
@@ -460,7 +500,8 @@ try {
     return u && u.type;
   });
   if (scout !== 'scout') throw new Error(`key 6 did not recruit a scout: ${scout}`);
-  const scoutTitle = await page.getAttribute('#info button[data-buy="scout"]', 'title');
+  // the city is occupied now, so the scout button is an order button – it keeps the unit description
+  const scoutTitle = await page.getAttribute('#info button[data-order="scout"]', 'title');
   if (!scoutTitle || !scoutTitle.includes('cannot capture cities')) throw new Error(`scout button title: ${scoutTitle}`);
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({ path: 'artifacts/screenshot-scout.png' });

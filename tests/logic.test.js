@@ -18,6 +18,7 @@ import {
   citySize, growthLeft, citySieged, growthText, growCities, tradeRoute, tradeText, cutRoutes, routesCutBy,
   cityUnrest, unrestCalm, unrestTurnsLeft, unrestText, calmCities, focusOf, cityFocus, setFocus, focusText,
   levy, canLevy, levyProblem,
+  recruitOrderProblem, setRecruitOrder, clearRecruitOrder, recruitOrderBlocker, recruitOrderText, fillRecruitOrders,
 } from '../src/game.js';
 import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
@@ -4528,7 +4529,7 @@ test('city focus: commerce, granary and fortress change income, growth and defen
   const old = cloneState(createGame({ seed: 2 }));
   old.version = 27;
   assert.equal(migrateState(old).version, STATE_VERSION);
-  assert.equal(STATE_VERSION, 28);
+  assert.ok(STATE_VERSION >= 28, 'focus arrived in version 28');
 });
 
 test('city focus: the AI picks fortress, granary or commerce; the advisor flags a wasted focus; C cycles it', () => {
@@ -4706,4 +4707,150 @@ test('levy: the AI levies only in an emergency, the advisor suggests it when gol
   tip = adviseTurn(a, 0).find((x) => x.kind === 'undefended');
   assert.ok(!/levy/.test(tip.text) && !tip.levy, 'with gold the advisor doesn\'t suggest a levy');
   assert.ok(foe);
+});
+
+test('recruit orders: who may order, bought at the owner\'s turn start once there is gold and room, replay, capture, validation', () => {
+  const s = createGame({ seed: 3, fog: false, happenings: false });
+  s.units = [];
+  const cap = s.cities.find((c) => c.owner === 0 && c.capital);
+  const other = s.cities.find((c) => c.owner === null);
+  const aiCap = s.cities.find((c) => c.owner === 1 && c.capital);
+  // who may order
+  assert.equal(recruitOrderProblem(s, other, 'archer'), 'not your city');
+  assert.equal(recruitOrderProblem(s, aiCap, 'archer'), 'not your city');
+  assert.equal(recruitOrderProblem(s, cap, 'dragon'), 'unknown unit');
+  assert.equal(recruitOrderProblem(s, cap, 'constructor'), 'unknown unit', 'no prototype keys');
+  assert.ok(!setRecruitOrder(s, aiCap.id, 'archer'));
+  s.current = 1;
+  assert.ok(!setRecruitOrder(s, cap.id, 'archer'), 'not on the enemy turn');
+  s.current = 0;
+  assert.equal(recruitOrderText(s, cap), '');
+  // an order made without gold waits and says why
+  const cost = unitCost(s, cap, 'archer');
+  s.gold[0] = 0;
+  assert.ok(setRecruitOrder(s, cap.id, 'archer'));
+  assert.ok(!setRecruitOrder(s, cap.id, 'archer'), 'the same order again changes nothing');
+  assert.equal(cap.order, 'archer');
+  assert.equal(recruitOrderBlocker(s, cap), 'gold');
+  assert.match(recruitOrderText(s, cap), new RegExp(`Ordered: Archer \\(${cost} gold\\).*waits for gold \\(0/${cost}\\)`));
+  assert.equal(stateProblem(JSON.parse(JSON.stringify(s))), null, 'a saved order is valid');
+  // income too small: the order survives the turn start
+  const income = incomeOf(s, 0);
+  assert.ok(income < cost, 'one turn of income is not enough on this map');
+  endTurn(s); endTurn(s);
+  assert.equal(s.current, 0);
+  assert.equal(cap.order, 'archer', 'still waiting');
+  assert.ok(!unitAt(s, cap.q, cap.r));
+  // occupied city: waits even with gold
+  s.gold[0] = 100;
+  const blocker = spawnUnit(s, 'scout', 0, cap.q, cap.r);
+  assert.equal(recruitOrderBlocker(s, cap), 'occupied');
+  assert.match(recruitOrderText(s, cap), /waits until the city tile is free/);
+  assert.deepEqual(fillRecruitOrders(s, 0), []);
+  s.units = s.units.filter((u) => u.id !== blocker.id);
+  assert.equal(recruitOrderBlocker(s, cap), null);
+  // the turn start buys it after income: paid, can't act this turn, order gone, event + replay
+  endTurn(s);
+  const before = cloneState(s);
+  drainEvents(s);
+  const goldBefore = s.gold[0];
+  const turnStart = cloneState(s);
+  endTurn(s);
+  const evs = drainEvents(s);
+  assert.equal(s.current, 0);
+  const u = unitAt(s, cap.q, cap.r);
+  assert.ok(u && u.type === 'archer' && u.owner === 0, 'the ordered archer was bought');
+  assert.equal(u.movesLeft, 0, 'like a recruit, it acts next turn');
+  assert.ok(u.hasAttacked);
+  assert.equal(cap.order, undefined);
+  assert.equal(s.gold[0], goldBefore + incomeOf(turnStart, 0) - cost);
+  const i = evs.findIndex((e) => e.type === 'order');
+  assert.ok(i >= 0 && evs[i + 1].type === 'spawn', 'order event right before the spawn');
+  assert.deepEqual(evs[i], { type: 'order', cityId: cap.id, player: 0, unitType: 'archer', cost });
+  assert.equal(soundFor(evs[i]), null);
+  assert.match(logFor(s, 0).at(-1).msg, /recruited Archer/);
+  for (const e of evs) applyEvent(before, e);
+  assert.equal(before.cities.find((c) => c.id === cap.id).order, undefined, 'the replay clears the order');
+  assert.ok(unitAt(before, cap.q, cap.r), 'the replay places the recruit');
+  // a harvest at the turn start can pay for the order (orders come after random events)
+  s.units = [];
+  setRecruitOrder(s, cap.id, 'warrior');
+  s.gold[0] = unitCost(s, cap, 'warrior') - HAPPENINGS.kinds.harvest.gold;
+  assert.equal(recruitOrderBlocker(s, cap), 'gold');
+  applyHappening(s, 0, 'harvest', cap);
+  assert.deepEqual(fillRecruitOrders(s, 0).map((o) => o.type), ['warrior']);
+  // recruiting anything in the city fulfils the order; clearing; several cities in id order with limited gold
+  s.units = [];
+  setRecruitOrder(s, cap.id, 'horseman');
+  s.gold[0] = 100;
+  assert.ok(buyUnit(s, cap.id, 'warrior'));
+  assert.equal(cap.order, undefined);
+  s.units = [];
+  setRecruitOrder(s, cap.id, 'scout');
+  assert.ok(clearRecruitOrder(s, cap.id));
+  assert.ok(!clearRecruitOrder(s, cap.id), 'nothing left to clear');
+  other.owner = 0;
+  setRecruitOrder(s, cap.id, 'warrior');
+  setRecruitOrder(s, other.id, 'warrior');
+  s.gold[0] = unitCost(s, cap, 'warrior');
+  const done = fillRecruitOrders(s, 0);
+  const first = [cap, other].sort((a, b) => a.id - b.id)[0];
+  assert.deepEqual(done.map((o) => o.cityId), [first.id], 'only the first city in id order gets the gold');
+  assert.equal(s.gold[0], 0);
+  assert.ok(!fillRecruitOrders(s, 1).length, 'not the player\'s turn');
+  // a captured city loses its order, also in the replay; game over buys nothing
+  const second = first === cap ? other : cap;
+  assert.equal(second.order, 'warrior');
+  s.current = 1;
+  const nb = neighbors(second.q, second.r).find((n) => isPassable(s, n.q, n.r) && !unitAt(s, n.q, n.r) && !cityAt(s, n.q, n.r));
+  const raider = spawnUnit(s, 'warrior', 1, nb.q, nb.r);
+  raider.movesLeft = 2; raider.hasAttacked = false;
+  drainEvents(s);
+  const pre2 = cloneState(s);
+  assert.ok(moveUnit(s, raider.id, second.q, second.r));
+  assert.equal(second.owner, 1);
+  assert.equal(second.order, undefined);
+  for (const e of drainEvents(s)) applyEvent(pre2, e);
+  assert.equal(pre2.cities.find((c) => c.id === second.id).order, undefined);
+  s.current = 0;
+  s.units = s.units.filter((x) => x.q !== first.q || x.r !== first.r);
+  setRecruitOrder(s, first.id, 'warrior');
+  s.gold[0] = 100;
+  s.winner = 1;
+  assert.deepEqual(fillRecruitOrders(s, 0), []);
+  assert.equal(recruitOrderProblem(s, first, 'warrior'), 'the game is over');
+  // validation and migration
+  const bad = JSON.parse(JSON.stringify(createGame({ seed: 3 })));
+  bad.cities[0].order = 'dragon';
+  assert.match(stateProblem(bad), /bad order/);
+  const neutralOrder = JSON.parse(JSON.stringify(createGame({ seed: 3 })));
+  neutralOrder.cities.find((c) => c.owner === null).order = 'warrior';
+  assert.match(stateProblem(neutralOrder), /bad order/);
+  const old = JSON.parse(JSON.stringify(createGame({ seed: 3 })));
+  old.version = 28;
+  assert.equal(migrateState(old).version, STATE_VERSION);  assert.equal(STATE_VERSION, 29);
+});
+
+test('recruit orders: in a real game against the AI only the player has orders and the state stays valid', () => {
+  const s = createGame({ seed: 5, happenings: true });
+  const cap = s.cities.find((c) => c.owner === 0 && c.capital);
+  let bought = 0;
+  for (let i = 0; i < 40 && s.winner === null; i++) {
+    // the player only orders a warrior in the capital every turn, whatever the gold, and walks the last one out
+    const g = unitAt(s, cap.q, cap.r);
+    if (g && g.owner === 0) {
+      const out = [...reachable(s, g).keys()].map((k) => k.split(',').map(Number)).find(([q, r]) => !cityAt(s, q, r) && !unitAt(s, q, r));
+      if (out) moveUnit(s, g.id, out[0], out[1]);
+    }
+    if (cap.owner === 0) setRecruitOrder(s, cap.id, 'warrior');
+    endTurn(s);
+    runAITurn(s);
+    drainEvents(s);
+    if (s.winner !== null) break;
+    endTurn(s);
+    bought += drainEvents(s).filter((e) => e.type === 'order').length;
+    assert.equal(stateProblem(JSON.parse(JSON.stringify(s))), null, `turn ${s.turn}`);
+    assert.ok(s.cities.every((c) => !c.order || c.owner === 0), 'only the player has orders');
+  }
+  assert.ok(bought >= 2, `several orders were fulfilled (${bought})`);
 });

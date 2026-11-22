@@ -2,6 +2,17 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-22 – Recruit orders (v0.40.0)
+- **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.38.0–v0.40.0) is ahead of `main` (v0.37.0) – please merge it.
+- Starting state green (117 logic tests + smoke).
+- Phase 18 (city management, own improvement), third task. When a city couldn't recruit (a few gold short, or a unit standing in it), the player had to remember to come back next turn – and on a busy front a turn often started without the planned recruit. Now the city can take an order.
+- In `game.js`: `recruitOrderProblem`, `setRecruitOrder`, `clearRecruitOrder`, `recruitOrderBlocker` ('gold' / 'occupied' / null), `recruitOrderText`, `fillRecruitOrders`. `city.order` holds a unit type. `endTurn` calls `fillRecruitOrders` at the start of the owner's turn after income and random events (so a harvest can pay for it), cities in id order while gold lasts; the purchase goes through `buyUnit` (price at that moment, academy XP, rally point), so the recruit can't act until the next turn – the same as clicking recruit at the turn start. A replayable `order` event comes right before the `spawn`. Any recruit in the city fulfils the order; a captured city loses it (also in replay). The AI doesn't use orders (it recruits directly). Named `recruitOrder…` because `setOrder`/`cancelOrder` already mean move orders.
+- UI: in the city panel a recruit button that can't be bought now becomes a dashed "⏳ order" button (it keeps the unit description in its tooltip); the ordered one is highlighted and pressing it again cancels; a "⏳ Ordered: … – waits for gold (x/y)" / "waits until the city tile is free" line with "✖ Cancel order"; number keys order when they can't recruit; a small hourglass left of the size dots on the map; the city tooltip shows the order; the start-of-turn banner says "Archer recruited in … as ordered (−12 gold)". Help text and the shortcut overlay updated.
+- State structure: `state.version` 29 (optional `city.order`), trivial migration; `stateProblem` validates it (known type, owned city).
+- Tests adjusted (not weakened): the city focus test pinned `STATE_VERSION` to 28 – it now checks `>= 28`, and the new test pins 29. The smoke test read the title of the scout's `data-buy` button in an occupied city, which is now an order button (`data-order`); it reads that one and still checks the scout description.
+- Tests: +2 logic (who may order, waiting for gold and for room with texts, bought at the turn start with the right gold, can't act, event order + replay, harvest pays for it, recruiting fulfils it, clearing, several cities with limited gold in id order, capture incl. replay, game over, validation, migration; a 40-turn game against the AI where the player only orders keeps a valid state and buys several units). Smoke test: ordering an archer in the occupied capital, key 1 switches the order, pressing it again cancels, then a real turn end buys the archer and the banner says so (`artifacts/screenshot-order.png`).
+- Status: `npm run check` green (119 logic tests + smoke).
+
 ## 2026-11-21 – Levy (v0.39.0)
 - **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.38.0–v0.39.0) is ahead of `main` (v0.37.0) – please merge it.
 - Starting state green (115 logic tests + smoke).

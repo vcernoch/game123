@@ -736,6 +736,7 @@ function drawCity(ctx, city) {
   drawSize(ctx, city, c.x, c.y);
   if (cityUnrest(city)) drawUnrest(ctx, c.x + houses[0][0], c.y + houses[0][1] - 5);
   if (city.owner === 0) drawFocus(ctx, focusOf(city), c.x + 15, c.y + 25); // the AI's focus stays its secret
+  if (city.owner === 0 && city.order) drawOrder(ctx, c.x - 15, c.y + 25);
   ctx.restore();
 }
 
@@ -774,6 +775,24 @@ function drawFocus(ctx, focus, x, y) {
     }
     ctx.stroke();
   }
+  ctx.restore();
+}
+
+// Recruit order waiting: a small hourglass left of the size dots.
+function drawOrder(ctx, x, y) {
+  ctx.save();
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = 'rgba(0,0,0,0.8)';
+  ctx.fillStyle = '#ffe27a';
+  ctx.beginPath();
+  ctx.moveTo(x - 3.5, y - 5); ctx.lineTo(x + 3.5, y - 5); ctx.lineTo(x, y);
+  ctx.closePath();
+  ctx.moveTo(x - 3.5, y + 5); ctx.lineTo(x + 3.5, y + 5); ctx.lineTo(x, y);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillRect(x - 4.5, y - 6, 9, 1.5);
+  ctx.fillRect(x - 4.5, y + 4.5, 9, 1.5);
   ctx.restore();
 }
 

@@ -7,7 +7,7 @@ import {
   upgradeOptions, upgradeUnit, canDisband, disbandRefund, disbandUnit, chargeReady,
   updateSightings, lastSeen, lastSeenAt, lastSeenText, armyOverview, ARMY_STATUS, ruinBelieved,
   canExplore, setExplore, canPillage, pillage, isPillaged, pillageTurnsLeft, canRepair, repair,
-  rallyPath, setRally, clearRally, swapPartners, swapUnits, canBuildRoad, buildRoad, timelineFor, adviseTurn, suggestRecruit, growthText, tradeText, tradeRoute, unrestText, focusOf, focusText, setFocus, levy, levyProblem,
+  rallyPath, setRally, clearRally, swapPartners, swapUnits, canBuildRoad, buildRoad, timelineFor, adviseTurn, suggestRecruit, growthText, tradeText, tradeRoute, unrestText, focusOf, focusText, setFocus, levy, levyProblem, setRecruitOrder, clearRecruitOrder, recruitOrderText,
 } from './game.js';
 import { createAnimator } from './anim.js';
 import { decideTap } from './input.js';
@@ -288,6 +288,7 @@ function updateHud() {
     if (city.owner === 0 && unrestText(state, city)) html += `<p class="unrest">✊ ${unrestText(state, city)}</p>`;
     if (city.owner === 0) html += `<p class="trade ${tradeRoute(state, city)}">🛤 ${tradeText(state, city)}</p>`;
     if (city.owner === 0 && (state.current !== 0 || busy())) html += `<p class="focus">${focusText(city)}</p>`;
+    if (city.owner === 0 && city.order && (state.current !== 0 || busy())) html += `<p class="order recruit-order">⏳ ${recruitOrderText(state, city)}</p>`;
     const res = cityResources(state, city).filter((t) => exploredTiles(state, 0).has(key(t.q, t.r)));
     if (res.length) html += `<p class="resource">Resources: ${res.map((t) => RESOURCES[t.resource].name + (isPillaged(state, t) ? ` (🔥 pillaged, ${pillageTurnsLeft(state, t)} more)` : '')).join(', ')}</p>`;
     const built = (city.buildings || []).map((b) => `<span class="building">${BUILDINGS[b].symbol} ${BUILDINGS[b].name}</span>`);
@@ -298,13 +299,22 @@ function updateHud() {
       html += '<h4>Recruit</h4><div class="buy">';
       for (const [type, t] of Object.entries(UNIT_TYPES)) {
         const cost = unitCost(state, city, type);
-        const dis = blocked || state.gold[0] < cost ? 'disabled' : '';
         const star = pick && pick.type === type;
-        html += `<button data-buy="${type}" ${dis}${star ? ' class="suggested"' : ''} title="${t.desc ? `${t.desc} · ` : ''}key ${recruitKey(type)}"><span><kbd class="hotkey">${recruitKey(type)}</kbd> ${t.name}${star ? ' <b class="star">★</b>' : ''}</span> <small>${cost} gold</small></button>`;
+        const label = `<span><kbd class="hotkey">${recruitKey(type)}</kbd> ${t.name}${star ? ' <b class="star">★</b>' : ''}</span>`;
+        if (blocked || state.gold[0] < cost) {
+          // can't recruit now: the button orders the unit for the start of a later turn instead
+          const ordered = city.order === type;
+          const tip = `${t.desc ? `${t.desc} · ` : ''}${ordered ? 'Ordered – press again to cancel the order'
+            : `${blocked ? 'The city is occupied' : 'Not enough gold'} – order it: it is bought at the start of your turn once there is gold and room`} (key ${recruitKey(type)})`;
+          html += `<button data-order="${type}" class="order-btn${ordered ? ' ordered' : ''}${star ? ' suggested' : ''}" aria-pressed="${ordered}" title="${tip}">${label} <small>${cost} gold · ⏳ ${ordered ? 'ordered' : 'order'}</small></button>`;
+        } else {
+          html += `<button data-buy="${type}" ${star ? ' class="suggested"' : ''} title="${t.desc ? `${t.desc} · ` : ''}key ${recruitKey(type)}">${label} <small>${cost} gold</small></button>`;
+        }
       }
       html += '</div>';
+      if (city.order) html += `<p class="order recruit-order">⏳ ${recruitOrderText(state, city)}</p><button data-order-cancel class="secondary wide-btn">✖ Cancel order</button>`;
       if (pick) html += `<p class="hint suggest">★ Suggested: ${UNIT_TYPES[pick.type].name} – ${pick.reason}.</p>`;
-      if (blocked) html += '<p class="hint">The city is occupied – move the unit out first.</p>';
+      if (blocked) html += '<p class="hint">The city is occupied – move the unit out first, or ⏳ order a unit for a later turn.</p>';
       html += levyButton(city);
       html += focusPanel(city);
       html += rallyPanel(city);
@@ -751,7 +761,7 @@ function cityTipText(city) {
   const owner = city.owner === null ? 'neutral' : PLAYERS[city.owner].name;
   const gar = ci.garrison ? UNIT_TYPES[ci.garrison.type].name : 'no garrison';
   const bs = (city.buildings || []).map((b) => BUILDINGS[b].name).join(', ');
-  return `${city.name} (${owner}): +${ci.income} gold/turn · defense +${ci.defensePct} % · ${gar}${bs ? ` · ${bs}` : ''}\n${sizeText(city)}${city.owner === 0 ? `\n${tradeText(state, city)}` : ''}${city.owner === 0 && unrestText(state, city) ? `\n${unrestText(state, city)}` : ''}${city.owner === 0 ? `\n${focusText(city)}` : ''}`;
+  return `${city.name} (${owner}): +${ci.income} gold/turn · defense +${ci.defensePct} % · ${gar}${bs ? ` · ${bs}` : ''}\n${sizeText(city)}${city.owner === 0 ? `\n${tradeText(state, city)}` : ''}${city.owner === 0 && unrestText(state, city) ? `\n${unrestText(state, city)}` : ''}${city.owner === 0 ? `\n${focusText(city)}` : ''}${city.owner === 0 && city.order ? `\n⏳ ${recruitOrderText(state, city)}` : ''}`;
 }
 
 // City size line: own cities also show their growth progress; for others (the AI's progress is
@@ -829,6 +839,8 @@ function doEndTurn(force = false) {
     const happened = ended.filter((e) => e.type === 'happening' && e.player === 0);
     const grew = ended.filter((e) => e.type === 'grow' && e.player === 0)
       .map((e) => `${state.cities.find((c) => c.id === e.cityId).name} grew to size ${e.size} (+1 gold).`);
+    grew.push(...ended.filter((e) => e.type === 'order' && e.player === 0)
+      .map((e) => `${UNIT_TYPES[e.unitType].name} recruited in ${state.cities.find((c) => c.id === e.cityId).name} as ordered (−${e.cost} gold).`));
     grew.push(...ended.filter((e) => e.type === 'calm' && e.player === 0)
       .map((e) => `${state.cities.find((c) => c.id === e.cityId).name} has accepted your rule and pays taxes again.`));
     events.push(...ended.filter((e) => e.type === 'volley')); // the AI's walls shoot at the end of its turn
@@ -1074,6 +1086,13 @@ $('info').addEventListener('click', (ev) => {
   const fBtn = ev.target.closest('button[data-focus]');
   if (fBtn) { focusSelected(fBtn.dataset.focus); return; }
   if (ev.target.closest('button[data-levy]')) { levySelected(); return; }
+  const oBtn = ev.target.closest('button[data-order]');
+  if (oBtn) { recruitOrderSelected(oBtn.dataset.order); return; }
+  if (ev.target.closest('button[data-order-cancel]')) {
+    if (!busy() && clearRecruitOrder(state, selectedCityId)) { sound.play('click'); save(); }
+    draw();
+    return;
+  }
   if (ev.target.closest('button[data-swap]')) { startSwapPick(); return; }
   if (ev.target.closest('button[data-fortify]')) { fortifySelected(); return; }
   if (ev.target.closest('button[data-explore]')) { exploreSelected(); return; }
@@ -1170,7 +1189,19 @@ updateAnimButton();
 // Recruits in the selected own city (number keys and the panel buttons).
 function recruitSelected(type) {
   if (busy() || !selectedCityId) return;
-  if (buyUnit(state, selectedCityId, type)) { undoStack = []; sound.play('recruit'); afterAction(); }
+  if (buyUnit(state, selectedCityId, type)) { undoStack = []; sound.play('recruit'); afterAction(); return; }
+  const city = state.cities.find((c) => c.id === selectedCityId);
+  if (city && city.order !== type) recruitOrderSelected(type); // can't buy it now: order it instead
+}
+
+// Orders a unit in the selected own city for a later turn; ordering the same type again cancels it.
+function recruitOrderSelected(type) {
+  if (busy() || !selectedCityId || state.current !== 0) return;
+  const city = state.cities.find((c) => c.id === selectedCityId);
+  if (!city) return;
+  const changed = city.order === type ? clearRecruitOrder(state, city.id) : setRecruitOrder(state, city.id, type);
+  if (changed) { sound.play('click'); save(); }
+  draw();
 }
 
 // Selects the next unit that can still act (Tab / button).

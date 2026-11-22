@@ -130,7 +130,7 @@ function countStat(state, name, player) {
   state.stats[name][player]++;
 }
 
-export const STATE_VERSION = 28;
+export const STATE_VERSION = 29;
 
 // Converts a saved state of an older version to the current one; returns null for an unknown format.
 export function migrateState(s) {
@@ -250,6 +250,10 @@ export function migrateState(s) {
   if (s.version === 27) {
     // city focus arrived in version 28 – a missing `city.focus` means balanced
     s.version = 28;
+  }
+  if (s.version === 28) {
+    // recruit orders arrived in version 29 – a missing `city.order` means none
+    s.version = 29;
   }
   return s.version === STATE_VERSION ? s : null;
 }
@@ -437,12 +441,16 @@ export function applyEvent(state, ev) {
       c.owner = ev.owner;
       delete c.rally;
       delete c.focus;
+      delete c.order;
       if (ev.size) { c.size = ev.size; c.growth = 0; }
       if (ev.unrest) c.unrest = ev.unrest; else delete c.unrest;
     }
   } else if (ev.type === 'focus') {
     const c = state.cities.find((x) => x.id === ev.cityId);
     if (c) { if (ev.focus === 'balanced') delete c.focus; else c.focus = ev.focus; }
+  } else if (ev.type === 'order') {
+    const c = state.cities.find((x) => x.id === ev.cityId);
+    if (c) delete c.order;
   } else if (ev.type === 'calm') {
     const c = state.cities.find((x) => x.id === ev.cityId);
     if (c) delete c.unrest;
@@ -1719,6 +1727,7 @@ export function moveUnit(state, unitId, q, r) {
     city.owner = unit.owner;
     delete city.rally; // the old owner's rally point means nothing to the new one
     delete city.focus; // … nor does their focus
+    delete city.order; // … nor their recruit order
     city.size = Math.max(1, citySize(city) - GROWTH.captureLoss); // a conquered city shrinks …
     city.growth = 0; // … and starts growing anew
     if (prev !== null) city.unrest = UNREST.turns; // the people of a conquered city resist (neutral ones join willingly)
@@ -1859,6 +1868,7 @@ export function buyUnit(state, cityId, type) {
   // rally point: the recruit gets a move order there and sets off at the start of the next turn
   const goal = rallyTarget(state, city);
   const extra = goal ? { goto: goal } : {};
+  delete city.order; // recruiting here fulfils a waiting order
   spawnUnit(state, type, state.current, city.q, city.r, xp, extra);
   addLog(state, `${PLAYERS[state.current].name}: recruited ${t.name} (${city.name})`, { by: state.current, at: [city] });
   return true;
@@ -1892,6 +1902,69 @@ export function levy(state, cityId) {
   spawnUnit(state, LEVY.type, city.owner, city.q, city.r, 0, goal ? { goto: goal } : {});
   addLog(state, `${PLAYERS[city.owner].name}: levied a ${UNIT_TYPES[LEVY.type].name} in ${city.name} (size ${city.size})`, { by: city.owner, at: [city] });
   return true;
+}
+
+// ---------- recruit orders ----------
+// city.order = a unit type the player ordered in a city that couldn't recruit it right away (not enough gold,
+// or the city tile is taken). At the start of the owner's turn, after income and random events, the order is
+// bought like a normal recruit as soon as there is gold and room; until then it waits. Recruiting anything in
+// the city fulfils the order. A captured city loses it. Player comfort – the AI recruits directly.
+
+// Why the current player can't order `type` in the city (a short text), or null when they can.
+export function recruitOrderProblem(state, city, type) {
+  if (state.winner !== null) return 'the game is over';
+  if (!city || city.owner === null || city.owner !== state.current) return 'not your city';
+  if (!Object.hasOwn(UNIT_TYPES, type)) return 'unknown unit';
+  return null;
+}
+
+// Places (or replaces) the order of an own city. Returns false when nothing changed.
+export function setRecruitOrder(state, cityId, type) {
+  const city = state.cities.find((c) => c.id === cityId);
+  if (recruitOrderProblem(state, city, type) !== null || city.order === type) return false;
+  city.order = type;
+  return true;
+}
+
+export function clearRecruitOrder(state, cityId) {
+  const city = state.cities.find((c) => c.id === cityId);
+  if (!city || city.owner !== state.current || !city.order) return false;
+  delete city.order;
+  return true;
+}
+
+// What stops the city's order from being bought now: 'occupied', 'gold' or null (it would be bought).
+export function recruitOrderBlocker(state, city) {
+  if (!city || !city.order || city.owner === null) return null;
+  if (unitAt(state, city.q, city.r)) return 'occupied';
+  if (state.gold[city.owner] < unitCost(state, city, city.order)) return 'gold';
+  return null;
+}
+
+// Order line for the panel and the tooltip, or '' without an order.
+export function recruitOrderText(state, city) {
+  if (!city || !city.order || city.owner === null) return '';
+  const name = UNIT_TYPES[city.order].name;
+  const cost = unitCost(state, city, city.order);
+  const why = recruitOrderBlocker(state, city);
+  const wait = why === 'occupied' ? ' – waits until the city tile is free'
+    : why === 'gold' ? ` – waits for gold (${state.gold[city.owner]}/${cost})` : '';
+  return `Ordered: ${name} (${cost} gold), bought at the start of your turn${wait}`;
+}
+
+// Start of the player's turn: every order that has gold and room is bought, cities in id order.
+// Emits an 'order' event before the recruit's 'spawn'. Returns the fulfilled orders.
+export function fillRecruitOrders(state, player) {
+  const done = [];
+  if (state.winner !== null || state.current !== player) return done;
+  for (const city of [...state.cities].sort((a, b) => a.id - b.id)) {
+    if (city.owner !== player || !city.order || recruitOrderBlocker(state, city)) continue;
+    const type = city.order;
+    const cost = unitCost(state, city, type);
+    emit(state, { type: 'order', cityId: city.id, player, unitType: type, cost });
+    if (buyUnit(state, city.id, type)) done.push({ cityId: city.id, type, cost });
+  }
+  return done;
 }
 
 // ---------- rally points ----------
@@ -2092,6 +2165,7 @@ export function endTurn(state) {
     u.moved = false;
   }
   if (state.happenings) rollHappening(state, state.current);
+  fillRecruitOrders(state, state.current); // after income and events, so a harvest can pay for it
   return true;
 }
 
@@ -2818,6 +2892,7 @@ export function stateProblem(s) {
     if (c.size !== undefined && !(isInt(c.size) && c.size >= 1 && c.size <= GROWTH.maxSize)) return `bad size of ${c.name}`;
     if (c.growth !== undefined && !(isInt(c.growth) && c.growth >= 0 && c.growth < 100)) return `bad growth of ${c.name}`;
     if (c.focus !== undefined && !(Object.hasOwn(FOCUS.kinds, c.focus) && c.focus !== 'balanced' && c.owner !== null)) return `bad focus of ${c.name}`;
+    if (c.order !== undefined && !(Object.hasOwn(UNIT_TYPES, c.order) && c.owner !== null)) return `bad order of ${c.name}`;
     if (c.unrest !== undefined && !(isInt(c.unrest) && c.unrest >= 0 && c.unrest <= UNREST.turns)) return `bad unrest of ${c.name}`;
   }
   const taken = new Set();

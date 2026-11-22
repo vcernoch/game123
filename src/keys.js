@@ -35,7 +35,7 @@ export const SHORTCUTS = [
     match: (k) => k === 'a' || k === 'A' },
   { keys: 'T', text: 'show or hide the enemy threat overlay', action: () => ({ type: 'threats' }), match: (k) => k === 't' || k === 'T' },
   { keys: 'Z', text: 'undo the last move (if it revealed nothing)', action: () => ({ type: 'undo' }), match: (k) => k === 'z' || k === 'Z' },
-  { keys: `1–${RECRUIT_TYPES.length}`, text: `recruit in the selected city (${RECRUIT_TYPES.map((t, i) => `${i + 1} ${UNIT_TYPES[t].name}`).join(', ')})`,
+  { keys: `1–${RECRUIT_TYPES.length}`, text: `recruit in the selected city (${RECRUIT_TYPES.map((t, i) => `${i + 1} ${UNIT_TYPES[t].name}`).join(', ')}); without gold or room it orders the unit for the start of a later turn`,
     action: (k) => ({ type: 'recruit', unitType: RECRUIT_TYPES[Number(k) - 1] }),
     match: (k) => /^[1-9]$/.test(k) && Number(k) <= RECRUIT_TYPES.length },
   { keys: 'Esc', text: 'cancel the selection, skip an animation, close this help', action: () => ({ type: 'escape' }), match: (k) => k === 'Escape' },

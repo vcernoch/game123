@@ -66,6 +66,8 @@ aside p { margin: 4px 0; }
 .buy .star { color: inherit; }
 .suggest { font-size: 0.9em; }
 .buy button { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 0 8px; text-align: left; }
+.buy button.order-btn { background: transparent; color: var(--muted); border: 1px dashed var(--muted); }
+.buy button.order-btn.ordered { color: #ffe27a; border: 1px solid #ffe27a; background: rgba(255, 226, 122, 0.08); }
 .buy .desc { flex-basis: 100%; font-weight: 400; color: var(--muted); }
 aside h4 { margin: 10px 0 0; font-size: 13px; color: var(--muted); font-weight: 600; }
 .building { display: inline-block; font-size: 12px; padding: 1px 6px; margin: 2px 2px 0 0; border-radius: 4px; background: #3c434f; }
