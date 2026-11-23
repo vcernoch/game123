@@ -1613,6 +1613,8 @@ try {
   await page.mouse.click(coldPt.x, coldPt.y);
   const frostLine = await page.evaluate(() => document.querySelector('#info .frost')?.textContent || '');
   if (!/Winter outside your territory: no healing, −1 HP/.test(frostLine)) throw new Error(`seasons: frost line "${frostLine}"`);
+  const frostTip = await page.evaluate(() => document.getElementById('advisor').textContent);
+  if (!frostTip.includes('is out in the winter cold')) throw new Error(`seasons: no advisor frost hint in "${frostTip}"`);
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({ path: 'artifacts/screenshot-winter.png' });
   await page.setViewportSize({ width: 390, height: 844 });

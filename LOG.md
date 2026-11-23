@@ -2,6 +2,13 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-23 – Winter advisor (v0.45.0, same run)
+- Phase 21, second task of this run (the version was bumped once for the run). Frost is easy to forget until the HP are already gone, and the season badge only says what the season does, not which of your units is at risk.
+- In `game.js`: `outsideHome` (not in own territory nor an own city – `frostBound` now uses it), `winterNear` (`'now'` in winter, `'soon'` in the last round before it, else null). `adviseTurn` gets a `frost` hint (❄, order 2.5 – right after wounded units in danger): the most wounded own unit outside home with ≤ `SEASONS.adviseHp` (60 %) HP that can still move and hasn't attacked, not the one the `wounded` hint already names, and not a 1-HP unit (frost can't hurt it). Text "Winter comes next turn – … start bringing it home." / "… is out in the winter cold – it loses 1 HP a turn outside your land; bring it home."; a click selects the unit.
+- No state structure change (`state.version` stays 35).
+- Tests: +1 logic (no hint two rounds before winter, the most wounded unit first in the last autumn round, the winter text, units without moves skipped, healthy and 1-HP units left alone, own territory is home, no seasons = never). Smoke test: the unit out in the winter cold appears in the advisor.
+- Status: `npm run check` green (136 logic tests + smoke).
+
 ## 2026-11-23 – Seasons (v0.45.0)
 - **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.38.0–v0.45.0) is ahead of `main` (v0.37.0) – please merge it.
 - Starting state green (133 logic tests + smoke).

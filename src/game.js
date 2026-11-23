@@ -997,10 +997,22 @@ export function frostLoss(state, unit) {
   return Math.max(0, Math.min(k.frost, unit.hp - SEASONS.frostMinHp));
 }
 
+// Is the unit outside its home – neither in its own territory nor in an own city?
+export function outsideHome(state, unit) {
+  const city = cityAt(state, unit.q, unit.r);
+  return territoryOwner(state, unit.q, unit.r) !== unit.owner && !(city && city.owner === unit.owner);
+}
+
 // Does winter keep the unit from healing (it stands outside its own territory)?
 export function frostBound(state, unit) {
-  return !!seasonKind(state).frost && territoryOwner(state, unit.q, unit.r) !== unit.owner
-    && !(cityAt(state, unit.q, unit.r) && cityAt(state, unit.q, unit.r).owner === unit.owner);
+  return !!seasonKind(state).frost && outsideHome(state, unit);
+}
+
+// Is winter here or does it start next round? Returns 'now', 'soon' or null.
+export function winterNear(state) {
+  if (seasonKind(state).frost) return 'now';
+  const next = seasonAt(state, state.turn + 1);
+  return next && SEASONS.kinds[next].frost ? 'soon' : null;
 }
 
 // Gold an owned city gets from the autumn harvest (size 2+, calm).
@@ -2978,6 +2990,21 @@ export function adviseTurn(state, player) {
   if (hurt) {
     add('wounded', `${unitTitle(hurt)} is badly wounded (${hurt.hp}/${UNIT_TYPES[hurt.type].hp} HP) and within enemy reach – pull it back to rest.`,
       hurt, { unitId: hurt.id });
+  }
+
+  // winter (or winter next round): the most wounded unit out in the cold that can still move heads home
+  const winter = winterNear(state);
+  if (winter) {
+    const cold = mine.filter((u) => u !== hurt && u.movesLeft > 0 && !u.hasAttacked && outsideHome(state, u)
+      && u.hp <= UNIT_TYPES[u.type].hp * SEASONS.adviseHp && u.hp > SEASONS.frostMinHp)
+      .sort((a, b) => a.hp / UNIT_TYPES[a.type].hp - b.hp / UNIT_TYPES[b.type].hp || a.id - b.id)[0];
+    if (cold) {
+      const hp = `${cold.hp}/${UNIT_TYPES[cold.type].hp} HP`;
+      add('frost', winter === 'now'
+        ? `${unitTitle(cold)} (${hp}) is out in the winter cold – it loses 1 HP a turn outside your land; bring it home.`
+        : `Winter comes next turn – ${unitTitle(cold)} (${hp}) is outside your land and would freeze there; start bringing it home.`,
+      cold, { unitId: cold.id });
+    }
   }
 
   // a known foreign city a unit can walk into this turn (enemy capitals, then enemy cities, then neutral ones)

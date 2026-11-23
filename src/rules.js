@@ -153,7 +153,8 @@ export const PURSUIT = { types: ['warrior', 'spearman'], aiHpShare: 0.6 };
 // autumn: harvest – every owned city of size 2+ that isn't restless pays `harvest` more gold;
 // winter: rivers freeze – crossing is free and gives no defense; a unit ending its owner's turn outside
 //   its own territory doesn't heal and loses `frost` HP (never below `frostMinHp`).
-// The AI's wounded units head home a little earlier in winter (`aiFrostHp` share of HP).
+// The AI's wounded units head home a little earlier in winter (`aiFrostHp` share of HP); the advisor warns about
+// units out in the cold with at most `adviseHp` of their HP, already in the last round before winter.
 export const SEASONS = {
   length: 3,
   order: ['spring', 'summer', 'autumn', 'winter'],
@@ -165,6 +166,7 @@ export const SEASONS = {
   },
   frostMinHp: 1,
   aiFrostHp: 0.6,
+  adviseHp: 0.6, // the advisor warns about units out in the cold with at most this share of HP
 };
 
 // They hit a random city of the player; weight = relative frequency.
@@ -313,6 +315,7 @@ export const ADVISOR = {
     undefended: { icon: '🛡', order: 0 },
     finish:     { icon: '⚔', order: 1 },
     wounded:    { icon: '✚', order: 2 },
+    frost:      { icon: '❄', order: 2.5 },
     capture:    { icon: '🏰', order: 3 },
     ruin:       { icon: '🏛', order: 4 },
     repair:     { icon: '🔧', order: 5 },

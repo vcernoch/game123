@@ -38,7 +38,7 @@ import { soundFor, createLimiter, createSound, SOUND_NAMES } from '../src/sound.
 import { readFileSync } from 'node:fs';
 import { GAME_VERSION, GAME_DATE } from '../src/version.js';
 import { pathExists, generateMap, dirTo } from '../src/map.js';
-import { seasonAt, seasonKind, seasonInfo, seasonStarted, riverCrossCost, frostLoss, frostBound, harvestGold } from '../src/game.js';
+import { seasonAt, seasonKind, seasonInfo, seasonStarted, riverCrossCost, frostLoss, frostBound, harvestGold, outsideHome, winterNear } from '../src/game.js';
 import { frostGoals } from '../src/ai.js';
 import { SEASONS, ROAD_COST } from '../src/rules.js';
 import { distance, key, neighbors } from '../src/hex.js';
@@ -5784,4 +5784,45 @@ test('seasons: winter frost outside own territory, season news in the chronicle,
     assert.equal(stateProblem(JSON.parse(JSON.stringify(r))), null);
   }
   assert.ok(frosts.size > 0, 'some units froze in the two winters');
+});
+
+test('seasons: the advisor warns about wounded units out in the cold, from the last round before winter', () => {
+  const s = createGame({ seed: 1, fog: false, happenings: false });
+  s.units = [];
+  const tiles = Object.values(s.tiles).filter((t) => TERRAIN[t.terrain].passable && !cityAt(s, t.q, t.r));
+  const outside = tiles.filter((t) => territoryOwner(s, t.q, t.r) === undefined);
+  const home = tiles.find((t) => territoryOwner(s, t.q, t.r) === 0);
+  const a = spawnUnit(s, 'warrior', 0, outside[0].q, outside[0].r);
+  const b = spawnUnit(s, 'archer', 0, outside[1].q, outside[1].r);
+  const c = spawnUnit(s, 'warrior', 0, home.q, home.r);
+  const full = (u) => UNIT_TYPES[u.type].hp;
+  a.hp = Math.floor(full(a) * SEASONS.adviseHp);
+  b.hp = 2;
+  c.hp = 1;
+  for (const u of s.units) { u.movesLeft = 2; u.hasAttacked = false; }
+  const frostTip = () => adviseTurn(s, 0).find((t) => t.kind === 'frost');
+  s.turn = 8; // autumn, winter is still 2 rounds away
+  assert.equal(winterNear(s), null);
+  assert.equal(frostTip(), undefined);
+  s.turn = 9; // the last round of autumn
+  assert.equal(winterNear(s), 'soon');
+  let tip = frostTip();
+  assert.equal(tip.unitId, b.id, 'the most wounded unit outside first (the one at home is fine)');
+  assert.match(tip.text, /^Winter comes next turn – Archer \(2\/\d+ HP\) is outside your land/);
+  assert.equal(tip.icon, '❄');
+  s.turn = 10;
+  assert.equal(winterNear(s), 'now');
+  tip = frostTip();
+  assert.match(tip.text, /is out in the winter cold – it loses 1 HP a turn outside your land; bring it home\.$/);
+  b.movesLeft = 0; // a unit that can't move any more gets no hint
+  assert.equal(frostTip().unitId, a.id);
+  a.hp = full(a);
+  assert.equal(frostTip(), undefined, 'healthy units are left alone');
+  b.movesLeft = 2; b.hp = 1;
+  assert.equal(frostTip(), undefined, 'frost can\'t take a last HP');
+  assert.equal(outsideHome(s, c), false);
+  assert.equal(outsideHome(s, a), true);
+  const off = createGame({ seed: 1, fog: false, seasons: false });
+  off.turn = 10;
+  assert.equal(winterNear(off), null);
 });
