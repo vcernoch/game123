@@ -46,6 +46,8 @@ let undoStack = [];        // states before undoable moves this turn (memory onl
 let lossMarks = [];        // tiles where the player lost units/cities in the last enemy turn (memory only)
 let enemyReplay = null;    // the last enemy turn to watch again: { before, events, seen } (memory only, until the turn ends)
 let replaying = false;
+let ping = null;           // { q, r, start }: a tile a chronicle entry points at, drawn as a fading ring
+const PING_MS = 1600;
 const sound = createSound();
 sound.enabled = loadPrefs().sound !== false;
 const anim = createAnimator(
@@ -181,6 +183,28 @@ function rallyView() {
   return { rallies, rallyLine, rallyPicking: rallyPick !== null };
 }
 
+// The pulsing ring of a chronicle entry's tile, or null once it has faded.
+function pingView() {
+  if (!ping) return null;
+  const age = (performance.now() - ping.start) / PING_MS;
+  if (age >= 1) { ping = null; return null; }
+  return { q: ping.q, r: ping.r, age };
+}
+
+// Points at the tile of a chronicle entry: scrolls it into view and pulses a ring on it for a moment.
+function pingTile(q, r) {
+  if (!state.tiles[key(q, r)]) return;
+  const first = !ping;
+  ping = { q, r, start: performance.now() };
+  bringIntoView(q, r);
+  if (!first) return; // the running loop picks up the new ping
+  const frame = () => {
+    drawBoard();
+    if (ping) requestAnimationFrame(frame);
+  };
+  requestAnimationFrame(frame);
+}
+
 function drawBoard() {
   const u = selectedUnit();
   const mine = u && u.owner === state.current && !busy();
@@ -200,6 +224,7 @@ function drawBoard() {
     inspired: u && u.owner === 0 && !busy() ? new Set(inspiredUnits(state, u).map((o) => o.id)) : null,
     swaps: mine && swapPick === u.id ? new Set(swapPartners(state, u).map((o) => o.id)) : null,
     lossMarks: busy() ? null : lossMarks,
+    ping: pingView(),
     ghosts: busy() ? null : lastSeen(state, 0),
     ...pathView(u, mine),
     ...rallyView(),
@@ -402,7 +427,11 @@ function updateHud() {
   info.innerHTML = html;
 
   $('log').innerHTML = logFor(state, 0).slice(-8).reverse()
-    .map((l) => `<li${l.hidden ? ' class="hidden-act"' : ''}><b>${l.turn}.</b> ${l.msg}</li>`).join('');
+    .map((l) => {
+      const attrs = l.hidden ? ' class="hidden-act"'
+        : l.q !== undefined ? ` class="placed" data-q="${l.q}" data-r="${l.r}" title="Show where it happened"` : '';
+      return `<li${attrs}><b>${l.turn}.</b> ${esc(l.msg)}</li>`;
+    }).join('');
 
   const banner = $('banner');
   // end-of-game jingle: once, after the last turn's animation finishes
@@ -1197,6 +1226,10 @@ async function replayEnemyTurn() {
   if (done) { done.textContent = '↺ Replay enemy turn'; done.setAttribute('aria-pressed', 'false'); }
   draw();
 }
+$('log').addEventListener('click', (ev) => {
+  const li = ev.target.closest('li.placed');
+  if (li) pingTile(Number(li.dataset.q), Number(li.dataset.r));
+});
 $('notice').addEventListener('click', (ev) => { if (ev.target.closest('#replay')) replayEnemyTurn(); });
 
 // Threat overlay on/off (T / ⚠ button); remembered in the preferences.
@@ -1411,6 +1444,7 @@ window.__game = {
   // shows the enemy-turn banner for events made on top of the state `before`
   showReport: (before, events) => { showNotice([], [], turnReport(before, events, 0)); draw(); },
   lossMarks: () => lossMarks,
+  ping: () => (ping ? { q: ping.q, r: ping.r } : null),
   // sets the enemy turn to replay from events made on top of `before` and shows its banner
   setReplay: (before, events) => { enemyReplay = enemyTurnReplay(before, events, 0); showNotice([], [], turnReport(before, events, 0)); draw(); },
   replayInfo: () => (enemyReplay ? { seen: enemyReplay.seen, events: enemyReplay.events.length, replaying } : null),

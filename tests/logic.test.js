@@ -5295,7 +5295,7 @@ test('pursuit: not for archers, riders or into a city; blocked tile; lost at the
   const old = JSON.parse(JSON.stringify(createGame({ seed: 3 })));
   old.version = 31;
   assert.equal(migrateState(old).version, STATE_VERSION);
-  assert.equal(STATE_VERSION, 32);
+  assert.ok(STATE_VERSION >= 32);
 });
 
 test('pursuit: the AI advances when it is safe or presses an enemy city, otherwise stays', () => {
@@ -5431,4 +5431,50 @@ test('enemy turn replay: replaying a real AI turn ends in the same state, seen n
     }
   }
   assert.ok(replays > 0, 'the AI was seen doing something in some turns');
+});
+
+test('chronicle places: entries keep the tile they happened on, only seen ones show it; validation and migration', () => {
+  const st = createGame({ seed: 4242, fog: true });
+  const mine = st.units.find((u) => u.owner === 0);
+  const near = neighbors(mine.q, mine.r).find((n) => isPassable(st, n.q, n.r) && !unitAt(st, n.q, n.r) && !cityAt(st, n.q, n.r));
+  const foe = spawnUnit(st, 'horseman', 1, near.q, near.r);
+  foe.movesLeft = 4; foe.hasAttacked = false;
+  mine.hp = 1;
+  st.current = 1;
+  assert.ok(attack(st, foe.id, mine.id));
+  const kill = st.log.find((e) => e.msg.includes('destroyed'));
+  assert.deepEqual([kill.q, kill.r], [mine.q, mine.r], 'a fight is placed on the defender');
+  const seen = logFor(st, 0).find((e) => e.msg.includes('destroyed'));
+  assert.deepEqual([seen.q, seen.r], [mine.q, mine.r]);
+  // an entry the player didn't see is merged into the fog line without a place
+  const vis = visibleTiles(st, 0);
+  const city = st.cities.find((c) => c.owner === 1);
+  assert.ok(!vis.has(key(city.q, city.r)), 'the enemy capital starts in the fog');
+  st.units = st.units.filter((u) => u.q !== city.q || u.r !== city.r);
+  st.gold[1] = 100;
+  assert.ok(buyUnit(st, city.id, 'warrior'));
+  const enemyView = logFor(st, 1).find((e) => e.msg.includes('recruited'));
+  {
+    const hidden = logFor(st, 0).filter((e) => e.hidden);
+    assert.ok(hidden.length >= 1);
+    for (const e of hidden) assert.equal(e.q, undefined);
+    assert.deepEqual([enemyView.q, enemyView.r], [city.q, city.r], 'the author sees where');
+  }
+  // entries without a place (game over) have none
+  const plain = createGame({ seed: 4242, fog: false });
+  plain.log.push({ turn: 1, msg: 'Game over – winner: You' });
+  assert.equal(logFor(plain, 0).at(-1).q, undefined);
+  // validation and migration
+  const bad = JSON.parse(JSON.stringify(st));
+  assert.equal(stateProblem(bad), null);
+  bad.log[0].q = 999; bad.log[0].r = 999;
+  assert.match(stateProblem(bad), /bad chronicle place/);
+  bad.log = 'nope';
+  assert.match(stateProblem(bad), /bad chronicle/);
+  bad.log = [{ turn: 1 }];
+  assert.match(stateProblem(bad), /bad chronicle/);
+  const old = JSON.parse(JSON.stringify(createGame({ seed: 3 })));
+  old.version = 32;
+  assert.equal(migrateState(old).version, STATE_VERSION);
+  assert.equal(STATE_VERSION, 33);
 });

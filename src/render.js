@@ -147,6 +147,25 @@ export function render(ctx, state, view = {}) {
     drawLossMark(ctx, c.x + HEX_SIZE * 0.42, c.y - HEX_SIZE * 0.5);
   }
 
+  // a chronicle entry points at its tile: a ring that pulses twice and fades (age 0..1)
+  if (view.ping) {
+    const c = tileCenter(view.ping.q, view.ping.r);
+    const a = view.ping.age;
+    const pulse = (a * 2) % 1;
+    ctx.save();
+    ctx.globalAlpha = 1 - a * 0.7;
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = '#ffe27a';
+    ctx.beginPath();
+    ctx.arc(c.x, c.y, HEX_SIZE * (0.55 + pulse * 0.6), 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(c.x, c.y, HEX_SIZE * 0.5, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
   // wall volley in flight: a stone on an arc
   if (view.shot) {
     ctx.beginPath();

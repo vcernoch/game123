@@ -119,6 +119,7 @@ Check off `[x]` when done. Add new ideas to the end of the relevant phase or to 
 
 ## Phase 20 – hindsight (own improvements)
 - [x] Replay enemy turn (↺ / V): the start-of-turn bar offers to watch the enemy's last turn again – only what you saw of it, even with animations off – on a copy of the state, then the map returns to now; available until you end your turn
+- [x] Chronicle places: each chronicle entry keeps the tile it happened on; a click on a line you saw (⌖) scrolls the map there and pulses a ring on the tile – fog lines never carry a place
 
 ## Ideas (unordered)
 - Diplomacy with multiple AIs

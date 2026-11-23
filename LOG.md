@@ -2,6 +2,15 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-23 – Chronicle places (v0.44.0, same run)
+- Phase 20, second task of this run (the version was bumped once for the run). The chronicle said "Enemy: Horseman destroyed Warrior", but not where – on a bigger map, or after the unit had moved on, the player had to guess.
+- In `game.js`: `addLog` stores the tile of an entry (`q`, `r`) – `where.place`, else the last of `where.at` (the defender of a fight, the city of a recruit or capture, the unit of a promotion); ruins pass their tile as `place`. `logFor` hands the place out only with entries the viewer saw; the merged "Enemy actions in the fog of war" lines never carry one, so nothing leaks.
+- UI: a chronicle line with a place shows ⌖ and a pointer; a click scrolls the (zoomed) map to the tile and pulses a yellow ring on it for 1.6 s (`view.ping` in `render.js`). Chronicle text is now escaped (unit names may come from an imported file). Help text updated.
+- State structure: `state.version` 33 (optional `q`/`r` on log entries), trivial migration; `stateProblem` now validates the chronicle (array, integer turn, text, known tile for a place).
+- Test adjusted (not weakened): the pursuit test pinned `STATE_VERSION` to 32 – it now checks `>= 32`, the new test pins 33.
+- Tests: +1 logic (a fight placed on the defender, `logFor` passes the place, fog lines have none while the author sees where, entries without a place, validation, migration). Smoke test: after the enemy kill the "destroyed" line has a place, a click sets the ring on that tile, no fog line carries one (`artifacts/screenshot-ping.png`).
+- Status: `npm run check` green (130 logic tests + smoke).
+
 ## 2026-11-23 – Replay enemy turn (v0.44.0)
 - **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.38.0–v0.44.0) is ahead of `main` (v0.37.0) – please merge it.
 - Starting state green (127 logic tests + smoke).

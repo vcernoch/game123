@@ -923,6 +923,21 @@ try {
   if (replayed.alive || replayed.units !== replay.units || !replayed.label.includes('Replay') || !replayed.still || replayed.still.replaying) {
     throw new Error(`replay: the state changed or the button didn't come back ${JSON.stringify(replayed)}`);
   }
+  // the chronicle entry of the attack points at the tile where the warrior fell
+  const pinged = await page.evaluate(() => {
+    const li = [...document.querySelectorAll('#log li.placed')].find((x) => x.textContent.includes('destroyed'));
+    if (!li) return null;
+    li.click();
+    const st = window.__game.getState();
+    return { ping: window.__game.ping(), text: li.textContent, hiddenPlaced: document.querySelectorAll('#log li.hidden-act[data-q]').length,
+      tile: { q: Number(li.dataset.q), r: Number(li.dataset.r) }, last: st.log.find((e) => e.msg.includes('destroyed')) };
+  });
+  if (!pinged || !pinged.ping || pinged.ping.q !== pinged.tile.q || pinged.ping.r !== pinged.tile.r || pinged.hiddenPlaced
+    || pinged.last.q !== pinged.tile.q || pinged.last.r !== pinged.tile.r) {
+    throw new Error(`chronicle place: ${JSON.stringify(pinged)}`);
+  }
+  await page.waitForTimeout(250);
+  await page.screenshot({ path: 'artifacts/screenshot-ping.png' });
   // V replays too; ending the turn drops the replay
   await page.keyboard.press('v');
   if (!(await page.evaluate(() => window.__game.isBusy()))) throw new Error('replay: V did not start the replay');

@@ -130,7 +130,7 @@ function countStat(state, name, player) {
   state.stats[name][player]++;
 }
 
-export const STATE_VERSION = 32;
+export const STATE_VERSION = 33;
 
 // Converts a saved state of an older version to the current one; returns null for an unknown format.
 export function migrateState(s) {
@@ -266,6 +266,10 @@ export function migrateState(s) {
   if (s.version === 31) {
     // pursuit arrived in version 32 – a missing `unit.pursuit` means the unit can't advance
     s.version = 32;
+  }
+  if (s.version === 32) {
+    // chronicle places arrived in version 33 – older entries simply have none
+    s.version = 33;
   }
   return s.version === STATE_VERSION ? s : null;
 }
@@ -2523,7 +2527,7 @@ export function exploreRuin(state, unit) {
     detail = ` (${ev.revealed} tiles mapped)`;
   }
   const who = PLAYERS[player].name;
-  addLog(state, `${who}: ${UNIT_TYPES[unit.type].name} explored ancient ruins – ${info.name}${detail}`, { seen: knownBy });
+  addLog(state, `${who}: ${UNIT_TYPES[unit.type].name} explored ancient ruins – ${info.name}${detail}`, { seen: knownBy, place: tile });
   if (kind === 'training') {
     gainXp(state, unit, info.xp);
     ev.xp = unit.xp;
@@ -2622,11 +2626,14 @@ function checkWinner(state) {
   }
 }
 
-// Chronicle entry. Without `where` the entry is public (game over…). With `where` = { by, at, also, seen }
+// Chronicle entry. Without `where` the entry is public (game over…). With `where` = { by, at, also, seen, place }
 // `seen` is stored: players who saw the action – its author, players in `also` and those who currently see
-// any of the `at` tiles. Without fog everyone sees, so `seen` isn't stored.
+// any of the `at` tiles. Without fog everyone sees, so `seen` isn't stored. The entry also keeps the tile it
+// happened on (q, r) – `place`, else the last of `at` (the defender of a fight) – so the chronicle can point at it.
 function addLog(state, msg, where = null) {
   const entry = { turn: state.turn, msg };
+  const place = where && (where.place || (where.at && where.at[where.at.length - 1]));
+  if (place) { entry.q = place.q; entry.r = place.r; }
   if (where && state.fog) entry.seen = where.seen || seenBy(state, where);
   state.log.push(entry);
   if (state.log.length > LOG_LIMIT) state.log.shift();
@@ -2647,11 +2654,12 @@ function seenBy(state, { by = null, at = [], also = [] }) {
 
 // Chronicle from a player's view (oldest first). Entries the player didn't see are merged into one
 // line "Enemy actions in the fog of war (N)" with a count; after game over everything is visible.
+// A seen entry with a place carries its tile (q, r); a hidden one never does, so nothing leaks.
 export function logFor(state, viewer) {
   const out = [];
   for (const e of state.log) {
     if (!e.seen || e.seen.includes(viewer) || state.winner !== null) {
-      out.push({ turn: e.turn, msg: e.msg });
+      out.push(e.q === undefined ? { turn: e.turn, msg: e.msg } : { turn: e.turn, msg: e.msg, q: e.q, r: e.r });
       continue;
     }
     const last = out[out.length - 1];
@@ -3090,6 +3098,13 @@ export function stateProblem(s) {
       if (!m || !isInt(m.turn) || m.turn < 1 || !MILESTONES.kinds[m.kind] || m.kind === 'lead' || !validOwner(m.player) || m.player === null
         || typeof m.text !== 'string' || m.text.length > 200) return 'bad war timeline';
       if (m.seen !== undefined && !(Array.isArray(m.seen) && m.seen.every((p) => validOwner(p) && p !== null))) return 'bad war timeline';
+    }
+  }
+  if (s.log !== undefined) {
+    if (!Array.isArray(s.log)) return 'bad chronicle';
+    for (const e of s.log) {
+      if (!e || !isInt(e.turn) || typeof e.msg !== 'string') return 'bad chronicle';
+      if ((e.q !== undefined || e.r !== undefined) && !s.tiles[key(e.q, e.r)]) return 'bad chronicle place';
     }
   }
   if (s.winner !== null && s.winner !== undefined && !validOwner(s.winner)) return 'bad winner';
