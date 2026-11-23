@@ -4,7 +4,7 @@ import { generateMap, hasRiverEdge } from './map.js';
 import {
   TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY, VISION, DIFFICULTY, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, ROAD_COST, RIVER, FLANK, HIGH_GROUND, CHARGE, SKIRMISH, PURSUIT, INSPIRE,
   FACTIONS, NO_FACTION, MAP_SIZES, HAPPENINGS, FORTIFY, TERRITORY, RESOURCES,
-  UPGRADES, UPGRADE, DISBAND, SIGHTINGS, RUINS, EXPLORE, PILLAGE, REPAIR, ROADWORK, SENTRY, VOLLEY, FORCED_MARCH, ANIM_SPEEDS, HEROES, MILESTONES, ADVISOR, GROWTH, TRADE, UNREST, FOCUS, LEVY,
+  UPGRADES, UPGRADE, DISBAND, SIGHTINGS, RUINS, EXPLORE, PILLAGE, REPAIR, ROADWORK, SENTRY, VOLLEY, FORCED_MARCH, ANIM_SPEEDS, HEROES, MILESTONES, ADVISOR, GROWTH, TRADE, UNREST, FOCUS, LEVY, PERKS,
 } from './rules.js';
 import { createRng } from './rng.js';
 
@@ -130,7 +130,7 @@ function countStat(state, name, player) {
   state.stats[name][player]++;
 }
 
-export const STATE_VERSION = 33;
+export const STATE_VERSION = 34;
 
 // Converts a saved state of an older version to the current one; returns null for an unknown format.
 export function migrateState(s) {
@@ -271,6 +271,10 @@ export function migrateState(s) {
     // chronicle places arrived in version 33 – older entries simply have none
     s.version = 33;
   }
+  if (s.version === 33) {
+    // perks arrived in version 34 – a unit without `perks` simply has a choice to make for each rank
+    s.version = 34;
+  }
   return s.version === STATE_VERSION ? s : null;
 }
 
@@ -319,7 +323,7 @@ export function visibleTiles(state, player) {
   for (const u of state.units) {
     if (u.owner !== player) continue;
     const onHills = tileAt(state, u.q, u.r).terrain === 'hills';
-    look(u.q, u.r, UNIT_TYPES[u.type].sight + (onHills ? VISION.hillsBonus : 0));
+    look(u.q, u.r, UNIT_TYPES[u.type].sight + (onHills ? VISION.hillsBonus : 0) + perkSight(u));
   }
   for (const c of state.cities) if (c.owner === player) look(c.q, c.r, citySight(c));
   return seen;
@@ -456,6 +460,9 @@ export function applyEvent(state, ev) {
   } else if (ev.type === 'fortify') {
     const u = getUnit(state, ev.unitId);
     if (u) { u.fortified = true; delete u.sentry; }
+  } else if (ev.type === 'perk') {
+    const u = getUnit(state, ev.unitId);
+    if (u && !hasPerk(u, ev.perk)) u.perks = [...perksOf(u), ev.perk];
   } else if (ev.type === 'spawn') {
     state.units.push({ ...ev.unit });
   } else if (ev.type === 'capture') {
@@ -916,11 +923,14 @@ export function stepCost(state, from, to, unit = null) {
   const b = tileAt(state, to.q, to.r);
   if (a && b && a.road && b.road) return ROAD_COST; // road across a river = bridge
   const river = riverBetween(state, from, to) ? RIVER.crossCost : 0;
+  let cost = TERRAIN[b.terrain].cost;
   if (unit && b.terrain === 'forest') {
     const fc = factionOf(state, unit.owner).forestCost;
-    if (fc) return fc + river;
+    if (fc) cost = fc;
   }
-  return TERRAIN[b.terrain].cost + river;
+  // a pathfinder crosses forest and hills like plains
+  if (unit && hasPerk(unit, 'pathfinder') && (b.terrain === 'forest' || b.terrain === 'hills')) cost = Math.min(cost, PERKS.kinds.pathfinder.roughCost);
+  return cost + river;
 }
 
 // Does a river flow between neighboring tiles a, b?
@@ -1554,6 +1564,49 @@ function gainXp(state, unit, amount) {
   return true;
 }
 
+// ---------- perks ----------
+// unit.perks = ['drill', …]: one perk per rank above Recruit, chosen by the owner (see PERKS in rules.js).
+// The number still to choose is derived from the rank, so a promotion needs no extra field.
+export const perksOf = (unit) => (Array.isArray(unit.perks) ? unit.perks : []);
+export const hasPerk = (unit, perk) => perksOf(unit).includes(perk);
+export const perkChoices = (unit) => Math.max(0, rankOf(unit) - perksOf(unit).length);
+export const perkAttackMult = (unit) => 1 + (hasPerk(unit, 'drill') ? PERKS.kinds.drill.atk : 0);
+export const perkSight = (unit) => (hasPerk(unit, 'lookout') ? PERKS.kinds.lookout.sight : 0);
+
+// Perks the unit could learn now (none when it has no choice left).
+export function perkOptions(unit) {
+  if (!perkChoices(unit)) return [];
+  return Object.keys(PERKS.kinds).filter((p) => !hasPerk(unit, p));
+}
+
+// Why the unit can't learn the perk (text), or null. Choosing is free and doesn't use the unit's turn.
+export function perkProblem(state, unit, perk) {
+  if (state.winner !== null) return 'The game is over.';
+  if (!unit || unit.owner !== state.current) return 'Not your unit or not your turn.';
+  if (!PERKS.kinds[perk]) return 'Unknown perk.';
+  if (hasPerk(unit, perk)) return 'The unit already knows it.';
+  if (!perkChoices(unit)) return 'The unit has no perk to choose – it gets one with each promotion.';
+  return null;
+}
+
+export function learnPerk(state, unitId, perk) {
+  const unit = getUnit(state, unitId);
+  if (perkProblem(state, unit, perk)) return false;
+  unit.perks = [...perksOf(unit), perk];
+  emit(state, { type: 'perk', unitId: unit.id, perk, q: unit.q, r: unit.r });
+  addLog(state, `${PLAYERS[unit.owner].name}: ${unitTitle(unit)} learned ${PERKS.kinds[perk].name}`, { by: unit.owner, at: [unit] });
+  return true;
+}
+
+// Extra healing from a medic: the unit itself or an own unit next to it knows Medic (never adds up).
+export function medicBonus(state, unit) {
+  const medic = state.units.some((m) => m.owner === unit.owner && hasPerk(m, 'medic') && distance(m, unit) <= 1);
+  return medic ? PERKS.kinds.medic.heal : 0;
+}
+
+// "⚔ Drill, 🌲 Pathfinder" for panels and tooltips ('' without perks).
+export const perkText = (unit) => perksOf(unit).map((p) => `${PERKS.kinds[p].icon} ${PERKS.kinds[p].name}`).join(', ');
+
 // ---------- heroes ----------
 // A unit reaching HEROES.minRank gets a name (unit.name) for life; unit.kills counts its kills.
 // Named units that leave the game are remembered in state.fallen for the hall of fame.
@@ -1710,7 +1763,7 @@ export function unitSummary(state, unit) {
     owner: unit.owner,
     hp: unit.hp,
     maxHp: t.hp,
-    attack: Math.round(t.atk * rankMult(unit) * 10) / 10,
+    attack: Math.round(t.atk * rankMult(unit) * perkAttackMult(unit) * 10) / 10,
     defense: Math.round(def * 10) / 10,
     baseDefense: t.def,
     range: t.range,
@@ -1724,6 +1777,8 @@ export function unitSummary(state, unit) {
     marching: !!unit.goto,
     exploring: !!unit.explore,
     sentry: unit.sentry || null,
+    perks: perksOf(unit),
+    perkChoices: perkChoices(unit),
     notes,
   };
 }
@@ -1767,7 +1822,7 @@ export function defenseValue(state, unit, attacker = null) {
 
 // Attack strength including rank, type bonus and city siege.
 function attackPower(state, unit, target) {
-  let atk = UNIT_TYPES[unit.type].atk * rankMult(unit) * vsMult(unit, target);
+  let atk = UNIT_TYPES[unit.type].atk * rankMult(unit) * perkAttackMult(unit) * vsMult(unit, target);
   const siege = UNIT_TYPES[unit.type].siege;
   if (siege && target && cityAt(state, target.q, target.r)) atk *= 1 + siege;
   return atk;
@@ -2268,7 +2323,7 @@ export function endTurn(state) {
     const city = cityAt(state, u.q, u.r);
     const restHeal = territoryOwner(state, u.q, u.r) === u.owner ? TERRITORY.healIdle : ECONOMY.healIdle;
     const heal = city && city.owner === u.owner ? cityHeal(city) : u.moved ? 0 : restHeal;
-    u.hp = Math.min(UNIT_TYPES[u.type].hp, u.hp + heal);
+    u.hp = Math.min(UNIT_TYPES[u.type].hp, u.hp + heal + (heal > 0 ? medicBonus(state, u) : 0));
     delete u.marched; // a forced march lasts only for the turn it was made in
     delete u.raided; // … and so does a hit and run
     delete u.pursuit; // … and a pursuit
@@ -2751,7 +2806,7 @@ export function eventTiles(st, ev) {
   if (ev.type === 'spawn') return at(ev.unit);
   if (ev.type === 'fortify' || ev.type === 'upgrade') return at(getUnit(st, ev.unitId));
   if (ev.type === 'volley') return [...at(ev), ...city()];
-  if (ev.type === 'focus') return [];
+  if (ev.type === 'focus' || ev.type === 'perk') return []; // the owner's choice – nothing to watch
   if (['march', 'disband', 'ruin', 'pillage', 'repair', 'road'].includes(ev.type)) return at(ev);
   return null;
 }
@@ -2904,6 +2959,13 @@ export function adviseTurn(state, player) {
     add('trade', `The trade route from ${c.name} is cut – drive the enemy ${UNIT_TYPES[e.type].name} off the road (+${TRADE.income} gold).`,
       e, { cityId: c.id });
     break;
+  }
+
+  // a promoted unit with a perk still to choose (the lowest id, so the hint is stable)
+  const learner = state.units.find((u) => u.owner === player && perkChoices(u));
+  if (learner) {
+    add('perk', `${unitTitle(learner)} was promoted – choose a perk for it (${Object.values(PERKS.kinds).map((k) => k.name).join(', ')}).`,
+      learner, { unitId: learner.id });
   }
 
   // a city focus that only costs gold: a fully grown city that isn't on commerce, a fortress with no
@@ -3082,6 +3144,8 @@ export function stateProblem(s) {
     if (u.raided !== undefined && u.raided !== true) return `unit ${u.id} has a bad hit and run`;
     if (u.pursuit !== undefined && !(u.pursuit && isInt(u.pursuit.q) && isInt(u.pursuit.r) && distance(u, u.pursuit) === 1)) return `unit ${u.id} has a bad pursuit`;
     if (u.sentry !== undefined && u.sentry !== 'watch' && u.sentry !== 'heal') return `unit ${u.id} has a bad watch order`;
+    if (u.perks !== undefined && !(Array.isArray(u.perks) && u.perks.length < RANKS.length && new Set(u.perks).size === u.perks.length
+      && u.perks.every((p) => Object.hasOwn(PERKS.kinds, p)))) return `unit ${u.id} has bad perks`;
     if (u.name !== undefined && !(typeof u.name === 'string' && u.name.length > 0 && u.name.length <= 40)) return `unit ${u.id} has a bad name`;
     if (u.kills !== undefined && !(isInt(u.kills) && u.kills >= 0)) return `unit ${u.id} has bad kills`;
   }

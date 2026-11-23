@@ -5,9 +5,9 @@ import {
   unitAt, getUnit, tileAt, fortify, difficultyOf, visibleTiles, exploredTiles, build, hasBuilding, unitCost, buildingCost, factionOf,
   threatTiles, cityAt, upgradeOptions, upgradeUnit, ruinBelieved, canPillage, pillage, isPillaged, repair, pillageTurnsLeft, territoryOwner,
   swapPartners, swapUnits, canBuildRoad, buildRoad, roadLinks, citySize, tradeTargets, cutsAt, cityUnrest,
-  focusOf, setFocus, citySieged, canLevy, levy, marchReach, forceMarch, canWithdraw, pursuitTile,
+  focusOf, setFocus, citySieged, canLevy, levy, marchReach, forceMarch, canWithdraw, pursuitTile, perkOptions, learnPerk,
 } from './game.js';
-import { UNIT_TYPES, TERRAIN, ROADWORK, GROWTH, FOCUS, LEVY, FORCED_MARCH, PURSUIT } from './rules.js';
+import { UNIT_TYPES, TERRAIN, ROADWORK, GROWTH, FOCUS, LEVY, FORCED_MARCH, PURSUIT, PERKS } from './rules.js';
 
 // What the AI knows about the map. On hard it sees everything, otherwise only what it has explored and sees.
 export function aiKnowledge(state, me) {
@@ -19,6 +19,7 @@ export function aiKnowledge(state, me) {
 
 export function runAITurn(state) {
   const me = state.current;
+  learnPerks(state, me); // units promoted while defending during the player's turn
   recruit(state, me);
   const know = aiKnowledge(state, me);
   upgradeSomething(state, me, know);
@@ -63,6 +64,24 @@ export function runAITurn(state) {
   buildSomething(state, me);
   layRoad(state, me, know);
   setFocuses(state, me, know);
+  learnPerks(state, me); // units promoted in this turn's fights
+}
+
+// The perk the AI picks for a unit: the first free one of its type's preference (PERKS.aiOrder), else
+// the first free one at all; null when the unit has nothing to choose.
+export function pickPerk(unit) {
+  const options = perkOptions(unit);
+  if (!options.length) return null;
+  return (PERKS.aiOrder[unit.type] || []).find((p) => options.includes(p)) || options[0];
+}
+
+// Lets every own unit with a choice learn its perks. Returns how many were learned.
+export function learnPerks(state, me) {
+  let learned = 0;
+  for (const u of state.units.filter((x) => x.owner === me)) {
+    for (let p = pickPerk(u); p && learnPerk(state, u.id, p); p = pickPerk(u)) learned++;
+  }
+  return learned;
 }
 
 // The focus the AI wants for an own city: a fortress when a visible enemy is near, a granary while the

@@ -153,6 +153,7 @@ fieldset .seed-row + small { margin-left: 0; }
 .order { color: #ffe27a; }
 .charge { color: #ffb74d; font-weight: 600; }
 .inspire { color: #f2c94c; }
+.perks { color: #cfe3ff; }
 .resource { color: #f2c94c; }
 .trade.linked { color: #9fd89f; }
 .trade.cut { color: #ff9b8a; }

@@ -8,6 +8,7 @@ import {
   updateSightings, lastSeen, lastSeenAt, lastSeenText, armyOverview, ARMY_STATUS, ruinBelieved,
   canExplore, setExplore, canPillage, pillage, isPillaged, pillageTurnsLeft, canRepair, repair,
   rallyPath, setRally, clearRally, swapPartners, swapUnits, canBuildRoad, buildRoad, timelineFor, adviseTurn, suggestRecruit, growthText, tradeText, tradeRoute, unrestText, focusOf, focusText, setFocus, levy, levyProblem, setRecruitOrder, clearRecruitOrder, recruitOrderText, enemyTurnReplay,
+  perkAttackMult, perkOptions, perkChoices, perkText, learnPerk,
 } from './game.js';
 import { createAnimator } from './anim.js';
 import { decideTap } from './input.js';
@@ -19,7 +20,7 @@ import { SHORTCUTS, keyAction, recruitKey } from './keys.js';
 import { render, canvasSize, pickHex, tileCenter } from './render.js';
 import { key } from './hex.js';
 import {
-  UNIT_TYPES, TERRAIN, PLAYERS, DIFFICULTY, BUILDINGS, RANKS, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FORTIFY, FORCED_MARCH, TERRITORY, ECONOMY, RESOURCES, HIGH_GROUND, CHARGE, INSPIRE, RUINS, PILLAGE, REPAIR, ROADWORK, SENTRY, FOCUS, LEVY,
+  UNIT_TYPES, TERRAIN, PLAYERS, DIFFICULTY, BUILDINGS, RANKS, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FORTIFY, FORCED_MARCH, TERRITORY, ECONOMY, RESOURCES, HIGH_GROUND, CHARGE, INSPIRE, RUINS, PILLAGE, REPAIR, ROADWORK, SENTRY, FOCUS, LEVY, PERKS,
 } from './rules.js';
 
 const SAVE_KEY = 'game123-save';
@@ -113,6 +114,28 @@ function rankLine(u) {
   const next = RANKS[r + 1];
   const kills = u.kills ? ` · ${u.kills} kill${u.kills === 1 ? '' : 's'}` : '';
   return `${RANKS[r].name} ${RANKS[r].symbol} · XP ${u.xp || 0}${next ? `/${next.xp}` : ''}${kills}`;
+}
+
+// Perk choice after a promotion: one button per perk the unit can still learn (free, doesn't end its turn).
+function perkPanel(u) {
+  const n = perkChoices(u);
+  let html = `<h4>★ Choose a perk${n > 1 ? ` (${n})` : ''}</h4><div class="focus-btns perk-btns">`;
+  for (const p of perkOptions(u)) {
+    const k = PERKS.kinds[p];
+    html += `<button data-perk="${p}" class="secondary" title="${k.name}: ${k.desc} – for life, free, doesn't use the unit's turn">${k.icon} ${k.name}</button>`;
+  }
+  return `${html}</div>`;
+}
+
+function perkSelected(perk) {
+  if (busy() || state.winner !== null) return;
+  const u = selectedUnit();
+  if (!u || u.owner !== 0 || !learnPerk(state, u.id, perk)) return;
+  drainEvents(state);
+  undoStack = []; // an undo would quietly take the perk back
+  save();
+  sound.play('click');
+  draw();
 }
 
 // "Inspires 2 units next to it (+10 % defense)" for a named hero.
@@ -246,9 +269,10 @@ function updateHud() {
   if (u) {
     const t = UNIT_TYPES[u.type];
     html += `<h3>${u.name ? `<span class="hero">${esc(u.name)}</span> ` : ''}${t.name} <span class="tag" style="background:${PLAYERS[u.owner].color}">${PLAYERS[u.owner].name}</span></h3>
-      <p>HP ${u.hp}/${t.hp} · Attack ${fmt(t.atk * rankMult(u))} · Defense ${fmt(t.def * rankMult(u))} · Range ${t.range}</p>
+      <p>HP ${u.hp}/${t.hp} · Attack ${fmt(t.atk * rankMult(u) * perkAttackMult(u))} · Defense ${fmt(t.def * rankMult(u))} · Range ${t.range}</p>
       <p>Move ${fmt(u.movesLeft)}/${unitMove(state, u)}${u.fortified ? '' : u.hasAttacked ? (u.movesLeft > 0 ? ' · already attacked' : ' · done for this turn') : ''}${chargeReady(state, u) ? ` · <span class="charge">charge ready (+${Math.round(CHARGE.atkBonus * 100)} %)</span>` : ''}</p>
-      <p>${rankLine(u)}</p>${inspireLine(u)}${t.desc ? `<p class="hint">${t.desc}</p>` : ''}`;
+      <p>${rankLine(u)}</p>${perkText(u) ? `<p class="perks">Perks: ${perkText(u)}</p>` : ''}${inspireLine(u)}${t.desc ? `<p class="hint">${t.desc}</p>` : ''}`;
+    if (u.owner === 0 && !busy() && state.current === 0 && perkChoices(u)) html += perkPanel(u);
     if (u.goto && u.owner === 0) {
       const r = planRoute(state, u, u.goto.q, u.goto.r);
       html += `<p class="order">➜ Marching to a target${r ? ` · ${r.turns} turn${r.turns === 1 ? '' : 's'}` : ''}</p>`;
@@ -797,6 +821,7 @@ function unitTipText(u) {
   const s = unitSummary(state, u);
   const tags = [s.rank !== RANKS[0].name ? s.rank : '', s.fortified ? 'fortified' : '', s.forcedMarch ? 'forced march' : '', s.hitAndRun ? 'hit and run' : '', s.pursuit ? 'can pursue' : '', s.marching ? 'marching' : '', s.exploring ? 'exploring' : '', s.sentry && s.owner === 0 ? (s.sentry === 'heal' ? 'resting' : 'on watch') : ''].filter(Boolean);
   if (s.kills) tags.push(`${s.kills} kill${s.kills === 1 ? '' : 's'}`);
+  tags.push(...s.perks.map((p) => PERKS.kinds[p].name.toLowerCase()));
   return `${PLAYERS[s.owner].name}: ${s.hero ? `${s.hero} the ${s.name}` : s.name}${tags.length ? ` (${tags.join(', ')})` : ''} · HP ${s.hp}/${s.maxHp}\n`
     + `Attack ${fmt(s.attack)} · Defense ${fmt(s.defense)}${s.notes.length ? ` (${s.notes.join(', ')})` : ''} · Range ${s.range} · Move ${s.move}`;
 }
@@ -1147,6 +1172,8 @@ $('info').addEventListener('click', (ev) => {
   if (ev.target.closest('button[data-swap]')) { startSwapPick(); return; }
   if (ev.target.closest('button[data-fortify]')) { fortifySelected(); return; }
   if (ev.target.closest('button[data-march]')) { marchSelected(); return; }
+  const perkBtn = ev.target.closest('button[data-perk]');
+  if (perkBtn) { perkSelected(perkBtn.dataset.perk); return; }
   if (ev.target.closest('button[data-explore]')) { exploreSelected(); return; }
   if (ev.target.closest('button[data-sentry]')) { sentrySelected(); return; }
   if (ev.target.closest('button[data-pillage]')) { pillageSelected(); return; }

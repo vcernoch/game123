@@ -117,9 +117,10 @@ Check off `[x]` when done. Add new ideas to the end of the relevant phase or to 
 - [x] Hit and run (🏇): horsemen and scouts that survive an attack keep their remaining moves minus 1 to pull back, but can't attack again or enter a foreign city that turn; the attack preview says how far, the AI pulls its riders back to safer tiles
 - [x] Pursuit (➜): a warrior or spearman that destroys an adjacent defender outside a city may advance into the freed tile for free that turn, even with no moves left (optional); the attack preview says so, the AI advances when the tile is no more exposed or when a healthy unit closes in on an enemy city
 
-## Phase 20 – hindsight (own improvements)
+## Phase 20 – hindsight and veterans (own improvements)
 - [x] Replay enemy turn (↺ / V): the start-of-turn bar offers to watch the enemy's last turn again – only what you saw of it, even with animations off – on a copy of the state, then the map returns to now; available until you end your turn
 - [x] Chronicle places: each chronicle entry keeps the tile it happened on; a click on a line you saw (⌖) scrolls the map there and pulses a ring on the tile – fog lines never carry a place
+- [x] Perks: each promotion (Veteran, Elite) lets the unit learn a perk of the owner's choice – ⚔ Drill +10 % attack, 🌲 Pathfinder (forest and hills cost 1), ✚ Medic (+1 healing for it and neighbours), 🔭 Lookout (+1 sight); free, for life; the advisor reminds, the AI picks by unit type
 
 ## Ideas (unordered)
 - Diplomacy with multiple AIs

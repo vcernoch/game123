@@ -22,12 +22,14 @@ import {
   forcedMarchProblem, canForceMarch, forceMarch, marchReach, attackTargets,
   isSkirmisher, movesAfterAttack, canWithdraw, isPursuer, pursuitTile, pursuesInto,
   eventTiles, eventSeen, enemyTurnReplay,
+  perksOf, hasPerk, perkChoices, perkOptions, perkProblem, learnPerk, medicBonus, perkText, perkAttackMult,
 } from '../src/game.js';
 import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
   dangerMap, dangerPenalty, moveTowardsGoal, DANGER, unexploredLand, SCOUT_WHEN_UNKNOWN, aiKnowledge,
   upgradeSomething, UPGRADE_HORSE_RADIUS, strikeLinedUp, pillageGoals, PILLAGE_DETOUR, repairGoals, REPAIR_DETOUR,
   relieveWounded, RELIEF_MIN_HP, layRoad, blockadeGoals, BLOCKADE_DETOUR, pickFocus, setFocuses, shouldLevy, withdraw, pursue,
+  pickPerk, learnPerks,
 } from '../src/ai.js';
 import { decideTap } from '../src/input.js';
 import { SHORTCUTS, keyAction, recruitKey } from '../src/keys.js';
@@ -40,7 +42,7 @@ import { distance, key, neighbors } from '../src/hex.js';
 import {
   RESOURCES, FORTIFY, TERRITORY, ECONOMY, UNIT_TYPES, TERRAIN, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FLANK, HIGH_GROUND, CHARGE, REPAIR,
   UPGRADES, UPGRADE, DISBAND, RUINS, EXPLORE, PILLAGE,
-  SIGHTINGS, ROADWORK, SENTRY, VOLLEY, ANIM_SPEEDS, HEROES, INSPIRE, MILESTONES, ADVISOR, GROWTH, TRADE, UNREST, FOCUS, LEVY, FORCED_MARCH, SKIRMISH, PURSUIT,
+  SIGHTINGS, ROADWORK, SENTRY, VOLLEY, ANIM_SPEEDS, HEROES, INSPIRE, MILESTONES, ADVISOR, GROWTH, TRADE, UNREST, FOCUS, LEVY, FORCED_MARCH, SKIRMISH, PURSUIT, PERKS, PLAYERS,
 } from '../src/rules.js';
 
 test('map is deterministic and starting cities are connected', () => {
@@ -5476,5 +5478,144 @@ test('chronicle places: entries keep the tile they happened on, only seen ones s
   const old = JSON.parse(JSON.stringify(createGame({ seed: 3 })));
   old.version = 32;
   assert.equal(migrateState(old).version, STATE_VERSION);
-  assert.equal(STATE_VERSION, 33);
+  assert.ok(STATE_VERSION >= 33);
+});
+
+test('perks: a promotion gives a choice, each perk works, learning is free and replayable; validation and migration', () => {
+  const st = createGame({ seed: 4242, fog: true });
+  const u = st.units.find((x) => x.owner === 0);
+  assert.equal(perkChoices(u), 0);
+  assert.deepEqual(perkOptions(u), []);
+  assert.match(perkProblem(st, u, 'drill'), /no perk to choose/);
+  u.xp = RANKS[1].xp;
+  assert.equal(perkChoices(u), 1);
+  assert.deepEqual(perkOptions(u), Object.keys(PERKS.kinds));
+  const tips = adviseTurn(st, 0).filter((t) => t.kind === 'perk');
+  assert.equal(tips.length, 1);
+  assert.equal(tips[0].unitId, u.id);
+  assert.match(perkProblem(st, u, 'nonsense'), /Unknown/);
+  // drill: +10 % attack, the turn isn't used, the event replays
+  const moves = u.movesLeft;
+  const atkBefore = unitSummary(st, u).attack;
+  drainEvents(st);
+  const before = cloneState(st);
+  assert.ok(learnPerk(st, u.id, 'drill'));
+  assert.equal(u.movesLeft, moves);
+  assert.deepEqual(perksOf(u), ['drill']);
+  assert.equal(perkChoices(u), 0);
+  assert.equal(perkAttackMult(u), 1 + PERKS.kinds.drill.atk);
+  assert.ok(unitSummary(st, u).attack > atkBefore);
+  assert.deepEqual(unitSummary(st, u).perks, ['drill']);
+  assert.equal(perkText(u), '⚔ Drill');
+  const evs = drainEvents(st);
+  assert.equal(evs[0].type, 'perk');
+  assert.deepEqual(eventTiles(before, evs[0]), [], 'the choice is not animated');
+  for (const ev of evs) applyEvent(before, ev);
+  assert.deepEqual(perksOf(getUnit(before, u.id)), ['drill']);
+  assert.ok(st.log.at(-1).msg.includes('learned Drill'));
+  assert.equal(adviseTurn(st, 0).filter((t) => t.kind === 'perk').length, 0);
+  assert.equal(learnPerk(st, u.id, 'medic'), false, 'one perk per rank');
+  // Elite: a second, different perk
+  u.xp = RANKS[2].xp;
+  assert.ok(!perkOptions(u).includes('drill'));
+  assert.match(perkProblem(st, u, 'drill'), /already/);
+  assert.ok(learnPerk(st, u.id, 'lookout'));
+  // lookout: one tile farther
+  const far = (sees) => [...sees].filter((k) => { const [q, r] = k.split(',').map(Number); return distance({ q, r }, u) === UNIT_TYPES[u.type].sight + 1; }).length;
+  const other = st.units.filter((x) => x.owner === 0 && x.id !== u.id);
+  st.units = st.units.filter((x) => !other.includes(x));
+  const cities = st.cities.map((c) => c.owner);
+  for (const c of st.cities) c.owner = null;
+  assert.ok(far(visibleTiles(st, 0)) > 0, 'a lookout sees one ring farther');
+  u.perks = ['drill'];
+  assert.equal(far(visibleTiles(st, 0)), 0);
+  st.cities.forEach((c, i) => { c.owner = cities[i]; });
+  st.units.push(...other);
+  // not on the enemy's turn, not after game over
+  st.current = 1;
+  assert.match(perkProblem(st, u, 'medic'), /not your turn/);
+  st.current = 0;
+  // validation and migration
+  const bad = JSON.parse(JSON.stringify(st));
+  assert.equal(stateProblem(bad), null);
+  bad.units[0].perks = ['drill', 'drill'];
+  assert.match(stateProblem(bad), /bad perks/);
+  bad.units[0].perks = ['flying'];
+  assert.match(stateProblem(bad), /bad perks/);
+  bad.units[0].perks = 'drill';
+  assert.match(stateProblem(bad), /bad perks/);
+  const old = JSON.parse(JSON.stringify(createGame({ seed: 3 })));
+  old.version = 33;
+  assert.equal(migrateState(old).version, STATE_VERSION);
+  assert.equal(STATE_VERSION, 34);
+});
+
+test('perks: pathfinder crosses forest and hills for 1, a medic heals itself and its neighbours +1 (not stacked)', () => {
+  const st = createGame({ seed: 4242, fog: false, faction: 'kingdom' });
+  const u = st.units.find((x) => x.owner === 0);
+  const from = { q: u.q, r: u.r };
+  // find a forest or hills tile next to some plains tile without a road or river between
+  let pair = null;
+  for (const t of Object.values(st.tiles)) {
+    if (t.terrain !== 'forest' && t.terrain !== 'hills') continue;
+    const n = neighbors(t.q, t.r).map((x) => tileAt(st, x.q, x.r)).find((x) => x && x.terrain === 'plains' && !riverBetween(st, x, t) && !(x.road && t.road));
+    if (n) { pair = [n, t]; break; }
+  }
+  assert.ok(pair);
+  assert.equal(stepCost(st, pair[0], pair[1], u), 2);
+  u.perks = ['pathfinder'];
+  assert.equal(stepCost(st, pair[0], pair[1], u), 1);
+  assert.equal(stepCost(st, pair[0], pair[1]), 2, 'without a unit nothing changes');
+  delete u.perks;
+  // medic: the unit itself and own units next to it heal +1 when they heal at all
+  const near = neighbors(from.q, from.r).find((n) => isPassable(st, n.q, n.r) && !unitAt(st, n.q, n.r) && !cityAt(st, n.q, n.r));
+  const buddy = spawnUnit(st, 'warrior', 0, near.q, near.r);
+  assert.equal(medicBonus(st, buddy), 0);
+  u.perks = ['medic'];
+  assert.equal(medicBonus(st, buddy), PERKS.kinds.medic.heal);
+  assert.equal(medicBonus(st, u), PERKS.kinds.medic.heal);
+  buddy.perks = ['medic'];
+  assert.equal(medicBonus(st, buddy), PERKS.kinds.medic.heal, 'two medics don\'t add up');
+  delete buddy.perks;
+  const enemy = st.units.find((x) => x.owner === 1);
+  assert.equal(medicBonus(st, enemy), 0);
+  buddy.hp = 3; buddy.moved = false; buddy.movesLeft = 1; buddy.hasAttacked = false;
+  const restHeal = territoryOwner(st, buddy.q, buddy.r) === 0 ? TERRITORY.healIdle : ECONOMY.healIdle;
+  endTurn(st);
+  assert.equal(buddy.hp, 3 + restHeal + PERKS.kinds.medic.heal);
+});
+
+test('perks: the AI learns perks by unit type and every promoted AI unit has them in real games', () => {
+  const st = createGame({ seed: 4242, fog: false });
+  const w = spawnUnit(st, 'archer', 1, st.units[0].q, st.units[0].r + 0);
+  st.units = st.units.filter((x) => x !== w);
+  w.xp = RANKS[2].xp;
+  assert.equal(pickPerk(w), 'drill');
+  w.perks = ['drill'];
+  assert.equal(pickPerk(w), 'lookout');
+  const s = { ...w, type: 'scout', perks: [] };
+  assert.equal(pickPerk(s), 'lookout');
+  w.perks = ['drill', 'lookout'];
+  assert.equal(pickPerk(w), null);
+  let learned = 0;
+  for (const seed of [5, 21]) {
+    const g = createGame({ seed, fog: false });
+    for (let i = 0; i < 80 && g.winner === null; i++) {
+      if (g.current === 1) runAITurn(g);
+      endTurn(g);
+      drainEvents(g);
+      for (const x of g.units.filter((y) => y.owner === 1 && g.current === 0)) assert.equal(perkChoices(x), 0, 'the AI never leaves a choice open after its turn');
+    }
+    learned += g.log.filter((e) => e.msg.startsWith(`${PLAYERS[1].name}:`) && e.msg.includes(' learned ')).length;
+    assert.equal(stateProblem(JSON.parse(JSON.stringify(g))), null);
+  }
+  assert.ok(learned > 0, 'the AI learned some perks');
+  // learnPerks returns the count and leaves the player's units alone
+  const h = createGame({ seed: 9, fog: false });
+  h.current = 1;
+  const mine = h.units.find((x) => x.owner === 0);
+  const theirs = h.units.find((x) => x.owner === 1);
+  mine.xp = RANKS[1].xp; theirs.xp = RANKS[2].xp;
+  assert.equal(learnPerks(h, 1), 2);
+  assert.equal(perkChoices(mine), 1);
 });

@@ -67,6 +67,21 @@ export const RANKS = [
 ];
 export const XP = { attack: 1, kill: 1, defend: 1, rankBonus: 0.15, promotionHeal: 3 };
 
+// Perks: each promotion (Veteran, Elite) lets the unit learn one perk of its owner's choice; a perk is
+// learned once and kept for life. `aiOrder` = what the AI picks first for a unit type (falls back to `kinds` order).
+export const PERKS = {
+  kinds: {
+    drill:      { name: 'Drill',      icon: '⚔', desc: '+10 % attack', atk: 0.1 },
+    pathfinder: { name: 'Pathfinder', icon: '🌲', desc: 'forest and hills cost only 1 move', roughCost: 1 },
+    medic:      { name: 'Medic',      icon: '✚', desc: 'it and own units next to it heal +1 HP when they heal', heal: 1 },
+    lookout:    { name: 'Lookout',    icon: '🔭', desc: 'sees 1 tile farther', sight: 1 },
+  },
+  aiOrder: {
+    warrior: ['drill', 'medic'], spearman: ['drill', 'medic'], horseman: ['drill', 'pathfinder'],
+    archer: ['drill', 'lookout'], catapult: ['drill', 'pathfinder'], scout: ['lookout', 'pathfinder'],
+  },
+};
+
 // Factions: each side has one. A missing entry = no bonus.
 // cityIncome: extra gold per city; unitDiscount / buildingDiscount: discount by type;
 // moveBonus: extra movement by unit type; forestCost / forestDefense: movement and defense in forest;
@@ -283,6 +298,7 @@ export const ADVISOR = {
     repair:     { icon: '🔧', order: 5 },
     unrest:     { icon: '✊', order: 5.2 },
     trade:      { icon: '🛤', order: 5.5 },
+    perk:       { icon: '★', order: 5.8 },
     focus:      { icon: '⚖', order: 8 },
     recruit:    { icon: '⚑', order: 6 },
     build:      { icon: '🔨', order: 7 },

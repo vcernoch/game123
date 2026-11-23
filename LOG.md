@@ -2,6 +2,18 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-23 – Perks (v0.44.0, same run)
+- Phase 20 (renamed "hindsight and veterans"), third task of this run. A promotion only added +15 % to both values, so every Veteran of a type was the same. Now each promotion is a small decision that shapes the unit.
+- `PERKS` in `rules.js` (`kinds` drill / pathfinder / medic / lookout, `aiOrder` per unit type). In `game.js`: `perksOf`, `hasPerk`, `perkChoices` (rank − perks learned, so no pending field is needed), `perkOptions`, `perkProblem`, `learnPerk` (own unit, own turn, free, doesn't use the turn; a `perk` event – replayable, never animated – and a chronicle line), `medicBonus`, `perkText`, `perkAttackMult`, `perkSight`. Effects: `attackPower` and `unitSummary` (Drill), `stepCost` (Pathfinder, also against the faction forest cost – the lower one wins), `visibleTiles` (Lookout), `endTurn` healing (Medic: +1 for the medic and own neighbours when they heal at all; medics don't add up). A retrained unit keeps its perks.
+- AI: `pickPerk` / `learnPerks` in `ai.js`, at the start of its turn (units promoted while defending) and at its end.
+- Advisor: new `perk` hint (★) for a promoted unit with a choice left; a click selects it.
+- UI: "★ Choose a perk" buttons in the unit panel, a "Perks: ⚔ Drill, …" line, perk names in the unit tooltip, attack in the panel includes Drill. Help text updated.
+- Balance (20 AI-vs-AI games, Normal with fog, 300 half-turns max): wins 11 : 7, 2 stalemates, ~90 half-turns (before: 10 : 8, 2, ~79). The AI mostly picks Drill (Medic and Lookout as second perks).
+- State structure: `state.version` 34 (optional `unit.perks`), trivial migration – old Veterans simply get their choice; `stateProblem` validates perks (known, unique, at most one per rank above Recruit).
+- Test adjusted (not weakened): the chronicle places test pinned `STATE_VERSION` to 33 – it now checks `>= 33`, the new test pins 34.
+- Tests: +3 logic (choice per rank, every reason, Drill attack, free, event + replay + not animated, chronicle, advisor hint, second different perk, Lookout sight ring, validation, migration; Pathfinder step cost, Medic healing incl. no stacking and only own units; AI pick order, real AI games leave no open choice and stay valid, `learnPerks` leaves the player's units alone). Smoke test: a Veteran in the capital shows 4 perk buttons and the advisor hint, Drill is learned by a click without using moves (`artifacts/screenshot-perks.png`).
+- Status: `npm run check` green (133 logic tests + smoke).
+
 ## 2026-11-23 – Chronicle places (v0.44.0, same run)
 - Phase 20, second task of this run (the version was bumped once for the run). The chronicle said "Enemy: Horseman destroyed Warrior", but not where – on a bigger map, or after the unit had moved on, the player had to guess.
 - In `game.js`: `addLog` stores the tile of an entry (`q`, `r`) – `where.place`, else the last of `where.at` (the defender of a fight, the city of a recruit or capture, the unit of a promotion); ruins pass their tile as `place`. `logFor` hands the place out only with entries the viewer saw; the merged "Enemy actions in the fog of war" lines never carry one, so nothing leaks.

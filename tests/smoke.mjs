@@ -503,6 +503,33 @@ try {
   await page.screenshot({ path: 'artifacts/screenshot-march.png' });
   await page.evaluate(() => window.scrollTo(0, 0));
 
+  // perks: the unit in the capital is promoted to Veteran, the panel offers the perks, Drill raises its attack
+  await page.evaluate(() => {
+    const st = window.__game.getState();
+    const c = st.cities.find((x) => x.owner === 0 && x.capital);
+    const u = st.units.find((x) => x.q === c.q && x.r === c.r);
+    u.xp = 3; delete u.perks;
+    window.__game.refresh();
+  });
+  const perkBtns = await page.locator('#info button[data-perk]').count();
+  if (perkBtns !== 4) throw new Error(`perks: expected 4 perk buttons, got ${perkBtns}`);
+  const advisorPerk = await page.evaluate(() => document.getElementById('advisor').textContent.includes('choose a perk'));
+  if (!advisorPerk) throw new Error('perks: the advisor does not mention the perk choice');
+  await page.locator('#info .perk-btns').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: 'artifacts/screenshot-perks.png' });
+  await page.locator('#info button[data-perk="drill"]').click();
+  const learned = await page.evaluate(() => {
+    const st = window.__game.getState();
+    const c = st.cities.find((x) => x.owner === 0 && x.capital);
+    const u = st.units.find((x) => x.q === c.q && x.r === c.r);
+    return { perks: u.perks, line: document.querySelector('#info .perks')?.textContent || '', btns: document.querySelectorAll('#info button[data-perk]').length,
+      moves: u.movesLeft };
+  });
+  if (JSON.stringify(learned.perks) !== '["drill"]' || !learned.line.includes('Drill') || learned.btns || learned.moves !== 3) {
+    throw new Error(`perks: ${JSON.stringify(learned)}`);
+  }
+  await page.evaluate(() => window.scrollTo(0, 0));
+
   // hit and run: the unit in the capital becomes a fresh horseman, strikes an enemy warrior next to it by a click
   // and keeps 3 moves to pull back (panel line), but has no second attack
   const raidFoe = await page.evaluate(async () => {

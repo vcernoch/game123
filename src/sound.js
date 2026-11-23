@@ -24,6 +24,7 @@ export function soundFor(ev, viewer = 0) {
     case 'grow': return 'boon';
     case 'calm': return 'boon';
     case 'focus': return 'click';
+    case 'perk': return 'click';
     case 'levy': return null; // the spawn right after it plays the recruit sound
     case 'order': return null; // … and so does the one after a fulfilled recruit order
     case 'happening': {
