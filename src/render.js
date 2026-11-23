@@ -1,7 +1,7 @@
 // Canvas rendering. No game logic, only drawing the state.
 import { hexToPixel, hexCorners, pixelToHex, key, neighbors, DIRS } from './hex.js';
 import { TERRAIN, UNIT_TYPES, PLAYERS, NEUTRAL_COLOR, RANKS, GROWTH } from './rules.js';
-import { territoryMap, ruinBelieved, isPillaged, citySize, cityUnrest, focusOf } from './game.js';
+import { territoryMap, ruinBelieved, isPillaged, citySize, cityUnrest, focusOf, seasonAt } from './game.js';
 
 export const HEX_SIZE = 32;
 const PAD = 8;
@@ -47,6 +47,7 @@ export function render(ctx, state, view = {}) {
   const seen = (q, r) => !view.visible || view.visible.has(key(q, r));
   const known = (q, r) => !view.explored || view.explored.has(key(q, r));
   const zocStops = [];
+  const season = seasonAt(state);
 
   for (const t of Object.values(state.tiles)) {
     const c = tileCenter(t.q, t.r);
@@ -61,6 +62,9 @@ export function render(ctx, state, view = {}) {
       if ((t.ruin || t.ruinGone) && ruinBelieved(state, t.q, t.r, view.viewer ?? 0)) drawRuin(ctx, c.x - 13, c.y - 12);
       // terrain detail draws its own paths – the hex outline must be rebuilt
       hexPath(ctx, c.x, c.y, HEX_SIZE - 1);
+      if (season === 'winter' && t.terrain !== 'water') drawSnow(ctx, c.x, c.y, Math.abs(t.q * 7 + t.r * 13));
+      else if (season === 'autumn' && t.terrain === 'forest') { ctx.fillStyle = 'rgba(214,120,30,0.28)'; ctx.fill(); }
+      if (season) hexPath(ctx, c.x, c.y, HEX_SIZE - 1);
       if (!seen(t.q, t.r)) {
         ctx.fillStyle = 'rgba(12,14,22,0.5)';
         ctx.fill();
@@ -647,7 +651,7 @@ function drawRivers(ctx, state, known, seen) {
       const p1 = corners[(6 - d) % 6];
       const p2 = corners[(7 - d) % 6];
       ctx.globalAlpha = lit ? 1 : 0.55;
-      for (const [color, width] of [['#1f4f86', 6], ['#5fa8e8', 3.5]]) {
+      for (const [color, width] of riverStyle(state)) {
         ctx.strokeStyle = color;
         ctx.lineWidth = width;
         ctx.beginPath();
@@ -657,6 +661,30 @@ function drawRivers(ctx, state, known, seen) {
       }
       if (t.road && nt && nt.road) drawBridge(ctx, p1, p2);
     }
+  }
+  ctx.restore();
+}
+
+// River colours and widths by season: swollen in spring, ice in winter.
+function riverStyle(state) {
+  const season = seasonAt(state);
+  if (season === 'winter') return [['#7d9fb8', 6], ['#e4f2fb', 3.5]];
+  if (season === 'spring') return [['#1f4f86', 8.5], ['#6cb4ef', 5]];
+  return [['#1f4f86', 6], ['#5fa8e8', 3.5]];
+}
+
+// Winter: a pale veil of snow on the tile plus a few flakes at fixed spots (seeded by the tile, so they don't flicker).
+function drawSnow(ctx, x, y, seed) {
+  ctx.fillStyle = 'rgba(236,244,252,0.32)';
+  ctx.fill();
+  ctx.save();
+  ctx.fillStyle = 'rgba(255,255,255,0.85)';
+  for (let i = 0; i < 4; i++) {
+    const a = ((seed * 37 + i * 97) % 360) * Math.PI / 180;
+    const d = 6 + ((seed * 11 + i * 23) % 16);
+    ctx.beginPath();
+    ctx.arc(x + Math.cos(a) * d, y + Math.sin(a) * d, 1.3, 0, Math.PI * 2);
+    ctx.fill();
   }
   ctx.restore();
 }

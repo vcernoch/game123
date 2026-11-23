@@ -122,5 +122,8 @@ Check off `[x]` when done. Add new ideas to the end of the relevant phase or to 
 - [x] Chronicle places: each chronicle entry keeps the tile it happened on; a click on a line you saw (⌖) scrolls the map there and pulses a ring on the tile – fog lines never carry a place
 - [x] Perks: each promotion (Veteran, Elite) lets the unit learn a perk of the owner's choice – ⚔ Drill +10 % attack, 🌲 Pathfinder (forest and hills cost 1), ✚ Medic (+1 healing for it and neighbours), 🔭 Lookout (+1 sight); free, for life; the advisor reminds, the AI picks by unit type
 
+## Phase 21 – the turning year (own improvements)
+- [x] Seasons (new game option, on by default): every 3 rounds the season turns – 🌱 spring thaw (crossing a river +1 more), ☀ summer, 🍂 autumn harvest (+1 gold for cities of size 2+), ❄ winter (rivers freeze: free to cross, no river defense; units outside own territory don't heal and lose 1 HP, never below 1); header badge, banner news, snow and ice on the map, frost warning in the unit panel; the AI brings weak units home in winter
+
 ## Ideas (unordered)
 - Diplomacy with multiple AIs

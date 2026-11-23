@@ -8,7 +8,7 @@ import {
   updateSightings, lastSeen, lastSeenAt, lastSeenText, armyOverview, ARMY_STATUS, ruinBelieved,
   canExplore, setExplore, canPillage, pillage, isPillaged, pillageTurnsLeft, canRepair, repair,
   rallyPath, setRally, clearRally, swapPartners, swapUnits, canBuildRoad, buildRoad, timelineFor, adviseTurn, suggestRecruit, growthText, tradeText, tradeRoute, unrestText, focusOf, focusText, setFocus, levy, levyProblem, setRecruitOrder, clearRecruitOrder, recruitOrderText, enemyTurnReplay,
-  perkAttackMult, perkOptions, perkChoices, perkText, learnPerk,
+  perkAttackMult, perkOptions, perkChoices, perkText, learnPerk, seasonInfo, seasonStarted, riverCrossCost, frostBound, frostLoss, harvestGold,
 } from './game.js';
 import { createAnimator } from './anim.js';
 import { decideTap } from './input.js';
@@ -20,7 +20,7 @@ import { SHORTCUTS, keyAction, recruitKey } from './keys.js';
 import { render, canvasSize, pickHex, tileCenter } from './render.js';
 import { key } from './hex.js';
 import {
-  UNIT_TYPES, TERRAIN, PLAYERS, DIFFICULTY, BUILDINGS, RANKS, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FORTIFY, FORCED_MARCH, TERRITORY, ECONOMY, RESOURCES, HIGH_GROUND, CHARGE, INSPIRE, RUINS, PILLAGE, REPAIR, ROADWORK, SENTRY, FOCUS, LEVY, PERKS,
+  UNIT_TYPES, TERRAIN, PLAYERS, DIFFICULTY, BUILDINGS, RANKS, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FORTIFY, FORCED_MARCH, TERRITORY, ECONOMY, RESOURCES, HIGH_GROUND, CHARGE, INSPIRE, RUINS, PILLAGE, REPAIR, ROADWORK, SENTRY, FOCUS, LEVY, PERKS, SEASONS,
 } from './rules.js';
 
 const SAVE_KEY = 'game123-save';
@@ -254,11 +254,38 @@ function drawBoard() {
   });
 }
 
+// Season badge in the header (hidden in games without seasons).
+function updateSeason() {
+  const el = $('season');
+  const si = seasonInfo(state);
+  el.hidden = !si;
+  if (!si) return;
+  const next = SEASONS.kinds[si.next];
+  el.textContent = `${si.icon} ${si.name}`;
+  el.dataset.season = si.id;
+  el.title = `${si.name}: ${si.text}. ${next.name} in ${si.turnsLeft} turn${si.turnsLeft === 1 ? '' : 's'}.`;
+}
+
+// Unit panel line in winter for an own unit outside its territory.
+function frostLine(u) {
+  if (u.owner !== 0 || !frostBound(state, u)) return '';
+  const loss = frostLoss(state, u);
+  return `<p class="frost">❄ Winter outside your territory: no healing${loss ? `, −${loss} HP at the end of the turn` : ''} – bring it home</p>`;
+}
+
+// The start-of-turn banner line for a season that began this round.
+function seasonNews() {
+  if (!seasonStarted(state)) return [];
+  const si = seasonInfo(state);
+  return [`${si.icon} ${si.name} has come: ${si.text}.`];
+}
+
 function updateHud() {
   $('turn').textContent = state.turn;
   $('gold').textContent = state.gold[0];
   $('income').textContent = `+${incomeOf(state, 0)}`;
   $('cities').textContent = `${state.cities.filter((c) => c.owner === 0).length} / ${state.cities.length}`;
+  updateSeason();
   $('end-turn').disabled = busy() || state.winner !== null;
   updateEndTurnButton();
 
@@ -271,7 +298,7 @@ function updateHud() {
     html += `<h3>${u.name ? `<span class="hero">${esc(u.name)}</span> ` : ''}${t.name} <span class="tag" style="background:${PLAYERS[u.owner].color}">${PLAYERS[u.owner].name}</span></h3>
       <p>HP ${u.hp}/${t.hp} · Attack ${fmt(t.atk * rankMult(u) * perkAttackMult(u))} · Defense ${fmt(t.def * rankMult(u))} · Range ${t.range}</p>
       <p>Move ${fmt(u.movesLeft)}/${unitMove(state, u)}${u.fortified ? '' : u.hasAttacked ? (u.movesLeft > 0 ? ' · already attacked' : ' · done for this turn') : ''}${chargeReady(state, u) ? ` · <span class="charge">charge ready (+${Math.round(CHARGE.atkBonus * 100)} %)</span>` : ''}</p>
-      <p>${rankLine(u)}</p>${perkText(u) ? `<p class="perks">Perks: ${perkText(u)}</p>` : ''}${inspireLine(u)}${t.desc ? `<p class="hint">${t.desc}</p>` : ''}`;
+      <p>${rankLine(u)}</p>${perkText(u) ? `<p class="perks">Perks: ${perkText(u)}</p>` : ''}${inspireLine(u)}${frostLine(u)}${t.desc ? `<p class="hint">${t.desc}</p>` : ''}`;
     if (u.owner === 0 && !busy() && state.current === 0 && perkChoices(u)) html += perkPanel(u);
     if (u.goto && u.owner === 0) {
       const r = planRoute(state, u, u.goto.q, u.goto.r);
@@ -352,6 +379,7 @@ function updateHud() {
       <p class="growth">${sizeText(city)}</p>`;
     if (city.owner === 0 && unrestText(state, city)) html += `<p class="unrest">✊ ${unrestText(state, city)}</p>`;
     if (city.owner === 0) html += `<p class="trade ${tradeRoute(state, city)}">🛤 ${tradeText(state, city)}</p>`;
+    if (city.owner === 0 && harvestGold(state, city)) html += `<p class="harvest">🍂 Autumn harvest: +${harvestGold(state, city)} gold</p>`;
     if (city.owner === 0 && (state.current !== 0 || busy())) html += `<p class="focus">${focusText(city)}</p>`;
     if (city.owner === 0 && city.order && (state.current !== 0 || busy())) html += `<p class="order recruit-order">⏳ ${recruitOrderText(state, city)}</p>`;
     const res = cityResources(state, city).filter((t) => exploredTiles(state, 0).has(key(t.q, t.r)));
@@ -401,7 +429,9 @@ function updateHud() {
     const tile = tileAt(state, hover.q, hover.r);
     const t = TERRAIN[tile.terrain];
     const road = tile.road ? ` · ${tile.roadBuilt ? 'built road' : 'road'} (move cost ½ along roads)` : '';
-    const river = tile.rivers && tile.rivers.length ? ` · river (crossing +${RIVER.crossCost} move, defender +${Math.round(RIVER.defBonus * 100)} %)` : '';
+    const river = !(tile.rivers && tile.rivers.length) ? ''
+      : riverCrossCost(state) === 0 ? ' · frozen river (free to cross, no defense bonus)'
+        : ` · river (crossing +${riverCrossCost(state)} move${riverCrossCost(state) > RIVER.crossCost ? ' – swollen by the thaw' : ''}, defender +${Math.round(RIVER.defBonus * 100)} %)`;
     const high = HIGH_GROUND.terrain.includes(tile.terrain) ? ` · high ground (attack +${Math.round(HIGH_GROUND.atkBonus * 100)} % against units below)` : '';
     const noCharge = CHARGE.blockedBy.includes(tile.terrain) ? ' · no cavalry charge' : '';
     html = `<p>${t.name}${t.passable ? ` · move ${t.cost} · defense +${Math.round(t.defBonus * 100)} %` : ' · impassable'}${high}${noCharge}${road}${river}</p>`;
@@ -419,6 +449,7 @@ function updateHud() {
       const whose = realm === null ? 'neutral territory' : realm === 0 ? 'your territory' : `${PLAYERS[realm].name} territory`;
       html += `<p class="hint">${whose[0].toUpperCase()}${whose.slice(1)} – units resting here heal +${TERRITORY.healIdle} (elsewhere +${ECONOMY.healIdle})</p>`;
     }
+    if (seasonInfo(state) && seasonInfo(state).frost && realm !== 0 && t.passable) html += '<p class="frost">❄ Winter: your units here don\'t heal and lose 1 HP each turn</p>';
     const hc = cityAt(state, hover.q, hover.r);
     if (hc) {
       const ci = cityInfo(state, hc);
@@ -442,7 +473,7 @@ function updateHud() {
   if (!html) {
     const diff = DIFFICULTY[state.difficulty] || DIFFICULTY.normal;
     html = `<p class="hint">Click your unit (blue) or a city.</p>
-      <p class="hint">Map ${state.seed} · Difficulty: ${diff.name}${state.fog ? '' : ' · no fog'}${state.happenings ? '' : ' · no random events'}</p>
+      <p class="hint">Map ${state.seed} · Difficulty: ${diff.name}${state.fog ? '' : ' · no fog'}${state.happenings ? '' : ' · no random events'}${state.seasons ? '' : ' · no seasons'}</p>
       ${state.factions && state.factions[0] ? `<p class="hint">You: ${factionOf(state, 0).name} · AI: ${factionOf(state, 1).name}</p>` : ''}`;
   }
   if (undoStack.length && !busy() && state.winner === null) {
@@ -931,7 +962,7 @@ function doEndTurn(force = false) {
     aiRunning = false;
     const stopped = orders.filter((o) => ['interrupted', 'blocked', 'done', 'alert', 'healed'].includes(o.result))
       .map((o) => orderText(getUnit(state, o.unitId), o.result));
-    showNotice(happened, [...grew, ...stopped], report);
+    showNotice(happened, [...grew, ...stopped], report, seasonNews());
     draw();
   }, 250);
 }
@@ -947,10 +978,11 @@ function orderText(unit, result) {
 
 // Banner at the start of the player's turn (cleared at the next end of turn): a random event that hit
 // the player, what the enemy did to them (report from turnReport) and further messages (stopped move orders).
-function showNotice(happened, extra = [], report = null) {
+// `news` (a new season) is neutral – it doesn't colour the bar on its own.
+function showNotice(happened, extra = [], report = null, news = []) {
   const el = $('notice');
   if (report) lossMarks = report.spots;
-  else if (!happened.length && !extra.length) lossMarks = []; // cleared together with the banner
+  else if (!happened.length && !extra.length && !news.length) lossMarks = []; // cleared together with the banner
   const ev = happened[0];
   const parts = [];
   let good = false;
@@ -964,7 +996,8 @@ function showNotice(happened, extra = [], report = null) {
     if (reportIsBad(report)) good = false;
   }
   parts.push(...extra);
-  const quiet = !parts.length; // nothing to report, but the enemy did something in sight
+  const quiet = !parts.length; // nothing to report (but maybe news or enemy activity in sight)
+  parts.unshift(...news);
   if (quiet && enemyReplay) parts.push(`The enemy was active in sight (${enemyReplay.seen} action${enemyReplay.seen === 1 ? '' : 's'}).`);
   if (!parts.length) { el.hidden = true; return; }
   el.innerHTML = `<span>${esc(parts.join(' '))}</span>${enemyReplay ? ' <button id="replay" class="secondary" title="Watch the enemy\'s last turn again – only what you saw (V)">↺ Replay enemy turn</button>' : ''}`;
@@ -1004,6 +1037,7 @@ function newGame({ firstVisit = false } = {}) {
   form.elements.difficulty.value = diff;
   form.elements.fog.checked = prefs.fog !== false;
   form.elements.happenings.checked = prefs.happenings !== false;
+  form.elements.seasons.checked = prefs.seasons !== false;
   form.elements.faction.value = FACTIONS[prefs.faction] ? prefs.faction : 'kingdom';
   form.elements.size.value = MAP_SIZES[prefs.size] ? prefs.size : 'medium';
   $('new-game-warning').hidden = firstVisit || state.winner !== null;
@@ -1033,6 +1067,7 @@ $('new-game-dialog').addEventListener('close', () => {
     difficulty: form.elements.difficulty.value,
     fog: form.elements.fog.checked,
     happenings: form.elements.happenings.checked,
+    seasons: form.elements.seasons.checked,
     faction: form.elements.faction.value,
     size: form.elements.size.value,
   };

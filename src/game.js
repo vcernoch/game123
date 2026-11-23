@@ -4,13 +4,13 @@ import { generateMap, hasRiverEdge } from './map.js';
 import {
   TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY, VISION, DIFFICULTY, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, ROAD_COST, RIVER, FLANK, HIGH_GROUND, CHARGE, SKIRMISH, PURSUIT, INSPIRE,
   FACTIONS, NO_FACTION, MAP_SIZES, HAPPENINGS, FORTIFY, TERRITORY, RESOURCES,
-  UPGRADES, UPGRADE, DISBAND, SIGHTINGS, RUINS, EXPLORE, PILLAGE, REPAIR, ROADWORK, SENTRY, VOLLEY, FORCED_MARCH, ANIM_SPEEDS, HEROES, MILESTONES, ADVISOR, GROWTH, TRADE, UNREST, FOCUS, LEVY, PERKS,
+  UPGRADES, UPGRADE, DISBAND, SIGHTINGS, RUINS, EXPLORE, PILLAGE, REPAIR, ROADWORK, SENTRY, VOLLEY, FORCED_MARCH, ANIM_SPEEDS, HEROES, MILESTONES, ADVISOR, GROWTH, TRADE, UNREST, FOCUS, LEVY, PERKS, SEASONS,
 } from './rules.js';
 import { createRng } from './rng.js';
 
 export function createGame({
   seed = 1, size = null, cols = 14, rows = 10, neutralCities = 4, fog = true, difficulty = 'normal',
-  faction = 'kingdom', aiFaction = null, happenings = true,
+  faction = 'kingdom', aiFaction = null, happenings = true, seasons = true,
 } = {}) {
   if (MAP_SIZES[size]) ({ cols, rows, neutralCities } = MAP_SIZES[size]);
   if (!DIFFICULTY[difficulty]) difficulty = 'normal';
@@ -39,6 +39,7 @@ export function createGame({
     events: [],
     fog,
     happenings: !!happenings,
+    seasons: !!seasons,
     zoc: true,
     difficulty,
     factions: [faction, aiFaction],
@@ -86,6 +87,7 @@ export function restartOptions(state) {
     neutralCities: state.cities.length - PLAYERS.length,
     fog: state.fog !== false,
     happenings: !!state.happenings,
+    seasons: !!state.seasons,
     difficulty: state.difficulty || 'normal',
   };
   if (state.factions && state.factions[0]) {
@@ -130,7 +132,7 @@ function countStat(state, name, player) {
   state.stats[name][player]++;
 }
 
-export const STATE_VERSION = 34;
+export const STATE_VERSION = 35;
 
 // Converts a saved state of an older version to the current one; returns null for an unknown format.
 export function migrateState(s) {
@@ -274,6 +276,10 @@ export function migrateState(s) {
   if (s.version === 33) {
     // perks arrived in version 34 – a unit without `perks` simply has a choice to make for each rank
     s.version = 34;
+  }
+  if (s.version === 34) {
+    s.seasons = false; // seasons arrived in version 35 – a game in progress continues with the rules it started with
+    s.version = 35;
   }
   return s.version === STATE_VERSION ? s : null;
 }
@@ -638,7 +644,8 @@ export function cityIncome(city, state = null) {
   const temple = hasBuilding(city, 'temple') ? BUILDING_EFFECTS.templeIncome : 0;
   const mines = state ? cityResources(state, city).filter((t) => t.resource === 'gold' && !isPillaged(state, t)).length * RESOURCES.gold.income : 0;
   const trade = state && tradeRoute(state, city) === 'linked' ? TRADE.income : 0;
-  return Math.max(0, base + faction + market + temple + mines + (citySize(city) - 1) * GROWTH.income + trade + cityFocus(city).gold);
+  const harvest = state ? harvestGold(state, city) : 0;
+  return Math.max(0, base + faction + market + temple + mines + (citySize(city) - 1) * GROWTH.income + trade + harvest + cityFocus(city).gold);
 }
 
 // ---------- city focus ----------
@@ -922,7 +929,7 @@ export function stepCost(state, from, to, unit = null) {
   const a = tileAt(state, from.q, from.r);
   const b = tileAt(state, to.q, to.r);
   if (a && b && a.road && b.road) return ROAD_COST; // road across a river = bridge
-  const river = riverBetween(state, from, to) ? RIVER.crossCost : 0;
+  const river = riverBetween(state, from, to) ? riverCrossCost(state) : 0;
   let cost = TERRAIN[b.terrain].cost;
   if (unit && b.terrain === 'forest') {
     const fc = factionOf(state, unit.owner).forestCost;
@@ -939,8 +946,68 @@ export function riverBetween(state, a, b) {
 }
 
 // Defense bonus for a unit attacked in melee across a river (0 if no river between them).
+// A frozen river (winter) gives no defense.
 export function riverDefense(state, attacker, defender) {
+  if (seasonKind(state).frozen) return 0;
   return distance(attacker, defender) === 1 && riverBetween(state, attacker, defender) ? RIVER.defBonus : 0;
+}
+
+// Extra move points for crossing a river now: more in spring (thaw), nothing in winter (frozen).
+export function riverCrossCost(state) {
+  const k = seasonKind(state);
+  return k.frozen ? 0 : RIVER.crossCost + (k.riverExtra || 0);
+}
+
+// ---------- seasons ----------
+// The season follows from the round (state.turn), so nothing is stored apart from the `seasons` option.
+
+// Season id for a round, or null when the game plays without seasons.
+export function seasonAt(state, turn = state.turn) {
+  if (!state.seasons) return null;
+  return SEASONS.order[Math.floor((Math.max(1, turn) - 1) / SEASONS.length) % SEASONS.order.length];
+}
+
+// The current season's settings ({} without seasons, so callers can read effects safely).
+export function seasonKind(state) {
+  const id = seasonAt(state);
+  return id ? SEASONS.kinds[id] : {};
+}
+
+// Season summary for the HUD: { id, name, icon, text, turnsLeft (rounds including this one), next } or null.
+export function seasonInfo(state) {
+  const id = seasonAt(state);
+  if (!id) return null;
+  const turnsLeft = SEASONS.length - ((state.turn - 1) % SEASONS.length);
+  const next = seasonAt(state, state.turn + turnsLeft);
+  return { id, ...SEASONS.kinds[id], turnsLeft, next };
+}
+
+// Did a new season start with this round? (Round 1 doesn't count – the game simply starts in spring.)
+export function seasonStarted(state) {
+  return state.turn > 1 && !!seasonAt(state) && seasonAt(state) !== seasonAt(state, state.turn - 1);
+}
+
+// Winter frost: does this unit freeze at the end of its owner's turn (outside own territory; a city of its own
+// is territory)? Returns the HP it would lose (0 = none).
+export function frostLoss(state, unit) {
+  const k = seasonKind(state);
+  if (!k.frost || territoryOwner(state, unit.q, unit.r) === unit.owner) return 0;
+  const city = cityAt(state, unit.q, unit.r);
+  if (city && city.owner === unit.owner) return 0;
+  return Math.max(0, Math.min(k.frost, unit.hp - SEASONS.frostMinHp));
+}
+
+// Does winter keep the unit from healing (it stands outside its own territory)?
+export function frostBound(state, unit) {
+  return !!seasonKind(state).frost && territoryOwner(state, unit.q, unit.r) !== unit.owner
+    && !(cityAt(state, unit.q, unit.r) && cityAt(state, unit.q, unit.r).owner === unit.owner);
+}
+
+// Gold an owned city gets from the autumn harvest (size 2+, calm).
+export function harvestGold(state, city) {
+  const k = seasonKind(state);
+  if (!k.harvest || city.owner === null || citySize(city) < 2 || cityUnrest(city) > 0) return 0;
+  return k.harvest;
 }
 
 // Flanking: other units of the attacker's owner next to the defender (the attacker itself never counts).
@@ -2318,21 +2385,33 @@ export function build(state, cityId, building) {
 export function endTurn(state) {
   if (state.winner !== null) return false;
   cityVolleys(state, state.current);
-  // heal units of the player ending the turn
+  const frozen = [];
+  // heal units of the player ending the turn (winter frost instead outside own territory)
   for (const u of state.units.filter((x) => x.owner === state.current)) {
     const city = cityAt(state, u.q, u.r);
     const restHeal = territoryOwner(state, u.q, u.r) === u.owner ? TERRITORY.healIdle : ECONOMY.healIdle;
-    const heal = city && city.owner === u.owner ? cityHeal(city) : u.moved ? 0 : restHeal;
-    u.hp = Math.min(UNIT_TYPES[u.type].hp, u.hp + heal + (heal > 0 ? medicBonus(state, u) : 0));
+    const frost = frostLoss(state, u);
+    const heal = frostBound(state, u) ? 0 : city && city.owner === u.owner ? cityHeal(city) : u.moved ? 0 : restHeal;
+    u.hp = Math.min(UNIT_TYPES[u.type].hp, u.hp + heal + (heal > 0 ? medicBonus(state, u) : 0)) - frost;
+    if (frost) frozen.push(u);
     delete u.marched; // a forced march lasts only for the turn it was made in
     delete u.raided; // … and so does a hit and run
     delete u.pursuit; // … and a pursuit
+  }
+  if (frozen.length) {
+    addLog(state, `${PLAYERS[state.current].name}: winter frost – ${frozen.length} ${frozen.length === 1 ? 'unit' : 'units'} outside home lost HP`, {
+      by: state.current, at: frozen,
+    });
   }
   state.current = (state.current + 1) % PLAYERS.length;
   if (state.current === 0) {
     state.turn++;
     recoverPillaged(state);
     recordHistory(state);
+    if (seasonStarted(state)) {
+      const k = seasonKind(state);
+      addLog(state, `${k.icon} ${k.name} has come: ${k.text}`);
+    }
   }
   calmCities(state, state.current);
   growCities(state, state.current);
@@ -3171,6 +3250,7 @@ export function stateProblem(s) {
       if ((e.q !== undefined || e.r !== undefined) && !s.tiles[key(e.q, e.r)]) return 'bad chronicle place';
     }
   }
+  if (s.seasons !== undefined && typeof s.seasons !== 'boolean') return 'bad seasons';
   if (s.winner !== null && s.winner !== undefined && !validOwner(s.winner)) return 'bad winner';
   return null;
 }

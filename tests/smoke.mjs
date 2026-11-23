@@ -1581,6 +1581,47 @@ try {
   }
   await page.screenshot({ path: 'artifacts/screenshot-file.png' });
 
+  // seasons: the end of round 9 brings winter – header badge, banner news, snow on the map; a unit of ours
+  // standing outside our territory shows the frost warning in its panel
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.evaluate(() => { window.__game.newGame(57, { fog: false, happenings: false }); window.__game.setAnimSpeed(0.05); });
+  const springBadge = await page.evaluate(() => ({ text: document.getElementById('season').textContent, hidden: document.getElementById('season').hidden }));
+  if (springBadge.hidden || springBadge.text !== '🌱 Spring') throw new Error(`seasons: spring badge ${JSON.stringify(springBadge)}`);
+  await page.evaluate(() => { window.__game.getState().turn = 9; window.__game.refresh(); });
+  await page.evaluate(() => window.__game.endTurn());
+  await page.waitForFunction(() => !window.__game.isBusy(), null, { timeout: 15000 });
+  const winter = await page.evaluate(() => ({ turn: window.__game.getState().turn, badge: document.getElementById('season').textContent,
+    title: document.getElementById('season').title, notice: document.getElementById('notice').textContent, hidden: document.getElementById('notice').hidden }));
+  if (winter.turn !== 10 || winter.badge !== '❄ Winter' || !winter.title.includes('Spring in 3 turns') || winter.hidden || !winter.notice.includes('Winter has come')) {
+    throw new Error(`seasons: winter ${JSON.stringify(winter)}`);
+  }
+  const coldPt = await page.evaluate(async () => {
+    const g = await import('./src/game.js');
+    const rnd = await import('./src/render.js');
+    const st = window.__game.getState();
+    const u = st.units.find((x) => x.owner === 0);
+    const spot = Object.values(st.tiles).find((t) => g.isPassable(st, t.q, t.r) && !g.unitAt(st, t.q, t.r) && !g.cityAt(st, t.q, t.r)
+      && g.territoryOwner(st, t.q, t.r) === undefined);
+    u.q = spot.q; u.r = spot.r; u.hp = 5;
+    window.__game.refresh();
+    const p = rnd.tileCenter(spot.q, spot.r);
+    const rect = document.getElementById('board').getBoundingClientRect();
+    const k = rect.width / rnd.canvasSize(st).w;
+    return { x: rect.left + p.x * k, y: rect.top + p.y * k };
+  });
+  await page.keyboard.press('Escape');
+  await page.mouse.click(coldPt.x, coldPt.y);
+  const frostLine = await page.evaluate(() => document.querySelector('#info .frost')?.textContent || '');
+  if (!/Winter outside your territory: no healing, −1 HP/.test(frostLine)) throw new Error(`seasons: frost line "${frostLine}"`);
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.screenshot({ path: 'artifacts/screenshot-winter.png' });
+  await page.setViewportSize({ width: 390, height: 844 });
+  if (await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1)) {
+    throw new Error('seasons: horizontal scroll on mobile');
+  }
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.screenshot({ path: 'artifacts/screenshot-winter-mobile.png' });
+
   if (errors.length) throw new Error(errors.join('\n'));
   console.log(`SMOKE OK – turn ${turn}, screenshots in artifacts/`);
 } catch (e) {

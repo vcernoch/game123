@@ -26,7 +26,7 @@ h1 { margin: 0; font-size: 20px; color: var(--accent); letter-spacing: 0.5px; }
 .icon-btn[aria-pressed="false"] { color: var(--muted); }
 #threats[aria-pressed="true"] { background: #a8372f; color: #fff; }
 h1 small { font-size: 12px; font-weight: 500; color: var(--muted); letter-spacing: 0; margin-left: 4px; }
-.stats { display: flex; gap: 18px; }
+.stats { display: flex; flex-wrap: wrap; gap: 4px 18px; }
 .stats small { color: #8fd48f; }
 .actions { margin-left: auto; display: flex; gap: 8px; }
 button {
@@ -136,6 +136,7 @@ fieldset .seed-row + small { margin-left: 0; }
 @media (max-width: 760px) {
   main { grid-template-columns: 1fr; padding: 16px; }
   .actions { margin-left: 0; }
+  .stats { gap: 4px 12px; }
   /* zoomed map: bigger hexes for fingers, scrolling inside the frame (the page itself doesn't scroll sideways) */
   .zoom-btn { display: block; width: 100%; }
   .board-wrap.zoomed { overflow: auto; max-height: 75vh; border-radius: 8px; -webkit-overflow-scrolling: touch; }
@@ -154,6 +155,12 @@ fieldset .seed-row + small { margin-left: 0; }
 .charge { color: #ffb74d; font-weight: 600; }
 .inspire { color: #f2c94c; }
 .perks { color: #cfe3ff; }
+.frost { color: #bfe4ff; }
+.harvest { color: #f0c27a; }
+.season { white-space: nowrap; cursor: help; }
+.season[data-season="winter"] { color: #cfeaff; }
+.season[data-season="autumn"] { color: #f0b46a; }
+.season[data-season="spring"] { color: #a8e0a0; }
 .resource { color: #f2c94c; }
 .trade.linked { color: #9fd89f; }
 .trade.cut { color: #ff9b8a; }

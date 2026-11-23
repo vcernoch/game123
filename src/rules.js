@@ -147,6 +147,26 @@ export const SKIRMISH = { types: ['horseman', 'scout'], moveCost: 1 };
 export const PURSUIT = { types: ['warrior', 'spearman'], aiHpShare: 0.6 };
 
 // Random events at the start of a player's turn (from turn fromTurn, with probability chance).
+// Seasons (a game option, like random events): the year turns every `length` rounds, starting in spring.
+// spring: thaw – crossing a river costs `riverExtra` more (bridges stay free);
+// summer: campaign season – no effect;
+// autumn: harvest – every owned city of size 2+ that isn't restless pays `harvest` more gold;
+// winter: rivers freeze – crossing is free and gives no defense; a unit ending its owner's turn outside
+//   its own territory doesn't heal and loses `frost` HP (never below `frostMinHp`).
+// The AI's wounded units head home a little earlier in winter (`aiFrostHp` share of HP).
+export const SEASONS = {
+  length: 3,
+  order: ['spring', 'summer', 'autumn', 'winter'],
+  kinds: {
+    spring: { name: 'Spring', icon: '🌱', riverExtra: 1, text: 'thaw – swollen rivers cost +1 more move to cross (bridges stay free)' },
+    summer: { name: 'Summer', icon: '☀', text: 'campaign season – no penalties' },
+    autumn: { name: 'Autumn', icon: '🍂', harvest: 1, text: 'harvest – cities of size 2+ pay +1 gold' },
+    winter: { name: 'Winter', icon: '❄', frozen: true, frost: 1, text: 'rivers freeze (free to cross, no river defense); units outside your territory don\'t heal and lose 1 HP each turn' },
+  },
+  frostMinHp: 1,
+  aiFrostHp: 0.6,
+};
+
 // They hit a random city of the player; weight = relative frequency.
 // harvest: extra gold; plague: units in and around the city lose HP (they don't die);
 // revolt: a city without its own garrison yields no income this turn (the capital never revolts).

@@ -38,6 +38,9 @@ import { soundFor, createLimiter, createSound, SOUND_NAMES } from '../src/sound.
 import { readFileSync } from 'node:fs';
 import { GAME_VERSION, GAME_DATE } from '../src/version.js';
 import { pathExists, generateMap, dirTo } from '../src/map.js';
+import { seasonAt, seasonKind, seasonInfo, seasonStarted, riverCrossCost, frostLoss, frostBound, harvestGold } from '../src/game.js';
+import { frostGoals } from '../src/ai.js';
+import { SEASONS, ROAD_COST } from '../src/rules.js';
 import { distance, key, neighbors } from '../src/hex.js';
 import {
   RESOURCES, FORTIFY, TERRITORY, ECONOMY, UNIT_TYPES, TERRAIN, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FLANK, HIGH_GROUND, CHARGE, REPAIR,
@@ -577,7 +580,7 @@ test('rivers: flow along edges, are symmetric and do not change the map layout',
 });
 
 test('rivers: crossing costs extra movement, a bridge does not, a defender behind a river gets a bonus', () => {
-  const s = createGame({ seed: 1, fog: false });
+  const s = createGame({ seed: 1, fog: false, seasons: false }); // the base rule – seasons have their own test
   const tiles = Object.values(s.tiles);
   // without a river between a, b the cost is unchanged; with a river crossCost is added
   const a = tiles.find((t) => t.terrain === 'plains' && !t.road);
@@ -4002,7 +4005,7 @@ test('recruit suggestion: counters horsemen, siege, archers, scouts, fast horsem
 });
 
 test('city growth: sizes after the owner\'s turns, income, siege halts it, capture shrinks it, events replay, migration', () => {
-  const s = createGame({ seed: 3, fog: false, happenings: false });
+  const s = createGame({ seed: 3, fog: false, happenings: false, seasons: false }); // exact incomes – no autumn harvest
   s.units = [];
   const cap = s.cities.find((c) => c.capital && c.owner === 0);
   const neutral = s.cities.find((c) => c.owner === null);
@@ -5547,7 +5550,7 @@ test('perks: a promotion gives a choice, each perk works, learning is free and r
   const old = JSON.parse(JSON.stringify(createGame({ seed: 3 })));
   old.version = 33;
   assert.equal(migrateState(old).version, STATE_VERSION);
-  assert.equal(STATE_VERSION, 34);
+  assert.ok(STATE_VERSION >= 34);
 });
 
 test('perks: pathfinder crosses forest and hills for 1, a medic heals itself and its neighbours +1 (not stacked)', () => {
@@ -5618,4 +5621,167 @@ test('perks: the AI learns perks by unit type and every promoted AI unit has the
   mine.xp = RANKS[1].xp; theirs.xp = RANKS[2].xp;
   assert.equal(learnPerks(h, 1), 2);
   assert.equal(perkChoices(mine), 1);
+});
+
+// ---------- seasons ----------
+
+// A plains pair with a river between them, roads removed (a fresh game on seed 1, no fog).
+function riverPair(s) {
+  const tiles = Object.values(s.tiles);
+  const a = tiles.find((t) => t.terrain === 'plains' && !t.road);
+  const b = neighbors(a.q, a.r).map((n) => s.tiles[key(n.q, n.r)]).find((t) => t && t.terrain === 'plains' && !t.road);
+  a.rivers = [dirTo(a, b)];
+  b.rivers = [dirTo(b, a)];
+  return { a, b };
+}
+
+test('seasons: the year turns every 3 rounds; thaw, frozen rivers, harvest; off for old games', () => {
+  const s = createGame({ seed: 1, fog: false, happenings: false });
+  assert.equal(s.seasons, true, 'seasons are on by default');
+  const at = (t) => seasonAt(s, t);
+  assert.deepEqual([1, 3, 4, 6, 7, 9, 10, 12, 13].map(at),
+    ['spring', 'spring', 'summer', 'summer', 'autumn', 'autumn', 'winter', 'winter', 'spring']);
+  assert.deepEqual(seasonInfo(s), { id: 'spring', ...SEASONS.kinds.spring, turnsLeft: 3, next: 'summer' });
+  s.turn = 12;
+  assert.equal(seasonInfo(s).turnsLeft, 1);
+  assert.equal(seasonInfo(s).next, 'spring');
+  s.turn = 1;
+  assert.equal(seasonStarted(s), false, 'the first spring is no news');
+  // rivers: +1 in spring, normal in summer and autumn, free and without defense in winter; a bridge is always a road
+  const { a, b } = riverPair(s);
+  const plain = TERRAIN.plains.cost;
+  const def = { owner: 0, q: a.q, r: a.r };
+  const att = { owner: 1, q: b.q, r: b.r };
+  const rivers = {};
+  for (const t of [1, 4, 7, 10]) {
+    s.turn = t;
+    rivers[seasonAt(s)] = [stepCost(s, a, b), riverDefense(s, att, def), riverCrossCost(s)];
+  }
+  assert.deepEqual(rivers, {
+    spring: [plain + RIVER.crossCost + 1, RIVER.defBonus, RIVER.crossCost + 1],
+    summer: [plain + RIVER.crossCost, RIVER.defBonus, RIVER.crossCost],
+    autumn: [plain + RIVER.crossCost, RIVER.defBonus, RIVER.crossCost],
+    winter: [plain, 0, 0],
+  });
+  a.road = true; b.road = true;
+  s.turn = 1;
+  assert.equal(stepCost(s, a, b), ROAD_COST, 'a bridge ignores the thaw');
+  // harvest: autumn only, owned cities of size 2+ that are calm
+  const cap = s.cities.find((c) => c.capital && c.owner === 0);
+  const neutral = s.cities.find((c) => c.owner === null);
+  s.turn = 7;
+  assert.equal(harvestGold(s, cap), 0, 'size 1 has no harvest');
+  const before = cityIncome(cap, s);
+  cap.size = 2;
+  assert.equal(harvestGold(s, cap), SEASONS.kinds.autumn.harvest);
+  assert.equal(cityIncome(cap, s), before + GROWTH.income + SEASONS.kinds.autumn.harvest);
+  assert.equal(incomeOf(s, 0), s.cities.filter((c) => c.owner === 0).reduce((x, c) => x + cityIncome(c, s), 0));
+  neutral.size = 2;
+  assert.equal(harvestGold(s, neutral), 0, 'neutral cities have no harvest');
+  cap.unrest = 2;
+  assert.equal(harvestGold(s, cap), 0, 'a restless city has no harvest');
+  delete cap.unrest;
+  s.turn = 4;
+  assert.equal(harvestGold(s, cap), 0, 'no harvest in summer');
+  // without seasons nothing changes
+  const off = createGame({ seed: 1, fog: false, seasons: false });
+  assert.equal(seasonAt(off), null);
+  assert.equal(seasonInfo(off), null);
+  assert.deepEqual(seasonKind(off), {});
+  assert.equal(riverCrossCost(off), RIVER.crossCost);
+  assert.equal(restartOptions(off).seasons, false);
+  assert.equal(restartOptions(s).seasons, true);
+  // validation and migration: a game in progress keeps playing without seasons
+  const bad = JSON.parse(JSON.stringify(s));
+  bad.seasons = 'yes';
+  assert.match(stateProblem(bad), /bad seasons/);
+  const old = JSON.parse(JSON.stringify(createGame({ seed: 3 })));
+  old.version = 34;
+  delete old.seasons;
+  const m = migrateState(old);
+  assert.equal(m.version, STATE_VERSION);
+  assert.equal(m.seasons, false);
+  assert.equal(stateProblem(m), null);
+  assert.equal(STATE_VERSION, 35);
+});
+
+test('seasons: winter frost outside own territory, season news in the chronicle, the AI heads home', () => {
+  const s = createGame({ seed: 1, fog: false, happenings: false });
+  s.units = [];
+  const tiles = Object.values(s.tiles).filter((t) => TERRAIN[t.terrain].passable && !cityAt(s, t.q, t.r));
+  const outside = tiles.find((t) => territoryOwner(s, t.q, t.r) === undefined);
+  const home = tiles.find((t) => territoryOwner(s, t.q, t.r) === 0);
+  const foreign = tiles.find((t) => territoryOwner(s, t.q, t.r) === 1);
+  const cap = s.cities.find((c) => c.capital && c.owner === 0);
+  const cold = spawnUnit(s, 'warrior', 0, outside.q, outside.r);
+  const warm = spawnUnit(s, 'warrior', 0, home.q, home.r);
+  const enemyLand = spawnUnit(s, 'warrior', 0, foreign.q, foreign.r);
+  const inCity = spawnUnit(s, 'warrior', 0, cap.q, cap.r);
+  const last = spawnUnit(s, 'warrior', 0, tiles.find((t) => territoryOwner(s, t.q, t.r) === undefined && !unitAt(s, t.q, t.r)).q,
+    tiles.find((t) => territoryOwner(s, t.q, t.r) === undefined && !unitAt(s, t.q, t.r)).r);
+  for (const u of s.units) { u.hp = 5; u.moved = false; }
+  last.hp = 1;
+  s.turn = 10; // winter
+  assert.equal(frostBound(s, cold), true);
+  assert.equal(frostLoss(s, cold), SEASONS.kinds.winter.frost);
+  assert.equal(frostBound(s, enemyLand), true, 'enemy land is no shelter');
+  assert.equal(frostBound(s, warm), false);
+  assert.equal(frostBound(s, inCity), false);
+  assert.equal(frostLoss(s, last), 0, 'frost never kills');
+  endTurn(s);
+  assert.equal(cold.hp, 4, 'no healing, −1 HP');
+  assert.equal(enemyLand.hp, 4);
+  assert.equal(last.hp, 1);
+  assert.equal(warm.hp, 5 + TERRITORY.healIdle, 'own territory heals as usual');
+  assert.equal(inCity.hp, 5 + cityHeal(cap));
+  assert.ok(s.log.some((e) => e.msg === `${PLAYERS[0].name}: winter frost – 2 units outside home lost HP`));
+  // in summer the same unit simply heals
+  const t = createGame({ seed: 1, fog: false, happenings: false });
+  t.units = [];
+  const u = spawnUnit(t, 'warrior', 0, outside.q, outside.r);
+  u.hp = 5; u.moved = false;
+  t.turn = 4;
+  assert.equal(frostLoss(t, u), 0);
+  endTurn(t);
+  assert.equal(u.hp, 5 + ECONOMY.healIdle);
+  // the chronicle announces a new season once, when the round starts
+  const g = createGame({ seed: 1, fog: false, happenings: false });
+  g.turn = 9; g.current = 1;
+  endTurn(g);
+  assert.equal(g.turn, 10);
+  assert.equal(seasonStarted(g), true);
+  assert.equal(g.log.filter((e) => e.msg.startsWith('❄ Winter has come:')).length, 1);
+  assert.equal(logFor(g, 0).at(-1).msg.startsWith('❄ Winter has come'), true, 'public news');
+  endTurn(g); endTurn(g);
+  assert.equal(g.log.filter((e) => e.msg.includes('has come')).length, 1, 'only on the first round of a season');
+  // AI: a weak unit freezing outside heads for the nearest own city, a healthy one or one at home doesn't
+  const h = createGame({ seed: 1, fog: false, happenings: false });
+  h.units = [];
+  const ai = spawnUnit(h, 'warrior', 1, outside.q, outside.r);
+  h.turn = 10;
+  ai.hp = Math.floor(UNIT_TYPES.warrior.hp * SEASONS.aiFrostHp);
+  const goals = frostGoals(h, ai);
+  const own = h.cities.filter((c) => c.owner === 1);
+  const nearest = Math.min(...own.map((c) => distance(c, ai)));
+  assert.ok(goals.length >= 1 && goals.every((x) => x.home && distance(x, ai) === nearest));
+  assert.deepEqual(goalsFor(h, ai), goals);
+  ai.hp = UNIT_TYPES.warrior.hp;
+  assert.deepEqual(frostGoals(h, ai), []);
+  ai.hp = 2;
+  h.turn = 7;
+  assert.deepEqual(frostGoals(h, ai), [], 'only in winter');
+  // real AI-vs-AI games through two winters stay valid and frost happens
+  const frosts = new Set();
+  for (const seed of [5, 21]) {
+    const r = createGame({ seed, fog: true });
+    for (let i = 0; i < 52 && r.winner === null; i++) {
+      runAITurn(r);
+      endTurn(r);
+      drainEvents(r);
+      assert.ok(r.units.every((x) => x.hp >= 1));
+      for (const e of r.log) if (e.msg.includes('winter frost')) frosts.add(`${seed}:${e.turn}:${e.msg}`);
+    }
+    assert.equal(stateProblem(JSON.parse(JSON.stringify(r))), null);
+  }
+  assert.ok(frosts.size > 0, 'some units froze in the two winters');
 });
