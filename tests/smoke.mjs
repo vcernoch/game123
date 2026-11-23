@@ -544,6 +544,55 @@ try {
     window.scrollTo(0, 0);
   }, raidFoe.id);
 
+  // pursuit: the unit in the capital as a fresh warrior destroys a weak enemy next to it, the panel offers the
+  // advance and a click on the freed tile steps there for free; afterwards it goes back as it was
+  const chase = await page.evaluate(async () => {
+    const rnd = await import('./src/render.js');
+    const g = await import('./src/game.js');
+    const st = window.__game.getState();
+    const c = st.cities.find((x) => x.owner === 0 && x.capital);
+    const u = st.units.find((x) => x.q === c.q && x.r === c.r);
+    const saved = JSON.parse(JSON.stringify(u));
+    Object.assign(u, { type: 'warrior', hp: 10, movesLeft: 2, hasAttacked: false, moved: false });
+    delete u.raided;
+    const spot = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]].map(([dq, dr]) => ({ q: c.q + dq, r: c.r + dr }))
+      .find((p) => g.isPassable(st, p.q, p.r) && !g.unitAt(st, p.q, p.r) && !g.cityAt(st, p.q, p.r));
+    const foe = g.spawnUnit(st, 'scout', 1, spot.q, spot.r);
+    foe.hp = 1;
+    g.drainEvents(st);
+    window.__game.refresh();
+    const p = rnd.tileCenter(spot.q, spot.r);
+    const rect = document.getElementById('board').getBoundingClientRect();
+    const k = rect.width / rnd.canvasSize(st).w;
+    return { saved, spot, unitId: u.id, x: rect.left + p.x * k, y: rect.top + p.y * k };
+  });
+  await page.keyboard.press('Escape');
+  await page.mouse.click(capPt.x, capPt.y);
+  await page.mouse.click(chase.x, chase.y);
+  await page.waitForFunction(() => !window.__game.isBusy(), null, { timeout: 10000 });
+  const offered = await page.evaluate((id) => {
+    const u = window.__game.getState().units.find((x) => x.id === id);
+    return u && { pursuit: u.pursuit, line: [...document.querySelectorAll('#info .march')].map((e) => e.textContent).join(' ') };
+  }, chase.unitId);
+  if (!offered || !offered.pursuit || !/Pursuit: click the freed tile/.test(offered.line)) throw new Error(`pursuit: ${JSON.stringify(offered)}`);
+  await page.mouse.click(chase.x, chase.y);
+  await page.waitForFunction(() => !window.__game.isBusy(), null, { timeout: 10000 });
+  const advanced = await page.evaluate((id) => {
+    const u = window.__game.getState().units.find((x) => x.id === id);
+    return u && { q: u.q, r: u.r, pursuit: u.pursuit ?? null, moves: u.movesLeft };
+  }, chase.unitId);
+  if (!advanced || advanced.q !== chase.spot.q || advanced.r !== chase.spot.r || advanced.pursuit !== null || advanced.moves !== 0) {
+    throw new Error(`pursuit advance: ${JSON.stringify(advanced)}`);
+  }
+  await page.evaluate((saved) => {
+    const st = window.__game.getState();
+    const u = st.units.find((x) => x.id === saved.id);
+    for (const k of Object.keys(u)) delete u[k];
+    Object.assign(u, saved);
+    window.__game.refresh();
+    window.scrollTo(0, 0);
+  }, chase.saved);
+
   // ? opens the shortcut overlay, Esc closes it
   await page.keyboard.press('?');
   if (!(await page.evaluate(() => document.getElementById('keys-dialog').open))) throw new Error('? did not open the shortcuts');

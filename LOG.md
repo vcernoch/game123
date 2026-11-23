@@ -2,6 +2,19 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-23 – Pursuit (v0.43.0)
+- **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.38.0–v0.43.0) is ahead of `main` (v0.37.0) – please merge it.
+- Starting state green (124 logic tests + smoke).
+- Phase 19 (manoeuvre, own improvement), third task. After hit and run gave riders a role, foot soldiers that won a fight were still stuck on their tile, so a broken enemy line closed again for free. Now a warrior or spearman that destroys an adjacent defender can step into the gap.
+- `PURSUIT` in `rules.js` (`types` warrior + spearman, `aiHpShare` 0.6). In `game.js`: `isPursuer`, `pursuesInto` (for the preview), `pursuitTile`. `attack` sets `unit.pursuit = {q, r}` on a kill at distance 1 when the freed tile is passable and not a city (a killed garrison still has to be followed up next turn – the same rule as for hit and run). `searchMoves` gives a unit with no moves left exactly that tile at cost 0 while it is free and it is the owner's turn, so `reachable`, `pathTo`, `moveUnit`, the reach highlight and clicking work unchanged. Any move and `endTurn` clear it; the `attack` event carries `pursuit` and `applyEvent` restores it (a `move` clears it). It is optional: the unit doesn't count as "ready" for Tab or the end-turn reminder.
+- AI: `pursue` in `ai.js`, after the strikes (next to `withdraw`) – advances when the freed tile is no more exposed than staying, or when a unit with ≥ 60 % HP gets next to a known enemy city it wasn't next to; a garrison never leaves its own city.
+- UI: "➜ Pursuit: click the freed tile to advance there for free – or stay where you are" in the unit panel, "can pursue" tag in the tooltip, the attack preview adds "· then it can advance", warrior/spearman descriptions mention it. Help text updated.
+- Balance (20 AI-vs-AI games, Normal with fog, 300 half-turns max, my script): wins 10 : 8, 2 stalemates, ~79 half-turns (without pursuit 8 : 9, 3, ~91); 580 pursuit rights, 167 advances. Games end a bit sooner, no side favoured.
+- State structure: `state.version` 32 (optional `unit.pursuit`), trivial migration; `stateProblem` validates it (integers, next to the unit).
+- Test adjusted (not weakened): the hit and run test pinned `STATE_VERSION` to 31 – it now checks `>= 31`, the new test pins 32.
+- Tests: +3 logic (the right after a kill, reach of exactly that tile at cost 0, not "ready", event + replay, the free step and the move replay; no pursuit for archers, horsemen or into a city, a tile taken by a friend, expiry at turn end, only on the owner's turn, validation, migration; AI advances when safe, stays when exposed, presses an enemy city when healthy but not when wounded, 3 real AI-vs-AI games with pursuits and advances). Smoke test: a warrior in the capital kills a weak scout by a click, the panel offers the pursuit and a second click advances into the freed tile.
+- Status: `npm run check` green (127 logic tests + smoke).
+
 ## 2026-11-23 – Hit and run (v0.42.0)
 - **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.38.0–v0.42.0) is ahead of `main` (v0.37.0) – please merge it.
 - Starting state green (121 logic tests + smoke).

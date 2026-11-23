@@ -20,13 +20,13 @@ import {
   levy, canLevy, levyProblem,
   recruitOrderProblem, setRecruitOrder, clearRecruitOrder, recruitOrderBlocker, recruitOrderText, fillRecruitOrders,
   forcedMarchProblem, canForceMarch, forceMarch, marchReach, attackTargets,
-  isSkirmisher, movesAfterAttack, canWithdraw,
+  isSkirmisher, movesAfterAttack, canWithdraw, isPursuer, pursuitTile, pursuesInto,
 } from '../src/game.js';
 import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
   dangerMap, dangerPenalty, moveTowardsGoal, DANGER, unexploredLand, SCOUT_WHEN_UNKNOWN, aiKnowledge,
   upgradeSomething, UPGRADE_HORSE_RADIUS, strikeLinedUp, pillageGoals, PILLAGE_DETOUR, repairGoals, REPAIR_DETOUR,
-  relieveWounded, RELIEF_MIN_HP, layRoad, blockadeGoals, BLOCKADE_DETOUR, pickFocus, setFocuses, shouldLevy, withdraw,
+  relieveWounded, RELIEF_MIN_HP, layRoad, blockadeGoals, BLOCKADE_DETOUR, pickFocus, setFocuses, shouldLevy, withdraw, pursue,
 } from '../src/ai.js';
 import { decideTap } from '../src/input.js';
 import { SHORTCUTS, keyAction, recruitKey } from '../src/keys.js';
@@ -39,7 +39,7 @@ import { distance, key, neighbors } from '../src/hex.js';
 import {
   RESOURCES, FORTIFY, TERRITORY, ECONOMY, UNIT_TYPES, TERRAIN, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FLANK, HIGH_GROUND, CHARGE, REPAIR,
   UPGRADES, UPGRADE, DISBAND, RUINS, EXPLORE, PILLAGE,
-  SIGHTINGS, ROADWORK, SENTRY, VOLLEY, ANIM_SPEEDS, HEROES, INSPIRE, MILESTONES, ADVISOR, GROWTH, TRADE, UNREST, FOCUS, LEVY, FORCED_MARCH, SKIRMISH,
+  SIGHTINGS, ROADWORK, SENTRY, VOLLEY, ANIM_SPEEDS, HEROES, INSPIRE, MILESTONES, ADVISOR, GROWTH, TRADE, UNREST, FOCUS, LEVY, FORCED_MARCH, SKIRMISH, PURSUIT,
 } from '../src/rules.js';
 
 test('map is deterministic and starting cities are connected', () => {
@@ -5134,7 +5134,7 @@ test('hit and run: a skirmisher that killed a garrison cannot ride into the city
   const old = JSON.parse(JSON.stringify(createGame({ seed: 3 })));
   old.version = 30;
   assert.equal(migrateState(old).version, STATE_VERSION);
-  assert.equal(STATE_VERSION, 31);
+  assert.ok(STATE_VERSION >= 31);
 });
 
 test('hit and run: the AI pulls its skirmishers back out of reach after striking', () => {
@@ -5192,4 +5192,166 @@ test('hit and run: the AI pulls its skirmishers back out of reach after striking
   }
   assert.ok(raids > 0, 'the AI riders strike and keep moves');
   assert.ok(pulledBack > 0, 'and some pull back');
+});
+
+test('pursuit: a warrior that destroys an adjacent defender may advance into the freed tile for free', () => {
+  const { s, mk, center } = raidSetup();
+  assert.ok(isPursuer({ type: 'warrior' }) && isPursuer({ type: 'spearman' }));
+  assert.ok(!isPursuer({ type: 'horseman' }) && !isPursuer({ type: 'archer' }) && !isPursuer({ type: 'catapult' }) && !isPursuer(null));
+  const around = neighbors(center.q, center.r);
+  const w = mk(900, 0, around[0], 'warrior');
+  const prey = mk(901, 1, center, 'archer', { hp: 1 });
+  const other = mk(902, 1, tileAt(s, center.q + 4, center.r), 'warrior');
+  s.units = [w, prey, other];
+  assert.ok(previewAttack(s, w, prey).kills);
+  assert.ok(pursuesInto(s, w, prey));
+  drainEvents(s);
+  const before = cloneState(s);
+  assert.ok(attack(s, w.id, prey.id));
+  const a = getUnit(s, w.id);
+  assert.equal(a.movesLeft, 0);
+  assert.deepEqual(a.pursuit, { q: center.q, r: center.r });
+  assert.deepEqual(pursuitTile(s, a), a.pursuit);
+  assert.ok(unitSummary(s, a).pursuit);
+  // the only reachable tile is the freed one, at no cost; pursuing is optional, so the unit doesn't nag as "ready"
+  const reach = reachable(s, a);
+  assert.deepEqual([...reach], [[key(center.q, center.r), 0]]);
+  assert.ok(!activeUnits(s, 0).some((u) => u.id === a.id));
+  assert.deepEqual(attackTargets(s, a), []);
+  // the attack event carries the pursuit and replays it
+  const evs = drainEvents(s);
+  assert.deepEqual(evs.find((e) => e.type === 'attack').pursuit, a.pursuit);
+  const replay = cloneState(before);
+  for (const e of evs) applyEvent(replay, e);
+  assert.deepEqual(getUnit(replay, w.id).pursuit, a.pursuit);
+  assert.equal(stateProblem(JSON.parse(JSON.stringify(s))), null);
+  // advancing: a free single step, then nothing more
+  assert.ok(moveUnit(s, a.id, center.q, center.r));
+  const moved = getUnit(s, w.id);
+  assert.deepEqual({ q: moved.q, r: moved.r }, { q: center.q, r: center.r });
+  assert.equal(moved.movesLeft, 0);
+  assert.equal(moved.pursuit, undefined);
+  assert.equal(reachable(s, moved).size, 0);
+  const mv = drainEvents(s).find((e) => e.type === 'move');
+  applyEvent(replay, mv);
+  const rm = getUnit(replay, w.id);
+  assert.deepEqual({ q: rm.q, r: rm.r, p: rm.pursuit }, { q: center.q, r: center.r, p: undefined });
+});
+
+test('pursuit: not for archers, riders or into a city; blocked tile; lost at the end of the turn; validation', () => {
+  // an archer killing at range 2 or a horseman killing next to it get no pursuit
+  const { s, mk, center } = raidSetup();
+  const around = neighbors(center.q, center.r);
+  const archer = mk(900, 0, tileAt(s, center.q - 2, center.r), 'archer');
+  const horse = mk(903, 0, around[1], 'horseman');
+  const p1 = mk(901, 1, center, 'scout', { hp: 1 });
+  const p2 = mk(902, 1, tileAt(s, center.q + 3, center.r), 'scout', { hp: 1 });
+  const h2 = mk(904, 0, tileAt(s, center.q + 2, center.r), 'horseman');
+  s.units = [archer, horse, p1, p2, h2];
+  assert.ok(!pursuesInto(s, archer, p1));
+  assert.ok(attack(s, archer.id, p1.id));
+  assert.equal(getUnit(s, archer.id).pursuit, undefined);
+  assert.ok(attack(s, h2.id, p2.id));
+  assert.equal(getUnit(s, h2.id).pursuit, undefined);
+  // a garrison killed in a city: no pursuit into the city
+  const { s: c, mk: mkc } = raidSetup();
+  const city = c.cities.find((x) => x.owner === 1);
+  for (const n of [city, ...neighbors(city.q, city.r)]) { const t = tileAt(c, n.q, n.r); if (t) t.terrain = 'plains'; }
+  c.units = c.units.filter((u) => distance(u, city) > 3);
+  const spear = mkc(900, 0, neighbors(city.q, city.r)[0], 'spearman');
+  const guard = mkc(901, 1, city, 'warrior', { hp: 1 });
+  c.units.push(spear, guard);
+  assert.ok(!pursuesInto(c, spear, guard));
+  assert.ok(attack(c, spear.id, guard.id));
+  assert.equal(getUnit(c, spear.id).pursuit, undefined);
+  assert.equal(reachable(c, getUnit(c, spear.id)).size, 0);
+  assert.equal(city.owner, 1);
+  // a pursuit tile taken by another unit is not reachable; the right expires at the end of the turn
+  const { s: t, mk: mkt, center: ct } = raidSetup();
+  const ar = neighbors(ct.q, ct.r);
+  const w = mkt(900, 0, ar[0], 'warrior');
+  const friend = mkt(902, 0, ar[3], 'warrior');
+  const prey = mkt(901, 1, ct, 'warrior', { hp: 1 });
+  t.units = [w, friend, prey];
+  assert.ok(attack(t, w.id, prey.id));
+  assert.ok(moveUnit(t, friend.id, ct.q, ct.r), 'a friend steps in first');
+  const tw = getUnit(t, w.id);
+  assert.equal(pursuitTile(t, tw), null);
+  assert.equal(reachable(t, tw).size, 0);
+  endTurn(t);
+  assert.equal(getUnit(t, w.id).pursuit, undefined);
+  // only on the owner's turn
+  const tw2 = getUnit(t, w.id);
+  tw2.pursuit = { q: ct.q, r: ct.r };
+  assert.equal(pursuitTile(t, tw2), null, "not on the other player's turn");
+  delete tw2.pursuit;
+  // validation and migration
+  const bad = JSON.parse(JSON.stringify(createGame({ seed: 3 })));
+  bad.units[0].pursuit = { q: bad.units[0].q + 3, r: bad.units[0].r };
+  assert.match(stateProblem(bad), /bad pursuit/);
+  bad.units[0].pursuit = true;
+  assert.match(stateProblem(bad), /bad pursuit/);
+  const old = JSON.parse(JSON.stringify(createGame({ seed: 3 })));
+  old.version = 31;
+  assert.equal(migrateState(old).version, STATE_VERSION);
+  assert.equal(STATE_VERSION, 32);
+});
+
+test('pursuit: the AI advances when it is safe or presses an enemy city, otherwise stays', () => {
+  const setup = () => {
+    const { s, mk, center } = raidSetup(1);
+    const around = neighbors(center.q, center.r);
+    const w = mk(900, 1, around[0], 'warrior');
+    const prey = mk(901, 0, center, 'warrior', { hp: 1 });
+    s.units = [w, prey];
+    assert.ok(attack(s, w.id, prey.id));
+    return { s, w: getUnit(s, w.id), center, mk };
+  };
+  // nothing threatens the freed tile – it advances
+  let { s, w, center } = setup();
+  assert.ok(pursue(s, w, aiKnowledge(s, 1), new Map()));
+  assert.deepEqual({ q: getUnit(s, 900).q, r: getUnit(s, 900).r }, { q: center.q, r: center.r });
+  // the freed tile is more exposed – it stays
+  ({ s, w, center } = setup());
+  const from = { q: w.q, r: w.r };
+  assert.equal(pursue(s, w, aiKnowledge(s, 1), new Map([[key(center.q, center.r), 3]])), false);
+  assert.deepEqual({ q: getUnit(s, 900).q, r: getUnit(s, 900).r }, from);
+  // … unless it brings a healthy unit next to a known enemy city
+  ({ s, w, center } = setup());
+  const near = neighbors(center.q, center.r).find((n) => distance(n, w) === 2);
+  s.cities.push({ id: 99, name: 'Testville', q: near.q, r: near.r, owner: 0, capital: false, buildings: [], size: 1, growth: 0 });
+  assert.ok(pursue(s, w, aiKnowledge(s, 1), new Map([[key(center.q, center.r), 3]])));
+  // a badly wounded unit doesn't press the city
+  ({ s, w, center } = setup());
+  s.cities.push({ id: 99, name: 'Testville', q: near.q, r: near.r, owner: 0, capital: false, buildings: [], size: 1, growth: 0 });
+  w.hp = 2;
+  assert.equal(pursue(s, w, aiKnowledge(s, 1), new Map([[key(center.q, center.r), 3]])), false);
+  // no pursuit right – nothing to do
+  const plain = raidSetup(1);
+  const lone = plain.mk(900, 1, plain.center, 'warrior', { movesLeft: 0, hasAttacked: true });
+  plain.s.units = [lone];
+  assert.equal(pursue(plain.s, lone), false);
+  // real AI-vs-AI games: pursuits happen, states stay valid, the right never survives the turn
+  let rights = 0;
+  let advances = 0;
+  for (const seed of [2, 7, 11]) {
+    const g = createGame({ seed, fog: false, happenings: false });
+    for (let i = 0; i < 120 && g.winner === null; i++) {
+      drainEvents(g);
+      runAITurn(g);
+      const evs = drainEvents(g);
+      const chased = new Map(evs.filter((e) => e.type === 'attack' && e.pursuit).map((e) => [e.attackerId, e.pursuit]));
+      rights += chased.size;
+      for (const e of evs) {
+        const p = e.type === 'move' && chased.get(e.unitId);
+        if (p && e.path.length === 2 && e.path[1].q === p.q && e.path[1].r === p.r) advances++;
+      }
+      for (const u of g.units) if (u.pursuit) assert.ok(isPursuer(u));
+      endTurn(g);
+      for (const u of g.units) assert.equal(u.pursuit, undefined);
+    }
+    assert.equal(stateProblem(JSON.parse(JSON.stringify(g))), null);
+  }
+  assert.ok(rights > 0, 'AI foot soldiers earn pursuits');
+  assert.ok(advances > 0, 'and some advance');
 });

@@ -4,7 +4,7 @@ import {
   unitAt, cityAt, getUnit, incomeOf, previewAttack, tileAt, pathTo, nextActiveUnit, cityInfo,
   cloneState, drainEvents, migrateState, logFor, turnReport, reportText, reportIsBad, isUndoableMove, canFortify, fortify, canForceMarch, forceMarch, marchReach, canSentry, sentry, SENTRY_TEXT, animSpeedOf, nextAnimSpeed, activeUnits, territoryOwner, cityResources, unitSummary, planRoute, setOrder, runOrders, cancelOrder, visibleTiles, exploredTiles, build, unitCost, hasBuilding,
   rankOf, rankMult, buildingCost, inspiredUnits, unitMove, factionOf, riverDefense, flankers, zocTiles, threatTiles, exportGame, importGame, saveFileName, parseSeed, restartOptions,
-  upgradeOptions, upgradeUnit, canDisband, disbandRefund, disbandUnit, chargeReady, movesAfterAttack,
+  upgradeOptions, upgradeUnit, canDisband, disbandRefund, disbandUnit, chargeReady, movesAfterAttack, pursuesInto,
   updateSightings, lastSeen, lastSeenAt, lastSeenText, armyOverview, ARMY_STATUS, ruinBelieved,
   canExplore, setExplore, canPillage, pillage, isPillaged, pillageTurnsLeft, canRepair, repair,
   rallyPath, setRally, clearRally, swapPartners, swapUnits, canBuildRoad, buildRoad, timelineFor, adviseTurn, suggestRecruit, growthText, tradeText, tradeRoute, unrestText, focusOf, focusText, setFocus, levy, levyProblem, setRecruitOrder, clearRecruitOrder, recruitOrderText,
@@ -128,6 +128,7 @@ function attackLabel(attacker, target, preview) {
   if (preview.inspired) label += ` · target inspired (defense +${Math.round(preview.inspired * 100)} %)`;
   const keep = preview.dies ? 0 : movesAfterAttack(state, attacker);
   if (keep > 0) label += ` · then ${fmt(keep)} move to pull back`;
+  if (preview.kills && pursuesInto(state, attacker, target)) label += ' · then it can advance';
   return label;
 }
 
@@ -246,6 +247,9 @@ function updateHud() {
     }
     if (u.raided && u.movesLeft > 0) {
       html += `<p class="march">🏇 Hit and run: ${fmt(u.movesLeft)} move left to pull back – no second attack, no foreign city</p>`;
+    }
+    if (u.owner === 0 && unitSummary(state, u).pursuit) {
+      html += '<p class="march">➜ Pursuit: click the freed tile to advance there for free – or stay where you are</p>';
     }
     if (u.marched) html += `<p class="march">🥾 Forced march: +${FORCED_MARCH.bonus} move, no attack and no healing this turn</p>`;
     if (u.owner === 0 && !busy() && canForceMarch(state, u)) {
@@ -760,7 +764,7 @@ function showTooltip(ev, hex) {
 
 function unitTipText(u) {
   const s = unitSummary(state, u);
-  const tags = [s.rank !== RANKS[0].name ? s.rank : '', s.fortified ? 'fortified' : '', s.forcedMarch ? 'forced march' : '', s.hitAndRun ? 'hit and run' : '', s.marching ? 'marching' : '', s.exploring ? 'exploring' : '', s.sentry && s.owner === 0 ? (s.sentry === 'heal' ? 'resting' : 'on watch') : ''].filter(Boolean);
+  const tags = [s.rank !== RANKS[0].name ? s.rank : '', s.fortified ? 'fortified' : '', s.forcedMarch ? 'forced march' : '', s.hitAndRun ? 'hit and run' : '', s.pursuit ? 'can pursue' : '', s.marching ? 'marching' : '', s.exploring ? 'exploring' : '', s.sentry && s.owner === 0 ? (s.sentry === 'heal' ? 'resting' : 'on watch') : ''].filter(Boolean);
   if (s.kills) tags.push(`${s.kills} kill${s.kills === 1 ? '' : 's'}`);
   return `${PLAYERS[s.owner].name}: ${s.hero ? `${s.hero} the ${s.name}` : s.name}${tags.length ? ` (${tags.join(', ')})` : ''} · HP ${s.hp}/${s.maxHp}\n`
     + `Attack ${fmt(s.attack)} · Defense ${fmt(s.defense)}${s.notes.length ? ` (${s.notes.join(', ')})` : ''} · Range ${s.range} · Move ${s.move}`;

@@ -5,9 +5,9 @@ import {
   unitAt, getUnit, tileAt, fortify, difficultyOf, visibleTiles, exploredTiles, build, hasBuilding, unitCost, buildingCost, factionOf,
   threatTiles, cityAt, upgradeOptions, upgradeUnit, ruinBelieved, canPillage, pillage, isPillaged, repair, pillageTurnsLeft, territoryOwner,
   swapPartners, swapUnits, canBuildRoad, buildRoad, roadLinks, citySize, tradeTargets, cutsAt, cityUnrest,
-  focusOf, setFocus, citySieged, canLevy, levy, marchReach, forceMarch, canWithdraw,
+  focusOf, setFocus, citySieged, canLevy, levy, marchReach, forceMarch, canWithdraw, pursuitTile,
 } from './game.js';
-import { UNIT_TYPES, TERRAIN, ROADWORK, GROWTH, FOCUS, LEVY, FORCED_MARCH } from './rules.js';
+import { UNIT_TYPES, TERRAIN, ROADWORK, GROWTH, FOCUS, LEVY, FORCED_MARCH, PURSUIT } from './rules.js';
 
 // What the AI knows about the map. On hard it sees everything, otherwise only what it has explored and sees.
 export function aiKnowledge(state, me) {
@@ -57,6 +57,8 @@ export function runAITurn(state) {
   if (state.winner !== null) return;
   // hit and run: skirmishers that struck this turn pull back out of reach
   for (const u of state.units.filter((x) => x.owner === me && x.raided)) withdraw(state, u, danger.get());
+  // pursuit: foot soldiers that destroyed a defender advance when it is safe or presses an enemy city
+  for (const u of state.units.filter((x) => x.owner === me && x.pursuit)) pursue(state, u, know, danger.get());
   recruit(state, me);
   buildSomething(state, me);
   layRoad(state, me, know);
@@ -328,6 +330,21 @@ export function withdraw(state, unit, danger = new Map()) {
   }
   if (!best || best.s > stay - WITHDRAW_MARGIN) return false;
   return moveUnit(state, unit.id, best.q, best.r);
+}
+
+// Pursuit: advance into the freed tile when it is no more exposed than staying, or when it brings a healthy
+// unit next to a known enemy city (which halts that city's growth). A garrison never leaves its own city.
+export function pursue(state, unit, know = aiKnowledge(state, unit.owner), danger = new Map()) {
+  const p = pursuitTile(state, unit);
+  if (!p) return false;
+  const here = cityAt(state, unit.q, unit.r);
+  if (here && here.owner === unit.owner) return false;
+  const safer = exposure(state, unit, p.q, p.r, danger) <= exposure(state, unit, unit.q, unit.r, danger);
+  const healthy = unit.hp >= UNIT_TYPES[unit.type].hp * PURSUIT.aiHpShare;
+  const presses = state.cities.some((c) => c.owner !== null && c.owner !== unit.owner && know.knows(c.q, c.r)
+    && distance(c, p) === 1 && distance(c, unit) > 1);
+  if (!safer && !(healthy && presses)) return false;
+  return moveUnit(state, unit.id, p.q, p.r);
 }
 
 // Buildings from surplus gold: a threatened city gets walls, otherwise market and barracks (capital first).

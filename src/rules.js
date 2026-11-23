@@ -9,13 +9,14 @@ export const TERRAIN = {
 };
 
 export const UNIT_TYPES = {
-  warrior:  { name: 'Warrior',   symbol: 'W', hp: 10, atk: 4, def: 3, move: 2, range: 1, cost: 10, sight: 2 },
+  warrior:  { name: 'Warrior',   symbol: 'W', hp: 10, atk: 4, def: 3, move: 2, range: 1, cost: 10, sight: 2,
+    desc: 'pursuit: can advance into the tile of a unit it destroyed' },
   archer:   { name: 'Archer',    symbol: 'A', hp: 8,  atk: 3, def: 2, move: 2, range: 2, cost: 12, sight: 2 },
   horseman: { name: 'Horseman',  symbol: 'H', hp: 10, atk: 5, def: 2, move: 4, range: 1, cost: 15, sight: 3,
     desc: 'hit and run: can pull back after attacking' },
   // bonusVs: extra strength multiplier against the given type (attack and defense)
   spearman: { name: 'Spearman',  symbol: 'S', hp: 10, atk: 3, def: 4, move: 2, range: 1, cost: 12, sight: 2,
-    bonusVs: { horseman: 1 }, desc: 'double strength against horsemen' },
+    bonusVs: { horseman: 1 }, desc: 'double strength against horsemen, pursuit' },
   // siege: bonus against units in cities, ignores walls
   catapult: { name: 'Catapult',  symbol: 'C', hp: 7,  atk: 6, def: 1, move: 1, range: 2, cost: 20, sight: 2,
     siege: 0.5, desc: '+50 % against city garrisons, ignores walls' },
@@ -123,6 +124,12 @@ export const CHARGE = { types: ['horseman'], minMoves: 2, atkBonus: 0.25, blocke
 // so it can pull back after striking. It can't attack again this turn and can't enter a foreign city after the
 // attack (no killing a garrison and riding in on the same turn). The AI withdraws its skirmishers out of reach.
 export const SKIRMISH = { types: ['horseman', 'scout'], moveCost: 1 };
+
+// Pursuit: a foot soldier of one of `types` that destroys an adjacent defender may advance into the freed
+// tile this turn for free, even with no move points left – but never into a city (a garrison killed still
+// has to be followed up next turn). Optional: the unit can just stay. The AI advances when the freed tile
+// is no more exposed than where it stands, or when it closes in on an enemy city and the unit is healthy.
+export const PURSUIT = { types: ['warrior', 'spearman'], aiHpShare: 0.6 };
 
 // Random events at the start of a player's turn (from turn fromTurn, with probability chance).
 // They hit a random city of the player; weight = relative frequency.

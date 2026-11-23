@@ -2,7 +2,7 @@
 import { key, neighbors, distance } from './hex.js';
 import { generateMap, hasRiverEdge } from './map.js';
 import {
-  TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY, VISION, DIFFICULTY, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, ROAD_COST, RIVER, FLANK, HIGH_GROUND, CHARGE, SKIRMISH, INSPIRE,
+  TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY, VISION, DIFFICULTY, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, ROAD_COST, RIVER, FLANK, HIGH_GROUND, CHARGE, SKIRMISH, PURSUIT, INSPIRE,
   FACTIONS, NO_FACTION, MAP_SIZES, HAPPENINGS, FORTIFY, TERRITORY, RESOURCES,
   UPGRADES, UPGRADE, DISBAND, SIGHTINGS, RUINS, EXPLORE, PILLAGE, REPAIR, ROADWORK, SENTRY, VOLLEY, FORCED_MARCH, ANIM_SPEEDS, HEROES, MILESTONES, ADVISOR, GROWTH, TRADE, UNREST, FOCUS, LEVY,
 } from './rules.js';
@@ -130,7 +130,7 @@ function countStat(state, name, player) {
   state.stats[name][player]++;
 }
 
-export const STATE_VERSION = 31;
+export const STATE_VERSION = 32;
 
 // Converts a saved state of an older version to the current one; returns null for an unknown format.
 export function migrateState(s) {
@@ -262,6 +262,10 @@ export function migrateState(s) {
   if (s.version === 30) {
     // hit and run arrived in version 31 – a missing `unit.raided` means the unit isn't pulling back
     s.version = 31;
+  }
+  if (s.version === 31) {
+    // pursuit arrived in version 32 – a missing `unit.pursuit` means the unit can't advance
+    s.version = 32;
   }
   return s.version === STATE_VERSION ? s : null;
 }
@@ -418,7 +422,7 @@ export function applyEvent(state, ev) {
   if (ev.type === 'move') {
     const u = getUnit(state, ev.unitId);
     const end = ev.path[ev.path.length - 1];
-    if (u) { u.q = end.q; u.r = end.r; delete u.fortified; delete u.sentry; }
+    if (u) { u.q = end.q; u.r = end.r; delete u.fortified; delete u.sentry; delete u.pursuit; }
   } else if (ev.type === 'attack') {
     const a = getUnit(state, ev.attackerId);
     const d = getUnit(state, ev.defenderId);
@@ -434,6 +438,7 @@ export function applyEvent(state, ev) {
       a.hasAttacked = true;
       a.movesLeft = ev.movesLeft ?? 0;
       if (a.movesLeft > 0) a.raided = true;
+      if (ev.pursuit) a.pursuit = { q: ev.pursuit.q, r: ev.pursuit.r };
       a.hp = ev.attackerHp ?? a.hp - ev.counter;
       a.xp = ev.attackerXp ?? a.xp;
       if (ev.attackerName) a.name = ev.attackerName;
@@ -558,6 +563,32 @@ export function movesAfterAttack(state, unit) {
 // Can the unit still pull back after its attack this turn?
 export function canWithdraw(state, unit) {
   return !!unit && !!unit.raided && unit.movesLeft > 0 && reachable(state, unit).size > 0;
+}
+
+// ---------- pursuit ----------
+
+export function isPursuer(unit) {
+  return !!unit && PURSUIT.types.includes(unit.type);
+}
+
+// The tile a pursuer may advance into after destroying the defender there, or null.
+function pursuitFrom(state, attacker, defender) {
+  if (!isPursuer(attacker) || distance(attacker, defender) !== 1) return null;
+  if (!isPassable(state, defender.q, defender.r) || cityAt(state, defender.q, defender.r)) return null;
+  return { q: defender.q, r: defender.r };
+}
+
+// Would destroying `defender` let `attacker` advance into its tile? (for the attack preview)
+export function pursuesInto(state, attacker, defender) {
+  return !!pursuitFrom(state, attacker, defender);
+}
+
+// The freed tile the unit can still advance into right now ({q, r}), or null.
+export function pursuitTile(state, unit) {
+  const p = unit && unit.pursuit;
+  if (!p || unit.owner !== state.current || state.winner !== null) return null;
+  if (distance(unit, p) !== 1 || !isFree(state, p.q, p.r) || cityAt(state, p.q, p.r)) return null;
+  return p;
 }
 
 export const CITY_DEF_BONUS = 0.25;
@@ -936,7 +967,12 @@ export function chargeBonus(state, attacker, defender) {
 function searchMoves(state, unit) {
   const result = new Map();
   const parent = new Map();
-  if (unit.movesLeft <= 0) return { result, parent };
+  if (unit.movesLeft <= 0) {
+    // pursuit: one free step into the tile of the destroyed defender
+    const p = pursuitTile(state, unit);
+    if (p) { result.set(key(p.q, p.r), 0); parent.set(key(p.q, p.r), key(unit.q, unit.r)); }
+    return { result, parent };
+  }
   const zoc = zocTiles(state, unit.owner);
   const start = key(unit.q, unit.r);
   const best = new Map([[start, 0]]);
@@ -1680,6 +1716,7 @@ export function unitSummary(state, unit) {
     fortified: !!unit.fortified,
     forcedMarch: !!unit.marched,
     hitAndRun: !!unit.raided,
+    pursuit: !!pursuitTile(state, unit),
     marching: !!unit.goto,
     exploring: !!unit.explore,
     sentry: unit.sentry || null,
@@ -1795,6 +1832,7 @@ export function moveUnit(state, unitId, q, r) {
   delete unit.sentry;
   delete unit.goto; // a manual move cancels a move order (followOrder puts it back)
   delete unit.explore; // … and an explore order (followExplore puts it back)
+  delete unit.pursuit; // a pursuit is a single step (or lost once the unit moves otherwise)
   const city = cityAt(state, q, r);
   if (city && city.owner !== unit.owner) {
     const prev = city.owner;
@@ -1894,7 +1932,9 @@ export function attack(state, attackerId, defenderId) {
   const ev = { type: 'attack', attackerId: a.id, defenderId: d.id, damage: res.damage, counter: 0, killed: d.hp <= 0, died: false, movesLeft: keep };
   emit(state, ev);
   if (d.hp <= 0) {
+    const chase = pursuitFrom(state, a, d); // computed while the defender still stands there
     removeUnit(state, d.id);
+    if (chase) { a.pursuit = chase; ev.pursuit = { ...chase }; }
     a.kills = (a.kills || 0) + 1;
     rememberHero(state, d, 'fell');
     addLog(state, `${PLAYERS[a.owner].name}: ${aName} destroyed ${dName}`, fight);
@@ -2227,6 +2267,7 @@ export function endTurn(state) {
     u.hp = Math.min(UNIT_TYPES[u.type].hp, u.hp + heal);
     delete u.marched; // a forced march lasts only for the turn it was made in
     delete u.raided; // … and so does a hit and run
+    delete u.pursuit; // … and a pursuit
   }
   state.current = (state.current + 1) % PLAYERS.length;
   if (state.current === 0) {
@@ -2988,6 +3029,7 @@ export function stateProblem(s) {
     if (!Number.isFinite(u.hp) || u.hp <= 0) return `unit ${u.id} has no HP`;
     if (u.marched !== undefined && u.marched !== true) return `unit ${u.id} has a bad forced march`;
     if (u.raided !== undefined && u.raided !== true) return `unit ${u.id} has a bad hit and run`;
+    if (u.pursuit !== undefined && !(u.pursuit && isInt(u.pursuit.q) && isInt(u.pursuit.r) && distance(u, u.pursuit) === 1)) return `unit ${u.id} has a bad pursuit`;
     if (u.sentry !== undefined && u.sentry !== 'watch' && u.sentry !== 'heal') return `unit ${u.id} has a bad watch order`;
     if (u.name !== undefined && !(typeof u.name === 'string' && u.name.length > 0 && u.name.length <= 40)) return `unit ${u.id} has a bad name`;
     if (u.kills !== undefined && !(isInt(u.kills) && u.kills >= 0)) return `unit ${u.id} has bad kills`;
