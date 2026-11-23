@@ -2729,6 +2729,49 @@ export function reportIsBad(rep) {
   return Object.keys(rep.lost).length > 0 || rep.citiesLost.length > 0 || rep.wounded > 0 || (rep.pillaged || 0) > 0;
 }
 
+// ---------- enemy turn replay ----------
+// Where an event happens, to decide whether a viewer saw it (the animation and the replay use the same
+// rule). st = the state right before the event (after it for a spawn or capture, as the animation shows
+// those first). Returns the tiles, [] for something never shown (a city's focus is the owner's secret)
+// or null for turn bookkeeping without a place (income, growth, random events – nothing to watch).
+export function eventTiles(st, ev) {
+  const at = (p) => (p ? [{ q: p.q, r: p.r }] : []);
+  const city = () => at(st.cities.find((c) => c.id === ev.cityId));
+  if (ev.type === 'move') return ev.path.map((p) => ({ q: p.q, r: p.r }));
+  if (ev.type === 'attack') return [...at(getUnit(st, ev.attackerId)), ...at(getUnit(st, ev.defenderId))];
+  if (ev.type === 'capture' || ev.type === 'levy') return city();
+  if (ev.type === 'spawn') return at(ev.unit);
+  if (ev.type === 'fortify' || ev.type === 'upgrade') return at(getUnit(st, ev.unitId));
+  if (ev.type === 'volley') return [...at(ev), ...city()];
+  if (ev.type === 'focus') return [];
+  if (['march', 'disband', 'ruin', 'pillage', 'repair', 'road'].includes(ev.type)) return at(ev);
+  return null;
+}
+
+// Whether the viewer sees an event with a place (see eventTiles) on the state st.
+export function eventSeen(st, ev, viewer) {
+  const tiles = eventTiles(st, ev);
+  if (!tiles || !tiles.length) return false;
+  const vis = visibleTiles(st, viewer);
+  return tiles.some((t) => vis.has(key(t.q, t.r)));
+}
+
+// The enemy's turn as the viewer can watch it again: { before, events, seen } with a private copy of
+// the state before the turn, or null when the viewer saw nothing happen (then there is nothing to replay).
+// The events are replayed on a copy exactly like the animation does, so visibility is judged at the
+// moment of each event – a unit walking out of sight counts, one that stayed in the fog doesn't.
+export function enemyTurnReplay(before, events, viewer) {
+  const st = cloneState(before);
+  let seen = 0;
+  for (const ev of events) {
+    const early = ev.type === 'spawn' || ev.type === 'capture';
+    if (early) applyEvent(st, ev);
+    if (eventSeen(st, ev, viewer)) seen++;
+    if (!early) applyEvent(st, ev);
+  }
+  return seen ? { before: cloneState(before), events: events.map((e) => ({ ...e })), seen } : null;
+}
+
 // ---------- advisor ----------
 // A short list of hints for the player's turn – one per kind, most urgent first (ADVISOR in rules.js).
 // Uses only what the player knows: visible enemy units, explored cities and ruins. Each hint is

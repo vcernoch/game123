@@ -7,7 +7,7 @@ import {
   upgradeOptions, upgradeUnit, canDisband, disbandRefund, disbandUnit, chargeReady, movesAfterAttack, pursuesInto,
   updateSightings, lastSeen, lastSeenAt, lastSeenText, armyOverview, ARMY_STATUS, ruinBelieved,
   canExplore, setExplore, canPillage, pillage, isPillaged, pillageTurnsLeft, canRepair, repair,
-  rallyPath, setRally, clearRally, swapPartners, swapUnits, canBuildRoad, buildRoad, timelineFor, adviseTurn, suggestRecruit, growthText, tradeText, tradeRoute, unrestText, focusOf, focusText, setFocus, levy, levyProblem, setRecruitOrder, clearRecruitOrder, recruitOrderText,
+  rallyPath, setRally, clearRally, swapPartners, swapUnits, canBuildRoad, buildRoad, timelineFor, adviseTurn, suggestRecruit, growthText, tradeText, tradeRoute, unrestText, focusOf, focusText, setFocus, levy, levyProblem, setRecruitOrder, clearRecruitOrder, recruitOrderText, enemyTurnReplay,
 } from './game.js';
 import { createAnimator } from './anim.js';
 import { decideTap } from './input.js';
@@ -44,6 +44,8 @@ let disbandArmed = null;   // id of the unit whose Disband button was pressed on
 let disbandArmTimer = null;
 let undoStack = [];        // states before undoable moves this turn (memory only)
 let lossMarks = [];        // tiles where the player lost units/cities in the last enemy turn (memory only)
+let enemyReplay = null;    // the last enemy turn to watch again: { before, events, seen } (memory only, until the turn ends)
+let replaying = false;
 const sound = createSound();
 sound.enabled = loadPrefs().sound !== false;
 const anim = createAnimator(
@@ -835,6 +837,7 @@ function doEndTurn(force = false) {
   swapPick = null;
   $('tooltip').hidden = true;
   pending = null;
+  enemyReplay = null;
   showNotice([]);
   undoStack = [];
   const beforeEnd = cloneState(state);
@@ -860,6 +863,7 @@ function doEndTurn(force = false) {
     events.push(...ended.filter((e) => e.type === 'volley')); // the AI's walls shoot at the end of its turn
     // the report must be made before the animation, which plays the events on top of `before`
     const report = state.winner === null ? turnReport(before, events, 0) : null;
+    enemyReplay = state.winner === null ? enemyTurnReplay(before, events, 0) : null; // copies `before`, which the animation changes
     updateSightings(state, 0, events);
     save();
     await anim.play(before, events);
@@ -906,9 +910,11 @@ function showNotice(happened, extra = [], report = null) {
     if (reportIsBad(report)) good = false;
   }
   parts.push(...extra);
+  const quiet = !parts.length; // nothing to report, but the enemy did something in sight
+  if (quiet && enemyReplay) parts.push(`The enemy was active in sight (${enemyReplay.seen} action${enemyReplay.seen === 1 ? '' : 's'}).`);
   if (!parts.length) { el.hidden = true; return; }
-  el.textContent = parts.join(' ');
-  el.className = good || (!ev && !extra.length && rep && !reportIsBad(report)) ? 'good' : 'bad';
+  el.innerHTML = `<span>${esc(parts.join(' '))}</span>${enemyReplay ? ' <button id="replay" class="secondary" title="Watch the enemy\'s last turn again – only what you saw (V)">↺ Replay enemy turn</button>' : ''}`;
+  el.className = quiet ? '' : good || (!ev && !extra.length && rep && !reportIsBad(report)) ? 'good' : 'bad';
   el.hidden = false;
   if (ev) sound.play(soundFor(ev, 0));
 }
@@ -956,6 +962,7 @@ function startNewGame(options) {
   state = createGame({ ...options, seed: options.seed ?? randomSeed() });
   updateSightings(state, 0);
   undoStack = [];
+  enemyReplay = null;
   showNotice([]);
   selectedId = null;
   selectedCityId = null;
@@ -1021,6 +1028,7 @@ function loadFromText(text) {
   selectedId = null;
   selectedCityId = null;
   lastWinner = state.winner;
+  enemyReplay = null;
   showNotice([]);
   save();
   resize();
@@ -1155,6 +1163,7 @@ window.addEventListener('keydown', (ev) => {
   else if (act.type === 'recruit') recruitSelected(act.unitType);
   else if (act.type === 'help') $('keys-dialog').showModal();
   else if (act.type === 'threats') toggleThreats();
+  else if (act.type === 'replay') replayEnemyTurn();
   else if (act.type === 'animSpeed') cycleAnimSpeed();
   else if (act.type === 'rally') startRallyPick();
   else if (act.type === 'focus') focusSelected();
@@ -1167,6 +1176,28 @@ window.addEventListener('keydown', (ev) => {
     selectedId = null; selectedCityId = null; pending = null; draw();
   }
 });
+
+// Watches the enemy's last turn again (V / the button in the banner): the same animation on a copy of
+// the state from before that turn, then the map snaps back to now. Plays even with animations off.
+async function replayEnemyTurn() {
+  if (replaying) { anim.skip(); return; }
+  if (busy() || !enemyReplay) return;
+  replaying = true;
+  selectedId = null; selectedCityId = null; pending = null; rallyPick = null; swapPick = null;
+  $('tooltip').hidden = true;
+  const speed = anim.speed;
+  if (!speed) anim.speed = 1;
+  const btn = $('replay');
+  if (btn) { btn.textContent = '⏹ Skip replay'; btn.setAttribute('aria-pressed', 'true'); }
+  updateHud();
+  await anim.play(cloneState(enemyReplay.before), enemyReplay.events);
+  anim.speed = speed;
+  replaying = false;
+  const done = $('replay');
+  if (done) { done.textContent = '↺ Replay enemy turn'; done.setAttribute('aria-pressed', 'false'); }
+  draw();
+}
+$('notice').addEventListener('click', (ev) => { if (ev.target.closest('#replay')) replayEnemyTurn(); });
 
 // Threat overlay on/off (T / ⚠ button); remembered in the preferences.
 function toggleThreats() {
@@ -1375,11 +1406,15 @@ window.__game = {
   setAnimSpeed: (x) => { anim.speed = x; },
   animSpeed: () => ({ id: animSpeed.id, speed: anim.speed }),
   refresh: () => { resize(); draw(); },
-  newGame: (seed, options = {}) => { state = createGame({ seed, ...options }); updateSightings(state, 0); undoStack = []; showNotice([]); resize(); draw(); },
+  newGame: (seed, options = {}) => { state = createGame({ seed, ...options }); updateSightings(state, 0); undoStack = []; enemyReplay = null; showNotice([]); resize(); draw(); },
   showNotice: (events) => { showNotice(events); draw(); },
   // shows the enemy-turn banner for events made on top of the state `before`
   showReport: (before, events) => { showNotice([], [], turnReport(before, events, 0)); draw(); },
   lossMarks: () => lossMarks,
+  // sets the enemy turn to replay from events made on top of `before` and shows its banner
+  setReplay: (before, events) => { enemyReplay = enemyTurnReplay(before, events, 0); showNotice([], [], turnReport(before, events, 0)); draw(); },
+  replayInfo: () => (enemyReplay ? { seen: enemyReplay.seen, events: enemyReplay.events.length, replaying } : null),
+  replay: replayEnemyTurn,
   ghosts: () => lastSeen(state, 0),
   // recomputes the last-seen markers after a test changed the state directly
   updateSightings: (events = []) => { updateSightings(state, 0, events); draw(); },

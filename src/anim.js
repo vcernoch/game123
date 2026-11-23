@@ -1,7 +1,7 @@
 // Replays game events as short animations.
 // Logic is unchanged: events are applied one by one to a copy of the state from before the action
 // (applyEvent from game.js), and in between only the drawn unit positions move.
-import { applyEvent, getUnit } from './game.js';
+import { applyEvent, eventTiles, getUnit } from './game.js';
 import { tileCenter } from './render.js';
 import { UNIT_TYPES } from './rules.js';
 
@@ -165,20 +165,11 @@ export function createAnimator(redraw, isVisible = () => true, onShow = () => {}
     redraw();
   };
 
-  // An event is worth animating only if it happens at least partly on a visible tile.
+  // An event is worth animating only if it happens at least partly on a visible tile (eventTiles in
+  // game.js); turn bookkeeping without a place (null) passes, there's nothing to draw for it anyway.
   function eventVisible(st, ev) {
-    const see = (p) => p && isVisible(st, p.q, p.r);
-    if (ev.type === 'move') return ev.path.some(see);
-    if (ev.type === 'attack') return see(getUnit(st, ev.attackerId)) || see(getUnit(st, ev.defenderId));
-    if (ev.type === 'capture') return see(st.cities.find((c) => c.id === ev.cityId));
-    if (ev.type === 'spawn') return see(ev.unit);
-    if (ev.type === 'fortify' || ev.type === 'upgrade') return see(getUnit(st, ev.unitId));
-    if (ev.type === 'march') return see(ev);
-    if (ev.type === 'volley') return see(ev) || see(st.cities.find((c) => c.id === ev.cityId));
-    if (ev.type === 'levy') return see(st.cities.find((c) => c.id === ev.cityId));
-    if (ev.type === 'focus') return false; // a city's focus is the owner's secret – nothing to watch
-    if (ev.type === 'disband' || ev.type === 'ruin' || ev.type === 'pillage' || ev.type === 'repair' || ev.type === 'road') return see(ev);
-    return true;
+    const tiles = eventTiles(st, ev);
+    return tiles === null || tiles.some((p) => isVisible(st, p.q, p.r));
   }
 
   // Short text over a looted ruin.

@@ -21,6 +21,7 @@ import {
   recruitOrderProblem, setRecruitOrder, clearRecruitOrder, recruitOrderBlocker, recruitOrderText, fillRecruitOrders,
   forcedMarchProblem, canForceMarch, forceMarch, marchReach, attackTargets,
   isSkirmisher, movesAfterAttack, canWithdraw, isPursuer, pursuitTile, pursuesInto,
+  eventTiles, eventSeen, enemyTurnReplay,
 } from '../src/game.js';
 import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
@@ -5354,4 +5355,80 @@ test('pursuit: the AI advances when it is safe or presses an enemy city, otherwi
   }
   assert.ok(rights > 0, 'AI foot soldiers earn pursuits');
   assert.ok(advances > 0, 'and some advance');
+});
+
+test('enemy turn replay: only what the viewer saw counts, the state before is copied, V replays', () => {
+  const st = createGame({ seed: 4242, fog: true });
+  const mine = st.units.find((u) => u.owner === 0);
+  const vis = visibleTiles(st, 0);
+  // an enemy horseman next to the player's unit attacks it in plain sight
+  const near = neighbors(mine.q, mine.r).find((n) => isPassable(st, n.q, n.r) && !unitAt(st, n.q, n.r) && !cityAt(st, n.q, n.r));
+  const foe = spawnUnit(st, 'horseman', 1, near.q, near.r);
+  foe.movesLeft = 4; foe.hasAttacked = false;
+  st.current = 1;
+  drainEvents(st);
+  const before = cloneState(st);
+  assert.ok(attack(st, foe.id, mine.id));
+  const events = drainEvents(st);
+  const rep = enemyTurnReplay(before, events, 0);
+  assert.ok(rep, 'an attack on an own unit is seen');
+  assert.equal(rep.seen, 1);
+  assert.deepEqual(rep.before, before);
+  assert.notEqual(rep.before, before, 'a private copy');
+  rep.before.units.length = 0;
+  assert.ok(before.units.length > 0, 'changing the copy leaves the original alone');
+  assert.deepEqual(eventTiles(before, events[0]).map((t) => key(t.q, t.r)).sort(), [key(foe.q, foe.r), key(mine.q, mine.r)].sort());
+  assert.equal(eventSeen(before, events[0], 0), true);
+
+  // a march deep in the fog is not seen, so there is nothing to replay
+  const hidden = Object.values(st.tiles).filter((t) => !vis.has(key(t.q, t.r)) && isPassable(st, t.q, t.r));
+  const a = hidden[0];
+  const b = hidden.find((t) => distance(t, a) === 1);
+  const fogMove = { type: 'move', unitId: foe.id, path: [{ q: a.q, r: a.r }, { q: b.q, r: b.r }] };
+  assert.equal(eventSeen(before, fogMove, 0), false);
+  assert.equal(enemyTurnReplay(before, [fogMove], 0), null);
+  // a walk that ends in sight counts; bookkeeping without a place never does; a focus is a secret
+  const inSight = { type: 'move', unitId: foe.id, path: [{ q: a.q, r: a.r }, { q: mine.q, r: mine.r }] };
+  assert.equal(enemyTurnReplay(before, [fogMove, inSight], 0).seen, 1);
+  assert.equal(eventTiles(before, { type: 'grow', cityId: st.cities[0].id, size: 2 }), null);
+  assert.equal(enemyTurnReplay(before, [{ type: 'grow', cityId: st.cities[0].id, size: 2 }], 0), null);
+  const own = st.cities.find((c) => c.owner === 0);
+  assert.deepEqual(eventTiles(before, { type: 'focus', cityId: own.id, focus: 'commerce' }), []);
+  assert.equal(eventSeen(before, { type: 'focus', cityId: own.id, focus: 'commerce' }, 0), false);
+  // a unit recruited out of sight isn't seen, one in sight is (checked after it appears, like the animation)
+  const spawnFog = { type: 'spawn', unit: { ...foe, id: 900, q: a.q, r: a.r } };
+  const spawnNear = { type: 'spawn', unit: { ...foe, id: 901, q: mine.q, r: mine.r } };
+  assert.equal(enemyTurnReplay(before, [spawnFog], 0), null);
+  assert.equal(enemyTurnReplay(before, [spawnFog, spawnNear], 0).seen, 1);
+  // without fog everything with a place is seen
+  const open = createGame({ seed: 4242, fog: false });
+  assert.equal(eventSeen(open, fogMove, 0), true);
+
+  assert.deepEqual(keyAction('v'), { type: 'replay' });
+  assert.deepEqual(keyAction('V'), { type: 'replay' });
+});
+
+test('enemy turn replay: replaying a real AI turn ends in the same state, seen never exceeds what happened', () => {
+  let replays = 0;
+  for (const seed of [3, 17, 58]) {
+    const st = createGame({ seed, fog: true });
+    for (let i = 0; i < 24 && st.winner === null; i++) {
+      if (st.current === 0) { endTurn(st); drainEvents(st); continue; }
+      const before = cloneState(st);
+      runAITurn(st);
+      const events = drainEvents(st);
+      const rep = enemyTurnReplay(before, events, 0);
+      if (rep) {
+        replays++;
+        assert.ok(rep.seen >= 1 && rep.seen <= events.length);
+        const shown = cloneState(rep.before);
+        for (const ev of rep.events) applyEvent(shown, ev);
+        assert.deepEqual(shown.units.map((u) => [u.id, u.q, u.r, u.hp]), st.units.map((u) => [u.id, u.q, u.r, u.hp]));
+        assert.deepEqual(shown.cities.map((c) => c.owner), st.cities.map((c) => c.owner));
+      }
+      endTurn(st);
+      drainEvents(st);
+    }
+  }
+  assert.ok(replays > 0, 'the AI was seen doing something in some turns');
 });

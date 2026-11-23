@@ -2,6 +2,15 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-23 – Replay enemy turn (v0.44.0)
+- **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.38.0–v0.44.0) is ahead of `main` (v0.37.0) – please merge it.
+- Starting state green (127 logic tests + smoke).
+- Phase 19 was done, so I opened phase 20 (own improvement). The AI turn plays once; a player who looked away (or plays with animations off) only had the report line and the ✕ marks to guess what happened. Now the enemy's turn can be watched again.
+- In `game.js`: `eventTiles` (where an event happens – tiles, `[]` for a secret focus, `null` for bookkeeping without a place), `eventSeen`, `enemyTurnReplay(before, events, viewer)` → `{ before, events, seen }` with a private copy of the state, or null when the viewer saw nothing. Visibility is judged on a replayed copy at the moment of each event, exactly as the animation does – `anim.js` now uses `eventTiles` instead of its own list, so the two can't disagree. No state structure change: the replay lives in memory until the player ends the turn (not saved, so a reload drops it).
+- UI: the start-of-turn bar gets a "↺ Replay enemy turn" button (if nothing else is reported it says "The enemy was active in sight (n actions)"), key V (also in the `?` overlay). The replay plays on a copy of the state from before the enemy turn – at normal speed when animations are off – and the map then returns to now; the button turns into "⏹ Skip replay" meanwhile, Esc or a click skips too. Help text updated.
+- Tests: +2 logic (an attack on an own unit is seen, the copy is private, a march in the fog isn't, a walk ending in sight is, bookkeeping and focus never count, spawns are judged after they appear, no fog = all seen, key V; real AI turns on 3 seeds: the replayed copy ends in the same units and cities, `seen` within the event count). Smoke test: the banner shows the button, a click starts the replay ("Skip" label, busy), the map returns with the state untouched, V starts it again and Esc skips (`artifacts/screenshot-replay.png`).
+- Status: `npm run check` green (129 logic tests + smoke).
+
 ## 2026-11-23 – Pursuit (v0.43.0)
 - **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.38.0–v0.43.0) is ahead of `main` (v0.37.0) – please merge it.
 - Starting state green (124 logic tests + smoke).

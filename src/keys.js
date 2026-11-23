@@ -35,6 +35,8 @@ export const SHORTCUTS = [
     match: (k) => k === 'd' || k === 'D' },
   { keys: 'A', text: 'change the animation speed (normal → fast → off)', action: () => ({ type: 'animSpeed' }),
     match: (k) => k === 'a' || k === 'A' },
+  { keys: 'V', text: 'replay the enemy\'s last turn – what you saw of it (until you end your turn)', action: () => ({ type: 'replay' }),
+    match: (k) => k === 'v' || k === 'V' },
   { keys: 'T', text: 'show or hide the enemy threat overlay', action: () => ({ type: 'threats' }), match: (k) => k === 't' || k === 'T' },
   { keys: 'Z', text: 'undo the last move (if it revealed nothing)', action: () => ({ type: 'undo' }), match: (k) => k === 'z' || k === 'Z' },
   { keys: `1–${RECRUIT_TYPES.length}`, text: `recruit in the selected city (${RECRUIT_TYPES.map((t, i) => `${i + 1} ${UNIT_TYPES[t].name}`).join(', ')}); without gold or room it orders the unit for the start of a later turn`,

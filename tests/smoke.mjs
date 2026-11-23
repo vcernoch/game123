@@ -887,6 +887,48 @@ try {
     throw new Error('turn report: banner caused horizontal page scroll');
   }
   await page.screenshot({ path: 'artifacts/screenshot-report.png' });
+  // replay of the enemy turn: the banner offers it, the button replays the attack on a copy, the map snaps back
+  const replay = await page.evaluate(async () => {
+    const g = await import('./src/game.js');
+    window.__game.newGame(777, { fog: false });
+    window.__game.setAnimSpeed(3);
+    const st = window.__game.getState();
+    const mine = st.units.find((u) => u.owner === 0);
+    const foe = st.units.find((u) => u.owner === 1);
+    const spot = Object.values(st.tiles).find((t) => g.isPassable(st, t.q, t.r) && !g.unitAt(st, t.q, t.r)
+      && Math.max(Math.abs(t.q - mine.q), Math.abs(t.r - mine.r), Math.abs(t.q + t.r - mine.q - mine.r)) === 1);
+    foe.type = 'horseman'; foe.q = spot.q; foe.r = spot.r; foe.movesLeft = 4; foe.hasAttacked = false;
+    mine.hp = 1;
+    st.current = 1;
+    const before = g.cloneState(st);
+    g.attack(st, foe.id, mine.id);
+    const events = g.drainEvents(st);
+    st.current = 0;
+    window.__game.setReplay(before, events);
+    const btn = document.getElementById('replay');
+    const info = window.__game.replayInfo();
+    btn.click();
+    await new Promise((r) => setTimeout(r, 120));
+    const during = { busy: window.__game.isBusy(), label: document.getElementById('replay').textContent, info: window.__game.replayInfo() };
+    return { has: !!btn, info, during, mineId: mine.id, units: st.units.length };
+  });
+  if (!replay.has || !replay.info || replay.info.seen < 1 || !replay.during.busy || !replay.during.info.replaying || !replay.during.label.includes('Skip')) {
+    throw new Error(`replay: ${JSON.stringify(replay)}`);
+  }
+  await page.screenshot({ path: 'artifacts/screenshot-replay.png' });
+  await page.waitForFunction(() => !window.__game.isBusy(), null, { timeout: 15000 });
+  const replayed = await page.evaluate((id) => ({ alive: !!window.__game.getState().units.find((u) => u.id === id),
+    units: window.__game.getState().units.length, label: document.getElementById('replay').textContent,
+    still: window.__game.replayInfo() }), replay.mineId);
+  if (replayed.alive || replayed.units !== replay.units || !replayed.label.includes('Replay') || !replayed.still || replayed.still.replaying) {
+    throw new Error(`replay: the state changed or the button didn't come back ${JSON.stringify(replayed)}`);
+  }
+  // V replays too; ending the turn drops the replay
+  await page.keyboard.press('v');
+  if (!(await page.evaluate(() => window.__game.isBusy()))) throw new Error('replay: V did not start the replay');
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => !window.__game.isBusy(), null, { timeout: 15000 });
+  await page.evaluate(() => window.__game.setAnimSpeed(1));
   // ending the turn clears the banner and the marks
   const cleared = await page.evaluate(() => { window.__game.endTurn(); return window.__game.lossMarks().length; });
   if (cleared) throw new Error('turn report: loss marks not cleared at end of turn');
