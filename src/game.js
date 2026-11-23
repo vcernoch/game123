@@ -2,7 +2,7 @@
 import { key, neighbors, distance } from './hex.js';
 import { generateMap, hasRiverEdge } from './map.js';
 import {
-  TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY, VISION, DIFFICULTY, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, ROAD_COST, RIVER, FLANK, HIGH_GROUND, CHARGE, INSPIRE,
+  TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY, VISION, DIFFICULTY, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, ROAD_COST, RIVER, FLANK, HIGH_GROUND, CHARGE, SKIRMISH, INSPIRE,
   FACTIONS, NO_FACTION, MAP_SIZES, HAPPENINGS, FORTIFY, TERRITORY, RESOURCES,
   UPGRADES, UPGRADE, DISBAND, SIGHTINGS, RUINS, EXPLORE, PILLAGE, REPAIR, ROADWORK, SENTRY, VOLLEY, FORCED_MARCH, ANIM_SPEEDS, HEROES, MILESTONES, ADVISOR, GROWTH, TRADE, UNREST, FOCUS, LEVY,
 } from './rules.js';
@@ -130,7 +130,7 @@ function countStat(state, name, player) {
   state.stats[name][player]++;
 }
 
-export const STATE_VERSION = 30;
+export const STATE_VERSION = 31;
 
 // Converts a saved state of an older version to the current one; returns null for an unknown format.
 export function migrateState(s) {
@@ -258,6 +258,10 @@ export function migrateState(s) {
   if (s.version === 29) {
     // forced march arrived in version 30 – a missing `unit.marched` means the unit didn't march
     s.version = 30;
+  }
+  if (s.version === 30) {
+    // hit and run arrived in version 31 – a missing `unit.raided` means the unit isn't pulling back
+    s.version = 31;
   }
   return s.version === STATE_VERSION ? s : null;
 }
@@ -427,6 +431,9 @@ export function applyEvent(state, ev) {
     if (a) {
       delete a.fortified;
       delete a.sentry;
+      a.hasAttacked = true;
+      a.movesLeft = ev.movesLeft ?? 0;
+      if (a.movesLeft > 0) a.raided = true;
       a.hp = ev.attackerHp ?? a.hp - ev.counter;
       a.xp = ev.attackerXp ?? a.xp;
       if (ev.attackerName) a.name = ev.attackerName;
@@ -530,9 +537,27 @@ export function isFree(state, q, r) {
 
 // Units that can't capture (scouts) never step into a foreign city – neither to stop nor to pass through.
 export function cityForbidden(state, unit, q, r) {
-  if (!UNIT_TYPES[unit.type].noCapture) return false;
+  // scouts never enter foreign cities; a skirmisher pulling back after its attack can't ride into one either
+  if (!UNIT_TYPES[unit.type].noCapture && !unit.raided) return false;
   const city = cityAt(state, q, r);
   return !!city && city.owner !== unit.owner;
+}
+
+// ---------- hit and run ----------
+
+export function isSkirmisher(unit) {
+  return !!unit && SKIRMISH.types.includes(unit.type);
+}
+
+// Move points a unit keeps after attacking (0 for all but surviving skirmishers).
+export function movesAfterAttack(state, unit) {
+  if (!isSkirmisher(unit)) return 0;
+  return Math.max(0, unit.movesLeft - SKIRMISH.moveCost);
+}
+
+// Can the unit still pull back after its attack this turn?
+export function canWithdraw(state, unit) {
+  return !!unit && !!unit.raided && unit.movesLeft > 0 && reachable(state, unit).size > 0;
 }
 
 export const CITY_DEF_BONUS = 0.25;
@@ -1654,6 +1679,7 @@ export function unitSummary(state, unit) {
     xp: unit.xp || 0,
     fortified: !!unit.fortified,
     forcedMarch: !!unit.marched,
+    hitAndRun: !!unit.raided,
     marching: !!unit.goto,
     exploring: !!unit.explore,
     sentry: unit.sentry || null,
@@ -1854,16 +1880,18 @@ export function attack(state, attackerId, defenderId) {
   delete a.sentry;
   delete a.goto;
   const res = previewAttack(state, a, d);
+  const keep = movesAfterAttack(state, a); // hit and run: skirmishers keep some moves to pull back
   d.hp -= res.damage;
   a.hasAttacked = true;
-  a.movesLeft = 0;
+  a.movesLeft = keep;
+  if (keep > 0) a.raided = true; // marks the hit-and-run until the end of the turn
   a.moved = true;
   const aName = unitTitle(a);
   const dName = unitTitle(d);
   // the fight is seen by both participants and anyone who sees at least one of the tiles (computed before units are lost)
   const fight = { by: a.owner, at: [{ q: a.q, r: a.r }, { q: d.q, r: d.r }], also: [d.owner] };
   fight.seen = seenBy(state, fight);
-  const ev = { type: 'attack', attackerId: a.id, defenderId: d.id, damage: res.damage, counter: 0, killed: d.hp <= 0, died: false };
+  const ev = { type: 'attack', attackerId: a.id, defenderId: d.id, damage: res.damage, counter: 0, killed: d.hp <= 0, died: false, movesLeft: keep };
   emit(state, ev);
   if (d.hp <= 0) {
     removeUnit(state, d.id);
@@ -2198,6 +2226,7 @@ export function endTurn(state) {
     const heal = city && city.owner === u.owner ? cityHeal(city) : u.moved ? 0 : restHeal;
     u.hp = Math.min(UNIT_TYPES[u.type].hp, u.hp + heal);
     delete u.marched; // a forced march lasts only for the turn it was made in
+    delete u.raided; // … and so does a hit and run
   }
   state.current = (state.current + 1) % PLAYERS.length;
   if (state.current === 0) {
@@ -2958,6 +2987,7 @@ export function stateProblem(s) {
     taken.add(k);
     if (!Number.isFinite(u.hp) || u.hp <= 0) return `unit ${u.id} has no HP`;
     if (u.marched !== undefined && u.marched !== true) return `unit ${u.id} has a bad forced march`;
+    if (u.raided !== undefined && u.raided !== true) return `unit ${u.id} has a bad hit and run`;
     if (u.sentry !== undefined && u.sentry !== 'watch' && u.sentry !== 'heal') return `unit ${u.id} has a bad watch order`;
     if (u.name !== undefined && !(typeof u.name === 'string' && u.name.length > 0 && u.name.length <= 40)) return `unit ${u.id} has a bad name`;
     if (u.kills !== undefined && !(isInt(u.kills) && u.kills >= 0)) return `unit ${u.id} has bad kills`;

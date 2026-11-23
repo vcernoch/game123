@@ -5,7 +5,7 @@ import {
   unitAt, getUnit, tileAt, fortify, difficultyOf, visibleTiles, exploredTiles, build, hasBuilding, unitCost, buildingCost, factionOf,
   threatTiles, cityAt, upgradeOptions, upgradeUnit, ruinBelieved, canPillage, pillage, isPillaged, repair, pillageTurnsLeft, territoryOwner,
   swapPartners, swapUnits, canBuildRoad, buildRoad, roadLinks, citySize, tradeTargets, cutsAt, cityUnrest,
-  focusOf, setFocus, citySieged, canLevy, levy, marchReach, forceMarch,
+  focusOf, setFocus, citySieged, canLevy, levy, marchReach, forceMarch, canWithdraw,
 } from './game.js';
 import { UNIT_TYPES, TERRAIN, ROADWORK, GROWTH, FOCUS, LEVY, FORCED_MARCH } from './rules.js';
 
@@ -55,6 +55,8 @@ export function runAITurn(state) {
   }
   strikeLinedUp(state, lined);
   if (state.winner !== null) return;
+  // hit and run: skirmishers that struck this turn pull back out of reach
+  for (const u of state.units.filter((x) => x.owner === me && x.raided)) withdraw(state, u, danger.get());
   recruit(state, me);
   buildSomething(state, me);
   layRoad(state, me, know);
@@ -301,6 +303,31 @@ function retreat(state, unit, know, danger = new Map()) {
   }
   const u = getUnit(state, unit.id);
   if (u) tryBestAttack(state, u, { safeOnly: true });
+}
+
+// How exposed a unit would be on a tile: the enemies that could attack it there next turn, weighed by its wounds,
+// minus the shelter of the terrain; an own city is safe.
+function exposure(state, unit, q, r, danger) {
+  const city = cityAt(state, q, r);
+  if (city && city.owner === unit.owner) return -1;
+  const hurt = 1 + (1 - unit.hp / UNIT_TYPES[unit.type].hp);
+  return (danger.get(key(q, r)) || 0) * hurt - TERRAIN[tileAt(state, q, r).terrain].defBonus;
+}
+
+// Hit and run: a skirmisher that attacked and kept some moves pulls back to the least exposed tile it can
+// reach (an own city first), but only when that is clearly safer than where it stands. Returns true if it moved.
+export const WITHDRAW_MARGIN = 0.25;
+export function withdraw(state, unit, danger = new Map()) {
+  if (!canWithdraw(state, unit)) return false;
+  const stay = exposure(state, unit, unit.q, unit.r, danger);
+  let best = null;
+  for (const [k, cost] of reachable(state, unit)) {
+    const [q, r] = k.split(',').map(Number);
+    const s = exposure(state, unit, q, r, danger) + cost * 0.01; // the shorter way on a tie
+    if (!best || s < best.s) best = { s, q, r };
+  }
+  if (!best || best.s > stay - WITHDRAW_MARGIN) return false;
+  return moveUnit(state, unit.id, best.q, best.r);
 }
 
 // Buildings from surplus gold: a threatened city gets walls, otherwise market and barracks (capital first).

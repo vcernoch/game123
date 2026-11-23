@@ -11,7 +11,8 @@ export const TERRAIN = {
 export const UNIT_TYPES = {
   warrior:  { name: 'Warrior',   symbol: 'W', hp: 10, atk: 4, def: 3, move: 2, range: 1, cost: 10, sight: 2 },
   archer:   { name: 'Archer',    symbol: 'A', hp: 8,  atk: 3, def: 2, move: 2, range: 2, cost: 12, sight: 2 },
-  horseman: { name: 'Horseman',  symbol: 'H', hp: 10, atk: 5, def: 2, move: 4, range: 1, cost: 15, sight: 3 },
+  horseman: { name: 'Horseman',  symbol: 'H', hp: 10, atk: 5, def: 2, move: 4, range: 1, cost: 15, sight: 3,
+    desc: 'hit and run: can pull back after attacking' },
   // bonusVs: extra strength multiplier against the given type (attack and defense)
   spearman: { name: 'Spearman',  symbol: 'S', hp: 10, atk: 3, def: 4, move: 2, range: 1, cost: 12, sight: 2,
     bonusVs: { horseman: 1 }, desc: 'double strength against horsemen' },
@@ -20,7 +21,7 @@ export const UNIT_TYPES = {
     siege: 0.5, desc: '+50 % against city garrisons, ignores walls' },
   // noCapture: cannot enter foreign (enemy or neutral) cities, so it can't capture them
   scout:    { name: 'Scout',     symbol: 'Sc', hp: 6, atk: 1, def: 1, move: 3, range: 1, cost: 8,  sight: 4,
-    noCapture: true, desc: 'sees 4 tiles far, cannot capture cities' },
+    noCapture: true, desc: 'sees 4 tiles far, cannot capture cities, hit and run' },
 };
 
 // Unit upgrades: a unit standing in an own city that hasn't acted this turn can be retrained
@@ -117,6 +118,11 @@ export const HIGH_GROUND = { atkBonus: 0.2, terrain: ['hills'] };
 // gets +atkBonus attack – unless the defender stands on one of `blockedBy` (no charging into woods).
 // Like flanking it adds to the attack only, not to the counterattack.
 export const CHARGE = { types: ['horseman'], minMoves: 2, atkBonus: 0.25, blockedBy: ['forest'] };
+
+// Hit and run: a unit of one of `types` that survives its attack keeps its remaining move points minus `moveCost`,
+// so it can pull back after striking. It can't attack again this turn and can't enter a foreign city after the
+// attack (no killing a garrison and riding in on the same turn). The AI withdraws its skirmishers out of reach.
+export const SKIRMISH = { types: ['horseman', 'scout'], moveCost: 1 };
 
 // Random events at the start of a player's turn (from turn fromTurn, with probability chance).
 // They hit a random city of the player; weight = relative frequency.

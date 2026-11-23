@@ -114,6 +114,7 @@ Check off `[x]` when done. Add new ideas to the end of the relevant phase or to 
 
 ## Phase 19 – manoeuvre (own improvements)
 - [x] Forced march (🥾 / M): a unit that hasn't moved or attacked gets +1 move this turn for 2 HP (needs more than 2 HP), but can't attack and doesn't heal at the end of the turn; a boot on the unit, the button tooltip counts the extra tiles; the AI marches a healthy unit into an unguarded threatened city it couldn't reach otherwise, the advisor's unguarded-city hint names the unit a march gets there
+- [x] Hit and run (🏇): horsemen and scouts that survive an attack keep their remaining moves minus 1 to pull back, but can't attack again or enter a foreign city that turn; the attack preview says how far, the AI pulls its riders back to safer tiles
 
 ## Ideas (unordered)
 - Diplomacy with multiple AIs

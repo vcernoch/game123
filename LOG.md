@@ -2,6 +2,19 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-23 – Hit and run (v0.42.0)
+- **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.38.0–v0.42.0) is ahead of `main` (v0.37.0) – please merge it.
+- Starting state green (121 logic tests + smoke).
+- Phase 19 (manoeuvre, own improvement), second task. Horsemen were just faster warriors: after a strike they stood next to the enemy, exposed to a pile-on. Now fast units can raid – strike and pull back – which gives cavalry and scouts a role of their own; spearmen, zones of control and terrain still check them.
+- `SKIRMISH` in `rules.js` (`types` horseman + scout, `moveCost` 1). In `game.js`: `isSkirmisher`, `movesAfterAttack`, `canWithdraw`. `attack` leaves a surviving skirmisher `movesLeft − 1` (a charge after 2 steps leaves 1 to pull back) and sets `unit.raided` when moves remain; `cityForbidden` keeps a raided unit out of foreign cities (no killing a garrison and riding in the same turn); `attackTargets` stays empty (`hasAttacked`). `endTurn` clears `raided`. The `attack` event carries `movesLeft`, so replay restores the kept moves and the flag. `unitSummary.hitAndRun`.
+- AI: `withdraw` in `ai.js`, run after the lined-up strikes for every raided unit – moves to the reachable tile with the lowest exposure (enemies that can reach it × wounds − terrain defense; an own city is safe), only when clearly safer (margin 0.25). In 3 AI-vs-AI test games: 51 raids, 39 pull-backs.
+- UI: "🏇 Hit and run: 3 move left to pull back – no second attack, no foreign city" in the unit panel, "hit and run" tag in the tooltip, the attack preview adds "· then 3 move to pull back", horseman/scout descriptions mention it. Help text updated.
+- Balance (20 AI-vs-AI games, Normal, 300 half-turns max): wins 8 : 11, 1 stalemate, ~74 half-turns (without hit and run 8 : 10, 2, ~75).
+- State structure: `state.version` 31 (optional `unit.raided`), trivial migration; `stateProblem` validates it.
+- Test adjusted (not weakened): the forced march test pinned `STATE_VERSION` to 30 – it now checks `>= 30`, the new test pins 31.
+- Tests: +3 logic (kept moves, no second attack, event + replay, pulling back out of a zone of control, warriors unchanged, flag cleared at turn end; a killed garrison's city is off limits until next turn, one move left = nothing kept, dying attacker, validation, migration; AI `withdraw` to a safer tile, no move without a raid or without danger, 3 real AI-vs-AI games with raids and pull-backs). Smoke test: a horseman in the capital clicks an adjacent enemy, keeps 3 moves and shows the panel line (`artifacts/screenshot-raid.png`).
+- Status: `npm run check` green (124 logic tests + smoke).
+
 ## 2026-11-22 – Forced march (v0.41.0)
 - **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.38.0–v0.41.0) is ahead of `main` (v0.37.0) – please merge it.
 - Starting state green (119 logic tests + smoke).

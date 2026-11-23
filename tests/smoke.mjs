@@ -503,6 +503,47 @@ try {
   await page.screenshot({ path: 'artifacts/screenshot-march.png' });
   await page.evaluate(() => window.scrollTo(0, 0));
 
+  // hit and run: the unit in the capital becomes a fresh horseman, strikes an enemy warrior next to it by a click
+  // and keeps 3 moves to pull back (panel line), but has no second attack
+  const raidFoe = await page.evaluate(async () => {
+    const rnd = await import('./src/render.js');
+    const g = await import('./src/game.js');
+    const st = window.__game.getState();
+    const c = st.cities.find((x) => x.owner === 0 && x.capital);
+    const u = st.units.find((x) => x.q === c.q && x.r === c.r);
+    Object.assign(u, { type: 'horseman', hp: 10, movesLeft: 4, hasAttacked: false, moved: false });
+    delete u.marched;
+    const spot = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]].map(([dq, dr]) => ({ q: c.q + dq, r: c.r + dr }))
+      .find((p) => g.isPassable(st, p.q, p.r) && !g.unitAt(st, p.q, p.r) && !g.cityAt(st, p.q, p.r));
+    const foe = g.spawnUnit(st, 'warrior', 1, spot.q, spot.r);
+    g.drainEvents(st);
+    window.__game.refresh();
+    const p = rnd.tileCenter(spot.q, spot.r);
+    const rect = document.getElementById('board').getBoundingClientRect();
+    const k = rect.width / rnd.canvasSize(st).w;
+    return { id: foe.id, unitId: u.id, x: rect.left + p.x * k, y: rect.top + p.y * k };
+  });
+  await page.keyboard.press('Escape');
+  await page.mouse.click(capPt.x, capPt.y);
+  await page.mouse.click(raidFoe.x, raidFoe.y);
+  await page.waitForFunction(() => !window.__game.isBusy(), null, { timeout: 10000 });
+  const hitRun = await page.evaluate((id) => {
+    const st = window.__game.getState();
+    const u = st.units.find((x) => x.id === id);
+    return u && { attacked: u.hasAttacked, moves: u.movesLeft, raided: u.raided, line: document.querySelector('#info .march')?.textContent || '' };
+  }, raidFoe.unitId);
+  if (!hitRun || !hitRun.attacked || hitRun.moves !== 3 || hitRun.raided !== true || !/Hit and run: 3 move left to pull back/.test(hitRun.line)) {
+    throw new Error(`hit and run: ${JSON.stringify(hitRun)}`);
+  }
+  await page.locator('#info .march').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: 'artifacts/screenshot-raid.png' });
+  await page.evaluate((id) => {
+    const st = window.__game.getState();
+    st.units = st.units.filter((u) => u.id !== id); // the test enemy leaves again
+    window.__game.refresh();
+    window.scrollTo(0, 0);
+  }, raidFoe.id);
+
   // ? opens the shortcut overlay, Esc closes it
   await page.keyboard.press('?');
   if (!(await page.evaluate(() => document.getElementById('keys-dialog').open))) throw new Error('? did not open the shortcuts');

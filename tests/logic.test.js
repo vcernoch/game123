@@ -20,12 +20,13 @@ import {
   levy, canLevy, levyProblem,
   recruitOrderProblem, setRecruitOrder, clearRecruitOrder, recruitOrderBlocker, recruitOrderText, fillRecruitOrders,
   forcedMarchProblem, canForceMarch, forceMarch, marchReach, attackTargets,
+  isSkirmisher, movesAfterAttack, canWithdraw,
 } from '../src/game.js';
 import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
   dangerMap, dangerPenalty, moveTowardsGoal, DANGER, unexploredLand, SCOUT_WHEN_UNKNOWN, aiKnowledge,
   upgradeSomething, UPGRADE_HORSE_RADIUS, strikeLinedUp, pillageGoals, PILLAGE_DETOUR, repairGoals, REPAIR_DETOUR,
-  relieveWounded, RELIEF_MIN_HP, layRoad, blockadeGoals, BLOCKADE_DETOUR, pickFocus, setFocuses, shouldLevy,
+  relieveWounded, RELIEF_MIN_HP, layRoad, blockadeGoals, BLOCKADE_DETOUR, pickFocus, setFocuses, shouldLevy, withdraw,
 } from '../src/ai.js';
 import { decideTap } from '../src/input.js';
 import { SHORTCUTS, keyAction, recruitKey } from '../src/keys.js';
@@ -38,7 +39,7 @@ import { distance, key, neighbors } from '../src/hex.js';
 import {
   RESOURCES, FORTIFY, TERRITORY, ECONOMY, UNIT_TYPES, TERRAIN, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FLANK, HIGH_GROUND, CHARGE, REPAIR,
   UPGRADES, UPGRADE, DISBAND, RUINS, EXPLORE, PILLAGE,
-  SIGHTINGS, ROADWORK, SENTRY, VOLLEY, ANIM_SPEEDS, HEROES, INSPIRE, MILESTONES, ADVISOR, GROWTH, TRADE, UNREST, FOCUS, LEVY, FORCED_MARCH,
+  SIGHTINGS, ROADWORK, SENTRY, VOLLEY, ANIM_SPEEDS, HEROES, INSPIRE, MILESTONES, ADVISOR, GROWTH, TRADE, UNREST, FOCUS, LEVY, FORCED_MARCH, SKIRMISH,
 } from '../src/rules.js';
 
 test('map is deterministic and starting cities are connected', () => {
@@ -4946,7 +4947,7 @@ test('forced march: +1 move for 2 HP, no attack and no healing this turn; who ca
   const old = JSON.parse(JSON.stringify(createGame({ seed: 3 })));
   old.version = 29;
   assert.equal(migrateState(old).version, STATE_VERSION);
-  assert.equal(STATE_VERSION, 30);
+  assert.ok(STATE_VERSION >= 30, 'forced march arrived in version 30');
   // key M
   assert.deepEqual(keyAction('m'), { type: 'march' });
   assert.deepEqual(keyAction('M'), { type: 'march' });
@@ -5022,4 +5023,173 @@ test('forced march: the AI marches a defender into a threatened city it could no
   h.hasAttacked = false;
   const tip2 = adviseTurn(a, 0).find((t) => t.kind === 'undefended');
   assert.ok(tip2 && !/forced march/.test(tip2.text) && tip2.marchUnitId === undefined);
+});
+
+// A flat, river-free board around (5, 4) with no cities nearby, for the hit-and-run tests.
+function raidSetup(current = 0, { seed = 1, difficulty = 'normal' } = {}) {
+  const s = createGame({ seed, fog: false, happenings: false, difficulty });
+  for (const t of Object.values(s.tiles)) { t.terrain = 'plains'; delete t.rivers; delete t.road; delete t.ruin; }
+  s.cities = s.cities.filter((c) => distance(c, { q: 5, r: 4 }) > 5);
+  s.factions = [null, null];
+  s.current = current;
+  const mk = (id, owner, p, type, extra = {}) => ({ id, type, owner, q: p.q, r: p.r, hp: UNIT_TYPES[type].hp,
+    movesLeft: UNIT_TYPES[type].move, hasAttacked: false, xp: 0, ...extra });
+  return { s, mk, center: tileAt(s, 5, 4) };
+}
+
+test('hit and run: horsemen and scouts keep moves after attacking, can pull back but not strike again or enter a foreign city', () => {
+  const { s, mk, center } = raidSetup();
+  assert.ok(isSkirmisher({ type: 'horseman' }) && isSkirmisher({ type: 'scout' }));
+  assert.ok(!isSkirmisher({ type: 'warrior' }) && !isSkirmisher({ type: 'archer' }) && !isSkirmisher(null));
+  const around = neighbors(center.q, center.r);
+  const foe = mk(901, 1, center, 'warrior');
+  const horse = mk(900, 0, around[0], 'horseman');
+  const warrior = mk(902, 0, around[3], 'warrior');
+  const foe2 = mk(903, 1, tileAt(s, center.q + 3, center.r), 'warrior');
+  s.units = [horse, warrior, foe, foe2];
+  // the preview helper: a fresh horseman keeps all its moves but one, a warrior none
+  assert.equal(movesAfterAttack(s, horse), UNIT_TYPES.horseman.move - SKIRMISH.moveCost);
+  assert.equal(movesAfterAttack(s, warrior), 0);
+  drainEvents(s);
+  const before = cloneState(s);
+  assert.ok(attack(s, horse.id, foe.id));
+  const h = getUnit(s, horse.id);
+  assert.ok(h, 'the horseman survived');
+  assert.equal(h.movesLeft, UNIT_TYPES.horseman.move - SKIRMISH.moveCost);
+  assert.equal(h.raided, true);
+  assert.ok(canWithdraw(s, h));
+  assert.deepEqual(attackTargets(s, h), [], 'no second attack');
+  assert.ok(unitSummary(s, h).hitAndRun);
+  assert.equal(unitStatus(s, h), 'ready', 'it can still move, so it counts as ready');
+  // the attack event carries the kept moves and replays them exactly
+  const evs = drainEvents(s);
+  const ev = evs.find((e) => e.type === 'attack');
+  assert.equal(ev.movesLeft, h.movesLeft);
+  const replay = cloneState(before);
+  for (const e of evs) applyEvent(replay, e);
+  const rh = getUnit(replay, horse.id);
+  assert.equal(rh.movesLeft, h.movesLeft);
+  assert.equal(rh.raided, true);
+  assert.equal(rh.hasAttacked, true);
+  // pulling back: away from the enemy, leaving its zone of control is free
+  const back = neighbors(h.q, h.r).find((n) => distance(n, center) === 2 && !unitAt(s, n.q, n.r));
+  assert.ok(moveUnit(s, h.id, back.q, back.r));
+  assert.equal(getUnit(s, h.id).movesLeft, UNIT_TYPES.horseman.move - SKIRMISH.moveCost - 1);
+  // a warrior's attack still ends its turn
+  assert.ok(getUnit(s, foe.id), 'the warrior survived the raid');
+  assert.ok(attack(s, warrior.id, foe.id));
+  const w = getUnit(s, warrior.id);
+  assert.equal(w.movesLeft, 0);
+  assert.ok(!w.raided);
+  assert.ok(!canWithdraw(s, w));
+  // the flag lasts only for the turn
+  endTurn(s);
+  assert.ok(!getUnit(s, horse.id).raided);
+  const json = JSON.parse(JSON.stringify(s));
+  assert.equal(stateProblem(json), null);
+});
+
+test('hit and run: a skirmisher that killed a garrison cannot ride into the city the same turn; edge cases', () => {
+  const { s, mk } = raidSetup();
+  const city = s.cities.find((c) => c.owner === 1);
+  const spot = neighbors(city.q, city.r).find((n) => isPassable(s, n.q, n.r));
+  for (const n of [city, ...neighbors(city.q, city.r)]) { const t = tileAt(s, n.q, n.r); if (t) t.terrain = 'plains'; }
+  s.units = s.units.filter((u) => distance(u, city) > 3);
+  const horse = mk(900, 0, spot, 'horseman');
+  const guard = mk(901, 1, city, 'warrior', { hp: 1 });
+  s.units.push(horse, guard);
+  assert.ok(attack(s, horse.id, guard.id));
+  assert.equal(getUnit(s, guard.id), undefined, 'the garrison fell');
+  const h = getUnit(s, horse.id);
+  assert.ok(h.movesLeft > 0);
+  assert.ok(!reachable(s, h).has(key(city.q, city.r)), 'the empty enemy city is out of bounds this turn');
+  assert.equal(moveUnit(s, h.id, city.q, city.r), false);
+  assert.equal(city.owner, 1);
+  // next turn it may ride in
+  endTurn(s); endTurn(s);
+  const h2 = getUnit(s, horse.id);
+  assert.ok(!h2.raided);
+  assert.ok(reachable(s, h2).has(key(city.q, city.r)));
+  assert.ok(moveUnit(s, h2.id, city.q, city.r));
+  assert.equal(city.owner, 0);
+  // a horseman with a single move left keeps none: no flag, nothing to withdraw with
+  const { s: t, mk: mk2, center } = raidSetup();
+  const a = mk2(900, 0, neighbors(center.q, center.r)[0], 'horseman', { movesLeft: SKIRMISH.moveCost });
+  const d = mk2(901, 1, center, 'warrior');
+  t.units = [a, d];
+  assert.ok(attack(t, a.id, d.id));
+  const ta = getUnit(t, a.id);
+  if (ta) { assert.equal(ta.movesLeft, 0); assert.ok(!ta.raided); assert.ok(!canWithdraw(t, ta)); }
+  // a horseman killed by the counterattack leaves nothing behind
+  const { s: k, mk: mk3, center: c3 } = raidSetup();
+  const weak = mk3(900, 0, neighbors(c3.q, c3.r)[0], 'horseman', { hp: 1 });
+  const wall = mk3(901, 1, c3, 'spearman');
+  k.units = [weak, wall];
+  assert.ok(attack(k, weak.id, wall.id));
+  assert.equal(getUnit(k, weak.id), undefined);
+  // validation and migration
+  const bad = JSON.parse(JSON.stringify(createGame({ seed: 3 })));
+  bad.units[0].raided = 1;
+  assert.match(stateProblem(bad), /bad hit and run/);
+  const old = JSON.parse(JSON.stringify(createGame({ seed: 3 })));
+  old.version = 30;
+  assert.equal(migrateState(old).version, STATE_VERSION);
+  assert.equal(STATE_VERSION, 31);
+});
+
+test('hit and run: the AI pulls its skirmishers back out of reach after striking', () => {
+  const { s, mk, center } = raidSetup(1, { difficulty: 'hard' });
+  const around = neighbors(center.q, center.r);
+  // the player's archer with friends close by; the AI horseman strikes it and should not stay next to them
+  const target = mk(901, 0, center, 'archer');
+  const friend1 = mk(902, 0, tileAt(s, center.q - 1, center.r - 1) || around[4], 'warrior');
+  const friend2 = mk(903, 0, tileAt(s, center.q - 2, center.r + 1) || around[5], 'spearman');
+  const horse = mk(900, 1, around[0], 'horseman');
+  s.units = [horse, target, friend1, friend2].filter((u, i, all) => all.findIndex((o) => o.q === u.q && o.r === u.r) === i);
+  assert.ok(attack(s, horse.id, target.id));
+  const h = getUnit(s, horse.id);
+  assert.ok(h && canWithdraw(s, h));
+  const danger = dangerMap(s, 1).get();
+  const stay = danger.get(key(h.q, h.r)) || 0;
+  assert.ok(stay > 0, 'the strike tile is within enemy reach');
+  const from = { q: h.q, r: h.r };
+  assert.ok(withdraw(s, h, danger));
+  const after = getUnit(s, horse.id);
+  assert.notDeepEqual({ q: after.q, r: after.r }, from);
+  assert.ok((danger.get(key(after.q, after.r)) || 0) < stay, 'it pulled back to a safer tile');
+  // nothing to do for a unit that didn't raid, or with no danger anywhere
+  const w = mk(904, 1, tileAt(s, center.q + 4, center.r), 'warrior');
+  s.units.push(w);
+  assert.equal(withdraw(s, w, danger), false);
+  const calm = raidSetup(1);
+  const lone = calm.mk(900, 1, neighbors(calm.center.q, calm.center.r)[0], 'horseman');
+  const prey = calm.mk(901, 0, calm.center, 'scout', { hp: 1 });
+  calm.s.units = [lone, prey];
+  assert.ok(attack(calm.s, lone.id, prey.id));
+  const l = getUnit(calm.s, lone.id);
+  assert.equal(withdraw(calm.s, l, dangerMap(calm.s, 1).get()), false, 'no enemy left – it stays');
+  // real AI-vs-AI games stay valid with hit and run in play
+  let raids = 0;
+  let pulledBack = 0;
+  for (const seed of [2, 7, 11]) {
+    const g = createGame({ seed, fog: false, happenings: false });
+    for (let i = 0; i < 120 && g.winner === null; i++) {
+      drainEvents(g);
+      runAITurn(g);
+      const evs = drainEvents(g);
+      const struck = new Set(evs.filter((e) => e.type === 'attack' && e.movesLeft > 0 && !e.died).map((e) => e.attackerId));
+      raids += struck.size;
+      // a move by a unit after its own hit-and-run attack
+      const seen = new Set();
+      for (const e of evs) {
+        if (e.type === 'attack' && struck.has(e.attackerId)) seen.add(e.attackerId);
+        if (e.type === 'move' && seen.has(e.unitId)) { pulledBack++; seen.delete(e.unitId); }
+      }
+      for (const u of g.units) if (u.raided) assert.ok(isSkirmisher(u));
+      endTurn(g);
+    }
+    assert.equal(stateProblem(JSON.parse(JSON.stringify(g))), null);
+  }
+  assert.ok(raids > 0, 'the AI riders strike and keep moves');
+  assert.ok(pulledBack > 0, 'and some pull back');
 });
