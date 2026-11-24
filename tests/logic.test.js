@@ -13,7 +13,7 @@ import {
   armyOverview, unitStatus, unitWhere, ARMY_STATUS, ruinBelieved, ruinKind, exploreRuin,
   exploreTarget, canExplore, setExplore, followExplore, canPillage, pillage, isPillaged, pillageTurnsLeft, cityAt, canRepair, repair,
   rallyPath, rallyTarget, canRally, setRally, clearRally, canSwap, swapPartners, swapUnits,
-  canBuildRoad, buildRoad, roadLinks, canSentry, sentry, checkSentries, SENTRY_TEXT, volleyTarget, cityVolleys, animSpeedOf, nextAnimSpeed,
+  canBuildRoad, buildRoad, roadLinks, canFell, fellForest, canSentry, sentry, checkSentries, SENTRY_TEXT, volleyTarget, cityVolleys, animSpeedOf, nextAnimSpeed,
   unitTitle, heroName, hallOfFame, inspiredBy, inspireBonus, inspiredUnits, timelineFor, leadChanges, whose, adviseTurn, suggestRecruit,
   citySize, growthLeft, citySieged, growthText, growCities, tradeRoute, tradeText, cutRoutes, routesCutBy,
   cityUnrest, unrestCalm, unrestTurnsLeft, unrestText, calmCities, focusOf, cityFocus, setFocus, focusText,
@@ -29,13 +29,14 @@ import {
   dangerMap, dangerPenalty, moveTowardsGoal, DANGER, unexploredLand, SCOUT_WHEN_UNKNOWN, aiKnowledge,
   upgradeSomething, UPGRADE_HORSE_RADIUS, strikeLinedUp, pillageGoals, PILLAGE_DETOUR, repairGoals, REPAIR_DETOUR,
   relieveWounded, RELIEF_MIN_HP, layRoad, blockadeGoals, BLOCKADE_DETOUR, pickFocus, setFocuses, shouldLevy, withdraw, pursue,
-  pickPerk, learnPerks,
+  pickPerk, learnPerks, fellTimber,
 } from '../src/ai.js';
 import { decideTap } from '../src/input.js';
 import { SHORTCUTS, keyAction, recruitKey } from '../src/keys.js';
 import { chartSvg, summaryRows, hallOfFameHtml, timelineHtml } from '../src/stats.js';
 import { soundFor, createLimiter, createSound, SOUND_NAMES } from '../src/sound.js';
 import { readFileSync } from 'node:fs';
+import { TIMBER as TIMBER_RULES } from '../src/rules.js';
 import { GAME_VERSION, GAME_DATE } from '../src/version.js';
 import { pathExists, generateMap, dirTo } from '../src/map.js';
 import { seasonAt, seasonKind, seasonInfo, seasonStarted, riverCrossCost, frostLoss, frostBound, harvestGold, outsideHome, winterNear, winterCamp, campSaves } from '../src/game.js';
@@ -5702,7 +5703,7 @@ test('seasons: the year turns every 3 rounds; thaw, frozen rivers, harvest; off 
   assert.equal(m.version, STATE_VERSION);
   assert.equal(m.seasons, false);
   assert.equal(stateProblem(m), null);
-  assert.equal(STATE_VERSION, 35);
+  assert.equal(STATE_VERSION, 36); // woodcutting (v36) came after seasons (v35)
 });
 
 test('seasons: winter frost outside own territory, season news in the chronicle, the AI heads home', () => {
@@ -5886,4 +5887,122 @@ test('winter camp: a fortified unit outside home doesn\'t freeze (but doesn\'t h
   endTurn(h);
   assert.equal(stay.hp, 5);
   assert.equal(walked.hp, 4);
+});
+
+// A forest tile of the player's own territory next to the capital (made forest if the map has none there),
+// with a fresh warrior of the player standing on it.
+function fellSetup(seed = 3) {
+  const s = createGame({ seed, fog: false });
+  const cap = s.cities.find((c) => c.capital && c.owner === 0);
+  s.units = s.units.filter((u) => u.owner !== 0);
+  const tile = Object.values(s.tiles).find((t) => isPassable(s, t.q, t.r) && !t.resource && !t.ruin && !cityAt(s, t.q, t.r)
+    && territoryOwner(s, t.q, t.r) === 0 && distance(t, cap) === 1);
+  tile.terrain = 'forest';
+  const u = spawnUnit(s, 'warrior', 0, tile.q, tile.r);
+  u.movesLeft = 2; u.hasAttacked = false;
+  s.gold[0] = 3;
+  drainEvents(s);
+  return { s, cap, tile, u };
+}
+
+test('woodcutting: felling an own forest gives timber gold, turns the tile into plains for good, ends the turn and replays', () => {
+  const { s, tile, u } = fellSetup();
+  assert.ok(canFell(s, u));
+  const defBefore = defenseValue(s, u);
+  const before = cloneState(s);
+  const ev = fellForest(s, u.id);
+  assert.equal(ev.type, 'fell');
+  assert.equal(s.gold[0], 3 + TIMBER_RULES.gold);
+  assert.equal(tile.terrain, 'plains');
+  assert.ok(tile.felled);
+  assert.equal(u.movesLeft, 0);
+  assert.ok(u.hasAttacked, 'the unit\'s turn is over');
+  assert.ok(!canFell(s, u), 'not twice');
+  assert.ok(defenseValue(s, u) < defBefore, 'the forest cover is gone');
+  assert.match(s.log.at(-1).msg, /^You: Warrior felled a forest \(\+6 gold\)$/);
+  // a horseman can now charge a unit standing there
+  const evs = drainEvents(s);
+  for (const e of evs) applyEvent(before, e);
+  assert.deepEqual(snapshot(before), snapshot(s));
+  assert.equal(before.gold[0], s.gold[0]);
+  assert.equal(tileAt(before, tile.q, tile.r).terrain, 'plains');
+  assert.ok(tileAt(before, tile.q, tile.r).felled);
+  assert.deepEqual(eventTiles(before, ev), [{ q: tile.q, r: tile.r }]);
+  assert.equal(isUndoableMove(cloneState(s), s, evs, 0), false);
+  assert.equal(soundFor(ev, 0), 'build');
+  // saves keep the felled tile, an old save migrates
+  const back = importGame(exportGame(s, GAME_VERSION));
+  assert.equal(back.state.tiles[key(tile.q, tile.r)].terrain, 'plains');
+  assert.ok(back.state.tiles[key(tile.q, tile.r)].felled);
+  const old = cloneState(s);
+  old.version = 35;
+  assert.equal(migrateState(old).version, STATE_VERSION);
+  assert.equal(keyAction('h').type, 'fell');
+  assert.equal(keyAction('H').type, 'fell');
+});
+
+test('woodcutting: who can\'t, and the AI fells timber only when short of gold and safe', () => {
+  const t = fellSetup();
+  const cases = [
+    ['attacked', (s, u) => { u.hasAttacked = true; }],
+    ['no moves', (s, u) => { u.movesLeft = 0; }],
+    ['not own turn', (s) => { s.current = 1; }],
+    ['not a forest', (s, u) => { tileAt(s, u.q, u.r).terrain = 'plains'; }],
+    ['a resource', (s, u) => { tileAt(s, u.q, u.r).resource = 'gold'; }],
+    ['a ruin', (s, u) => { tileAt(s, u.q, u.r).ruin = true; }],
+    ['in a city', (s, u) => { const c = s.cities.find((x) => x.owner === 0); u.q = c.q; u.r = c.r; tileAt(s, c.q, c.r).terrain = 'forest'; }],
+    ['outside own territory', (s, u) => {
+      const far = Object.values(s.tiles).find((x) => isPassable(s, x.q, x.r) && !cityAt(s, x.q, x.r) && territoryOwner(s, x.q, x.r) !== 0);
+      far.terrain = 'forest';
+      u.q = far.q; u.r = far.r;
+    }],
+    ['game over', (s) => { s.winner = 1; }],
+  ];
+  for (const [why, spoil] of cases) {
+    const s = cloneState(t.s);
+    const u = getUnit(s, t.u.id);
+    spoil(s, u);
+    assert.ok(!canFell(s, u), why);
+    assert.equal(fellForest(s, u.id), null, why);
+  }
+
+  // AI: an idle unit on its own forest fells it only when short of gold, not fortified and with no enemy close by
+  const s = createGame({ seed: 3, fog: false });
+  s.current = 1;
+  const cap = s.cities.find((c) => c.capital && c.owner === 1);
+  s.units = [];
+  const tile = Object.values(s.tiles).find((x) => isPassable(s, x.q, x.r) && !x.resource && !x.ruin && !cityAt(s, x.q, x.r)
+    && territoryOwner(s, x.q, x.r) === 1 && distance(x, cap) === 1);
+  tile.terrain = 'forest';
+  const w = spawnUnit(s, 'warrior', 1, tile.q, tile.r);
+  w.movesLeft = 2; w.hasAttacked = false;
+  s.gold[1] = TIMBER_RULES.aiBelow;
+  assert.equal(fellTimber(s, 1), null, 'has enough gold');
+  s.gold[1] = TIMBER_RULES.aiBelow - 1;
+  w.fortified = true;
+  assert.equal(fellTimber(s, 1), null, 'keeps a fortified position');
+  delete w.fortified;
+  const foe = neighbors(tile.q, tile.r).find((n) => isPassable(s, n.q, n.r) && !cityAt(s, n.q, n.r));
+  const enemy = spawnUnit(s, 'warrior', 0, foe.q, foe.r);
+  assert.equal(fellTimber(s, 1), null, 'not with an enemy next to it');
+  s.units = s.units.filter((x) => x.id !== enemy.id);
+  assert.equal(fellTimber(s, 1).type, 'fell');
+  assert.equal(tile.terrain, 'plains');
+  assert.equal(s.gold[1], TIMBER_RULES.aiBelow - 1 + TIMBER_RULES.gold);
+
+  // AI-vs-AI games fell some forests, always in their own territory and only when short of gold
+  let felled = 0;
+  for (const seed of [7, 10, 12]) {
+    const g = createGame({ seed });
+    for (let i = 0; i < 80 && g.winner === null; i++) {
+      runAITurn(g);
+      for (const e of drainEvents(g).filter((x) => x.type === 'fell')) {
+        felled++;
+        assert.equal(territoryOwner(g, e.q, e.r), e.player);
+      }
+      if (g.winner === null) endTurn(g);
+      drainEvents(g);
+    }
+  }
+  assert.ok(felled >= 1, `forests felled: ${felled}`);
 });

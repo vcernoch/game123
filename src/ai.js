@@ -1,13 +1,13 @@
 // Simple AI: attacks when it pays off, otherwise moves toward the nearest goal and recruits.
-import { distance, key } from './hex.js';
+import { distance, key, neighbors } from './hex.js';
 import {
   reachable, attackTargets, previewAttack, moveUnit, attack, buyUnit,
   unitAt, getUnit, tileAt, fortify, difficultyOf, visibleTiles, exploredTiles, build, hasBuilding, unitCost, buildingCost, factionOf,
   threatTiles, cityAt, upgradeOptions, upgradeUnit, ruinBelieved, canPillage, pillage, isPillaged, repair, pillageTurnsLeft, territoryOwner,
-  swapPartners, swapUnits, canBuildRoad, buildRoad, roadLinks, citySize, tradeTargets, cutsAt, cityUnrest,
+  swapPartners, swapUnits, canBuildRoad, buildRoad, roadLinks, canFell, fellForest, citySize, tradeTargets, cutsAt, cityUnrest,
   focusOf, setFocus, citySieged, canLevy, levy, marchReach, forceMarch, canWithdraw, pursuitTile, perkOptions, learnPerk, frostBound, campSaves,
 } from './game.js';
-import { UNIT_TYPES, TERRAIN, ROADWORK, GROWTH, FOCUS, LEVY, FORCED_MARCH, PURSUIT, PERKS, SEASONS } from './rules.js';
+import { UNIT_TYPES, TERRAIN, ROADWORK, TIMBER, GROWTH, FOCUS, LEVY, FORCED_MARCH, PURSUIT, PERKS, SEASONS } from './rules.js';
 
 // What the AI knows about the map. On hard it sees everything, otherwise only what it has explored and sees.
 export function aiKnowledge(state, me) {
@@ -24,6 +24,7 @@ export function runAITurn(state) {
   const know = aiKnowledge(state, me);
   upgradeSomething(state, me, know);
   const garrisons = assignGarrisons(state, me, know);
+  fellTimber(state, me, know, garrisons); // a unit that walked onto own forest last turn cuts it before it moves on
   const danger = dangerMap(state, me, know);
   // archers and catapults go first so melee units can finish weakened targets (focus fire)
   const ids = state.units
@@ -61,6 +62,7 @@ export function runAITurn(state) {
   // pursuit: foot soldiers that destroyed a defender advance when it is safe or presses an enemy city
   for (const u of state.units.filter((x) => x.owner === me && x.pursuit)) pursue(state, u, know, danger.get());
   makeCamp(state, me);
+  fellTimber(state, me, know); // before recruiting, so the timber gold can buy a unit
   recruit(state, me);
   buildSomething(state, me);
   layRoad(state, me, know);
@@ -122,6 +124,17 @@ export function layRoad(state, me, know = aiKnowledge(state, me)) {
     if (score > bestScore || (score === bestScore && u.id < best.id)) { best = u; bestScore = score; }
   }
   return best ? buildRoad(state, best.id) : null;
+}
+
+// Woodcutting: short of gold, one unit fells the own forest it stands on (called before the units move and
+// again before recruiting), never with a visible enemy within TIMBER.aiSafe tiles (the forest cover may still
+// be needed there); fortified units and city garrisons keep their posts. Returns the 'fell' event or null.
+export function fellTimber(state, me, know = aiKnowledge(state, me), garrisons = new Map()) {
+  if (state.gold[me] >= TIMBER.aiBelow) return null;
+  const u = state.units
+    .filter((x) => x.owner === me && !x.fortified && !garrisons.has(x.id) && canFell(state, x) && !enemiesNear(state, x, know, TIMBER.aiSafe).length)
+    .sort((a, b) => a.id - b.id)[0];
+  return u ? fellForest(state, u.id) : null;
 }
 
 // Carries out lined-up melee strikes in the order they were planned (later plans assume the earlier hits);
@@ -453,14 +466,14 @@ function tryBestAttack(state, unit, { safeOnly = false } = {}) {
 export function goalsFor(state, unit, know = aiKnowledge(state, unit.owner)) {
   const home = frostGoals(state, unit);
   if (home.length) return home;
-  const goals = [...ruinGoals(state, unit, know), ...repairGoals(state, unit)];
+  const goals = [...ruinGoals(state, unit, know), ...repairGoals(state, unit), ...timberGoals(state, unit, know)];
   if (UNIT_TYPES[unit.type].noCapture) return [...goals, ...exploreGoals(state, know)];
   goals.push(...pillageGoals(state, unit, know), ...blockadeGoals(state, unit, know));
   for (const c of state.cities) {
     if (c.owner !== unit.owner && know.knows(c.q, c.r)) goals.push({ q: c.q, r: c.r, w: (c.owner === null ? 1 : 1.3) + (citySize(c) - 1) * GROWTH.aiGoalBonus });
   }
   for (const u of state.units) if (u.owner !== unit.owner && know.sees(u.q, u.r)) goals.push({ q: u.q, r: u.r, w: 1.1, enemy: true });
-  return goals.some((g) => !g.ruin && !g.pillage && !g.repair && !g.blockade) ? goals : [...goals, ...exploreGoals(state, know)];
+  return goals.some((g) => !g.ruin && !g.pillage && !g.repair && !g.blockade && !g.timber) ? goals : [...goals, ...exploreGoals(state, know)];
 }
 
 // Winter camp: units that stayed put outside their land in winter fortify instead of losing HP to the frost.
@@ -518,6 +531,18 @@ export function repairGoals(state, unit) {
     .filter((t) => t.resource && pillageTurnsLeft(state, t) >= 2 && distance(t, unit) <= REPAIR_DETOUR
       && territoryOwner(state, t.q, t.r) === unit.owner)
     .map((t) => ({ q: t.q, r: t.r, w: 0.9, repair: true }));
+}
+
+// Short of gold, a unit that is in its own land with no enemy near steps onto an own forest right next to it
+// (it fells the timber at the start of its next turn, see fellTimber).
+export function timberGoals(state, unit, know) {
+  if (state.gold[unit.owner] >= TIMBER.aiBelow || territoryOwner(state, unit.q, unit.r) !== unit.owner) return [];
+  if (enemiesNear(state, unit, know, TIMBER.aiSafe).length) return [];
+  return neighbors(unit.q, unit.r)
+    .map((n) => tileAt(state, n.q, n.r))
+    .filter((t) => t && t.terrain === 'forest' && !t.resource && !t.ruin && !cityAt(state, t.q, t.r)
+      && territoryOwner(state, t.q, t.r) === unit.owner && !unitAt(state, t.q, t.r))
+    .map((t) => ({ q: t.q, r: t.r, w: 0.85, timber: true }));
 }
 
 function exploreGoals(state, know) {

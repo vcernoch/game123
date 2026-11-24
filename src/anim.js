@@ -120,6 +120,9 @@ export function createAnimator(redraw, isVisible = () => true, onShow = () => {}
     } else if (ev.type === 'road') {
       addFloater(tileCenter(ev.q, ev.r), '🛤 road built', '#e8d3a6');
       await tween(PAUSE_MS * 2, () => {});
+    } else if (ev.type === 'fell') {
+      addFloater(tileCenter(ev.q, ev.r), `🪓 timber +${ev.gold}`, '#e8d3a6');
+      await tween(PAUSE_MS * 2, () => {});
     } else if (ev.type === 'volley') {
       const c = st.cities.find((x) => x.id === ev.cityId);
       const to = tileCenter(ev.q, ev.r);

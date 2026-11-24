@@ -810,11 +810,12 @@ try {
   await page.screenshot({ path: 'artifacts/screenshot-mobile.png', fullPage: true });
 
   // "Same map again" on the game-over banner restarts the same map with the same settings
-  // (looted ruins, pillaged resources and built roads are the only changes a game makes to its map – undo them before comparing)
+  // (looted ruins, pillaged resources, built roads and felled forests are the only changes a game makes to its map – undo them before comparing)
   const endTiles = await page.evaluate(() => JSON.stringify(Object.fromEntries(Object.entries(window.__game.getState().tiles)
     .map(([k, t]) => {
-      const { ruinGone, pillagedUntil, roadBuilt, ...rest } = t;
+      const { ruinGone, pillagedUntil, roadBuilt, felled, ...rest } = t;
       if (roadBuilt) delete rest.road;
+      if (felled) rest.terrain = 'forest';
       return [k, ruinGone ? { ...rest, ruin: true } : rest];
     }))));
   await page.click('#banner-again');
@@ -1425,6 +1426,45 @@ try {
   }, road);
   if (!built.road || !built.built || built.gold !== 16 || !built.log.includes('built a road')) throw new Error(`road: ${JSON.stringify(built)}`);
   await page.screenshot({ path: 'artifacts/screenshot-road.png' });
+
+  // woodcutting: a warrior on a forest of own territory fells it with the panel button – gold, plains, stumps
+  const wood = await page.evaluate(async () => {
+    const g = await import('./src/game.js');
+    const rnd = await import('./src/render.js');
+    window.__game.newGame(31, { fog: false, happenings: false });
+    const st = window.__game.getState();
+    st.units = st.units.filter((u) => u.owner !== 0);
+    st.gold[0] = 2;
+    const cap = st.cities.find((c) => c.capital && c.owner === 0);
+    const hexDist = (a, b) => Math.max(Math.abs(a.q - b.q), Math.abs(a.r - b.r), Math.abs(a.q + a.r - b.q - b.r));
+    const t = Object.values(st.tiles).find((x) => hexDist(x, cap) === 1 && g.isFree(st, x.q, x.r) && !x.resource && !x.ruin
+      && g.territoryOwner(st, x.q, x.r) === 0);
+    if (!t) return { error: 'no tile' };
+    t.terrain = 'forest';
+    const u = g.spawnUnit(st, 'warrior', 0, t.q, t.r);
+    u.movesLeft = 2; u.hasAttacked = false;
+    g.drainEvents(st);
+    window.__game.refresh();
+    const rect = document.getElementById('board').getBoundingClientRect();
+    const k = rect.width / rnd.canvasSize(st).w;
+    const c = rnd.tileCenter(t.q, t.r);
+    return { q: t.q, r: t.r, x: rect.left + c.x * k, y: rect.top + c.y * k };
+  });
+  if (wood.error) throw new Error(`woodcutting: ${wood.error}`);
+  await page.mouse.click(wood.x, wood.y);
+  if (!(await page.textContent('#info')).includes('Fell forest (+6 gold)')) throw new Error('woodcutting: no button in the unit panel');
+  await page.click('#info button[data-fell]');
+  await page.waitForFunction(() => !window.__game.isBusy(), null, { timeout: 10000 });
+  const cut = await page.evaluate((p) => {
+    const st = window.__game.getState();
+    const t = st.tiles[`${p.q},${p.r}`];
+    return { terrain: t.terrain, felled: t.felled, gold: st.gold[0], log: document.getElementById('log').textContent };
+  }, wood);
+  if (cut.terrain !== 'plains' || !cut.felled || cut.gold !== 8 || !cut.log.includes('felled a forest')) throw new Error(`woodcutting: ${JSON.stringify(cut)}`);
+  await page.keyboard.press('Escape');
+  await page.mouse.move(wood.x, wood.y);
+  if (!(await page.textContent('#info')).includes('felled forest')) throw new Error('woodcutting: the tile panel does not mention the stumps');
+  await page.screenshot({ path: 'artifacts/screenshot-woodcut.png' });
 
   // rivers: large map without fog, hovering a river tile shows its description in the panel
   await page.setViewportSize({ width: 1280, height: 800 });

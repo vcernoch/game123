@@ -2,6 +2,20 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-24 – Woodcutting (v0.47.0)
+- **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.38.0–v0.47.0) is ahead of `main` (v0.37.0) – please merge it.
+- Starting state green (137 logic tests + smoke).
+- Phase 21 was done, so a new Phase 22 (working the land), own improvement. The map never changed under the players' feet except for roads; now a forest is a resource you can cash in – at the price of its cover. A poor treasury gets a way out, and clearing the woods next to your cities takes away the attackers' cover (and your own).
+- `TIMBER` in `rules.js` (gold 6, AI below 12 gold, no enemy within 3 tiles). In `game.js`: `canFell`, `fellForest` – the tile becomes `plains` with `tile.felled`, the unit's turn ends, a `fell` event (replayed by `applyEvent`, placed by `eventTiles`), a chronicle line. Defense, movement cost and the charge rule all follow the new terrain on their own.
+- AI (`ai.js`): `fellTimber` – short of gold, one unit standing on its own forest (not fortified, not a city garrison, no visible enemy within 3 tiles) fells it, once before the units move and once before recruiting; `timberGoals` – a poor unit in its own land with no enemy near is drawn to an own forest right next to it. ≈ 1–1.5 fells per game.
+- UI: "🪓 Fell forest (+6 gold)" in the unit panel, key H (in the `?` overlay), "🪓 timber +6" floater, build sound, stumps drawn on felled tiles, the tile panel says "felled forest (stumps)". Help text updated.
+- Balance (AI vs AI, default settings with fog, 300 half-turns max, 40 games): with felling 19 : 16, 5 stalemates; without 16 : 20, 4 stalemates – within noise.
+- State structure: `state.version` 36 (`tile.felled`; nothing to migrate – a missing flag means the terrain came with the map).
+- Test adjusted (not weakened): the seasons test pinned `STATE_VERSION` at 35 – it is now 36.
+- Known limitation: like built roads, a forest felled in the fog shows as plains on the explored map before you see it happen.
+- Tests: +2 logic (gold, plains, lost cover, turn ends, replay, save/migration, key H; every "can't" case; AI only when poor, not fortified, not with an enemy near; AI-vs-AI games fell some forests in their own territory). Smoke test: the panel button fells a forest, gold and chronicle, the tile panel mentions the stumps (`artifacts/screenshot-woodcut.png`); "Same map again" comparison restores felled forests.
+- Status: `npm run check` green (139 logic tests + smoke).
+
 ## 2026-11-24 – Winter camp (v0.46.0)
 - **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.38.0–v0.46.0) is ahead of `main` (v0.37.0) – please merge it.
 - Starting state green (136 logic tests + smoke).

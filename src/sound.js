@@ -20,6 +20,7 @@ export function soundFor(ev, viewer = 0) {
     case 'pillage': return ev.player === viewer ? 'pillage' : 'bane';
     case 'repair': return 'repair';
     case 'road': return 'build';
+    case 'fell': return 'build';
     case 'volley': return 'hit';
     case 'grow': return 'boon';
     case 'calm': return 'boon';

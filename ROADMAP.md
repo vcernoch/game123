@@ -127,5 +127,8 @@ Check off `[x]` when done. Add new ideas to the end of the relevant phase or to 
 - [x] Winter advisor (❄): from the last round of autumn the advisor names the most wounded unit (≤ 60 % HP) outside your territory that can still move and tells you to bring it home before the frost
 - [x] Winter camp (⛺): a unit fortified outside your territory in winter doesn't lose HP to the frost (it still doesn't heal); the fortify button, unit panel, tile panel and advisor offer it, the AI digs in units that stay put in the cold
 
+## Phase 22 – working the land (own improvements)
+- [x] Woodcutting (🪓 / H): a unit that hasn't attacked and has a move left fells a forest of its own territory (not a city, resource or ruin) for +6 gold and ends its turn; the tile becomes plains for good (stumps on the map) – cheaper to cross, but no forest cover and no shelter from charges; the AI fells timber when its treasury runs dry and no enemy is near
+
 ## Ideas (unordered)
 - Diplomacy with multiple AIs

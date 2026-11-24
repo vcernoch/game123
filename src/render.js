@@ -56,6 +56,7 @@ export function render(ctx, state, view = {}) {
       ctx.fillStyle = TERRAIN[t.terrain].color;
       ctx.fill();
       drawTerrainDetail(ctx, t.terrain, c.x, c.y);
+      if (t.felled) drawStumps(ctx, c.x, c.y);
       if (t.road) drawRoad(ctx, state, t, c);
       if (t.resource) drawResource(ctx, t.resource, c.x + 13, c.y - 12);
       if (t.resource && isPillaged(state, t)) drawPillaged(ctx, c.x + 13, c.y - 12);
@@ -701,6 +702,20 @@ function drawBridge(ctx, p1, p2) {
   ctx.lineWidth = 1;
   ctx.fillRect(-5, -7, 10, 14);
   ctx.strokeRect(-5, -7, 10, 14);
+  ctx.restore();
+}
+
+// Stumps of a felled forest: three small cut trunks where the trees stood.
+function drawStumps(ctx, x, y) {
+  ctx.save();
+  for (const [dx, dy] of [[-9, 6], [0, -3], [9, 6]]) {
+    ctx.fillStyle = '#6b4a26';
+    ctx.fillRect(x + dx - 3, y + dy - 2, 6, 5);
+    ctx.fillStyle = '#d9b77e';
+    ctx.beginPath();
+    ctx.ellipse(x + dx, y + dy - 2, 3, 1.6, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
   ctx.restore();
 }
 
