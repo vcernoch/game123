@@ -152,7 +152,8 @@ export const PURSUIT = { types: ['warrior', 'spearman'], aiHpShare: 0.6 };
 // summer: campaign season – no effect;
 // autumn: harvest – every owned city of size 2+ that isn't restless pays `harvest` more gold;
 // winter: rivers freeze – crossing is free and gives no defense; a unit ending its owner's turn outside
-//   its own territory doesn't heal and loses `frost` HP (never below `frostMinHp`).
+//   its own territory doesn't heal and loses `frost` HP (never below `frostMinHp`) – unless it is fortified
+//   (`camp`: a winter camp keeps the cold out, but still no healing). The AI makes camp with units that stay put.
 // The AI's wounded units head home a little earlier in winter (`aiFrostHp` share of HP); the advisor warns about
 // units out in the cold with at most `adviseHp` of their HP, already in the last round before winter.
 export const SEASONS = {
@@ -162,9 +163,10 @@ export const SEASONS = {
     spring: { name: 'Spring', icon: '🌱', riverExtra: 1, text: 'thaw – swollen rivers cost +1 more move to cross (bridges stay free)' },
     summer: { name: 'Summer', icon: '☀', text: 'campaign season – no penalties' },
     autumn: { name: 'Autumn', icon: '🍂', harvest: 1, text: 'harvest – cities of size 2+ pay +1 gold' },
-    winter: { name: 'Winter', icon: '❄', frozen: true, frost: 1, text: 'rivers freeze (free to cross, no river defense); units outside your territory don\'t heal and lose 1 HP each turn' },
+    winter: { name: 'Winter', icon: '❄', frozen: true, frost: 1, text: 'rivers freeze (free to cross, no river defense); units outside your territory don\'t heal and lose 1 HP each turn unless fortified (winter camp)' },
   },
   frostMinHp: 1,
+  camp: true, // a fortified unit doesn't lose HP to frost
   aiFrostHp: 0.6,
   adviseHp: 0.6, // the advisor warns about units out in the cold with at most this share of HP
 };

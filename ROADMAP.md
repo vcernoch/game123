@@ -125,6 +125,7 @@ Check off `[x]` when done. Add new ideas to the end of the relevant phase or to 
 ## Phase 21 – the turning year (own improvements)
 - [x] Seasons (new game option, on by default): every 3 rounds the season turns – 🌱 spring thaw (crossing a river +1 more), ☀ summer, 🍂 autumn harvest (+1 gold for cities of size 2+), ❄ winter (rivers freeze: free to cross, no river defense; units outside own territory don't heal and lose 1 HP, never below 1); header badge, banner news, snow and ice on the map, frost warning in the unit panel; the AI brings weak units home in winter
 - [x] Winter advisor (❄): from the last round of autumn the advisor names the most wounded unit (≤ 60 % HP) outside your territory that can still move and tells you to bring it home before the frost
+- [x] Winter camp (⛺): a unit fortified outside your territory in winter doesn't lose HP to the frost (it still doesn't heal); the fortify button, unit panel, tile panel and advisor offer it, the AI digs in units that stay put in the cold
 
 ## Ideas (unordered)
 - Diplomacy with multiple AIs

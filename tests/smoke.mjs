@@ -1623,6 +1623,28 @@ try {
   }
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({ path: 'artifacts/screenshot-winter-mobile.png' });
+  // winter camp: the fortify button offers it, F digs the unit in and the panel says it won't freeze
+  const campBtn = await page.evaluate(() => document.querySelector('#info button[data-fortify]')?.textContent || '');
+  if (!campBtn.includes('winter camp')) throw new Error(`winter camp: fortify button "${campBtn}"`);
+  await page.keyboard.press('f');
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const campPt = await page.evaluate(async () => {
+    const rnd = await import('./src/render.js');
+    const st = window.__game.getState();
+    const u = st.units.find((x) => x.owner === 0 && x.fortified);
+    const p = rnd.tileCenter(u.q, u.r);
+    const rect = document.getElementById('board').getBoundingClientRect();
+    const k = rect.width / rnd.canvasSize(st).w;
+    return { x: rect.left + p.x * k, y: rect.top + p.y * k };
+  });
+  await page.keyboard.press('Escape');
+  await page.mouse.click(campPt.x, campPt.y);
+  const camp = await page.evaluate(() => ({ line: document.querySelector('#info .frost')?.textContent || '',
+    tip: document.getElementById('advisor').textContent, hp: window.__game.getState().units.find((x) => x.fortified && x.owner === 0)?.hp }));
+  if (!camp.line.includes('Winter camp') || camp.tip.includes('is out in the winter cold') || camp.hp !== 5) {
+    throw new Error(`winter camp: ${JSON.stringify(camp)}`);
+  }
+  await page.screenshot({ path: 'artifacts/screenshot-camp.png' });
 
   if (errors.length) throw new Error(errors.join('\n'));
   console.log(`SMOKE OK – turn ${turn}, screenshots in artifacts/`);

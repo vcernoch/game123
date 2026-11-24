@@ -988,10 +988,10 @@ export function seasonStarted(state) {
 }
 
 // Winter frost: does this unit freeze at the end of its owner's turn (outside own territory; a city of its own
-// is territory)? Returns the HP it would lose (0 = none).
+// is territory)? Returns the HP it would lose (0 = none). A fortified unit sits in a winter camp and doesn't freeze.
 export function frostLoss(state, unit) {
   const k = seasonKind(state);
-  if (!k.frost || territoryOwner(state, unit.q, unit.r) === unit.owner) return 0;
+  if (!k.frost || territoryOwner(state, unit.q, unit.r) === unit.owner || winterCamp(state, unit)) return 0;
   const city = cityAt(state, unit.q, unit.r);
   if (city && city.owner === unit.owner) return 0;
   return Math.max(0, Math.min(k.frost, unit.hp - SEASONS.frostMinHp));
@@ -1001,6 +1001,16 @@ export function frostLoss(state, unit) {
 export function outsideHome(state, unit) {
   const city = cityAt(state, unit.q, unit.r);
   return territoryOwner(state, unit.q, unit.r) !== unit.owner && !(city && city.owner === unit.owner);
+}
+
+// Is the unit in a winter camp – fortified outside its home in winter? (It doesn't freeze, but doesn't heal.)
+export function winterCamp(state, unit) {
+  return !!SEASONS.camp && !!unit.fortified && !!seasonKind(state).frost && outsideHome(state, unit);
+}
+
+// Would fortifying now spare the unit the frost at the end of this turn?
+export function campSaves(state, unit) {
+  return !!SEASONS.camp && !unit.fortified && canFortify(state, unit) && frostLoss(state, unit) > 0;
 }
 
 // Does winter keep the unit from healing (it stands outside its own territory)?
@@ -2995,13 +3005,13 @@ export function adviseTurn(state, player) {
   // winter (or winter next round): the most wounded unit out in the cold that can still move heads home
   const winter = winterNear(state);
   if (winter) {
-    const cold = mine.filter((u) => u !== hurt && u.movesLeft > 0 && !u.hasAttacked && outsideHome(state, u)
+    const cold = mine.filter((u) => u !== hurt && u.movesLeft > 0 && !u.hasAttacked && !u.fortified && outsideHome(state, u)
       && u.hp <= UNIT_TYPES[u.type].hp * SEASONS.adviseHp && u.hp > SEASONS.frostMinHp)
       .sort((a, b) => a.hp / UNIT_TYPES[a.type].hp - b.hp / UNIT_TYPES[b.type].hp || a.id - b.id)[0];
     if (cold) {
       const hp = `${cold.hp}/${UNIT_TYPES[cold.type].hp} HP`;
       add('frost', winter === 'now'
-        ? `${unitTitle(cold)} (${hp}) is out in the winter cold – it loses 1 HP a turn outside your land; bring it home.`
+        ? `${unitTitle(cold)} (${hp}) is out in the winter cold – it loses 1 HP a turn outside your land; bring it home${campSaves(state, cold) ? ' or fortify it in a winter camp' : ''}.`
         : `Winter comes next turn – ${unitTitle(cold)} (${hp}) is outside your land and would freeze there; start bringing it home.`,
       cold, { unitId: cold.id });
     }

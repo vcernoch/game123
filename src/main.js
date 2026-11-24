@@ -8,7 +8,7 @@ import {
   updateSightings, lastSeen, lastSeenAt, lastSeenText, armyOverview, ARMY_STATUS, ruinBelieved,
   canExplore, setExplore, canPillage, pillage, isPillaged, pillageTurnsLeft, canRepair, repair,
   rallyPath, setRally, clearRally, swapPartners, swapUnits, canBuildRoad, buildRoad, timelineFor, adviseTurn, suggestRecruit, growthText, tradeText, tradeRoute, unrestText, focusOf, focusText, setFocus, levy, levyProblem, setRecruitOrder, clearRecruitOrder, recruitOrderText, enemyTurnReplay,
-  perkAttackMult, perkOptions, perkChoices, perkText, learnPerk, seasonInfo, seasonStarted, riverCrossCost, frostBound, frostLoss, harvestGold,
+  perkAttackMult, perkOptions, perkChoices, perkText, learnPerk, seasonInfo, seasonStarted, riverCrossCost, frostBound, frostLoss, harvestGold, winterCamp, campSaves,
 } from './game.js';
 import { createAnimator } from './anim.js';
 import { decideTap } from './input.js';
@@ -269,8 +269,9 @@ function updateSeason() {
 // Unit panel line in winter for an own unit outside its territory.
 function frostLine(u) {
   if (u.owner !== 0 || !frostBound(state, u)) return '';
+  if (winterCamp(state, u)) return '<p class="frost">⛺ Winter camp: fortified, it doesn\'t freeze – but it doesn\'t heal outside your territory</p>';
   const loss = frostLoss(state, u);
-  return `<p class="frost">❄ Winter outside your territory: no healing${loss ? `, −${loss} HP at the end of the turn` : ''} – bring it home</p>`;
+  return `<p class="frost">❄ Winter outside your territory: no healing${loss ? `, −${loss} HP at the end of the turn` : ''} – bring it home${campSaves(state, u) ? ' or fortify it (winter camp)' : ''}</p>`;
 }
 
 // The start-of-turn banner line for a season that began this round.
@@ -344,7 +345,7 @@ function updateHud() {
       html += `<button data-sentry class="secondary wide-btn" title="${heal ? 'Rest here until fully healed' : 'Keep watch here'}; Tab skips the unit until an enemy comes within ${SENTRY.radius} tiles (W)">👁 ${heal ? 'Rest until healed' : 'Sentry'}</button>`;
     }
     if (u.owner === 0 && !busy() && canFortify(state, u)) {
-      html += `<button data-fortify class="secondary wide-btn" title="Dig in: +${Math.round(FORTIFY.defBonus * 100)} % defense, ends the unit's turn (F)">⛨ Fortify</button>`;
+      html += `<button data-fortify class="secondary wide-btn" title="Dig in: +${Math.round(FORTIFY.defBonus * 100)} % defense, ends the unit's turn${campSaves(state, u) ? '; in winter a fortified unit doesn\'t freeze (winter camp)' : ''} (F)">⛨ Fortify${campSaves(state, u) ? ' <small>⛺ winter camp</small>' : ''}</button>`;
     }
     if (u.owner === 0 && !busy() && state.current === 0) {
       const partners = swapPartners(state, u);
@@ -449,7 +450,7 @@ function updateHud() {
       const whose = realm === null ? 'neutral territory' : realm === 0 ? 'your territory' : `${PLAYERS[realm].name} territory`;
       html += `<p class="hint">${whose[0].toUpperCase()}${whose.slice(1)} – units resting here heal +${TERRITORY.healIdle} (elsewhere +${ECONOMY.healIdle})</p>`;
     }
-    if (seasonInfo(state) && seasonInfo(state).frost && realm !== 0 && t.passable) html += '<p class="frost">❄ Winter: your units here don\'t heal and lose 1 HP each turn</p>';
+    if (seasonInfo(state) && seasonInfo(state).frost && realm !== 0 && t.passable) html += '<p class="frost">❄ Winter: your units here don\'t heal and lose 1 HP each turn (fortified ones are in a winter camp and don\'t freeze)</p>';
     const hc = cityAt(state, hover.q, hover.r);
     if (hc) {
       const ci = cityInfo(state, hc);

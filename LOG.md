@@ -2,6 +2,19 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-24 – Winter camp (v0.46.0)
+- **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.38.0–v0.46.0) is ahead of `main` (v0.37.0) – please merge it.
+- Starting state green (136 logic tests + smoke).
+- Phase 21 (the turning year), own improvement. Winter only had one answer – walk home – so a siege or a forward line simply bled 1 HP a turn. Now a unit can dig in for the winter: holding a position costs its turn but not its health.
+- `SEASONS.camp` in `rules.js`, winter text mentions it. In `game.js`: `winterCamp` (fortified outside home in winter), `campSaves` (fortifying now would spare frost). `frostLoss` is 0 in a camp; `frostBound` is unchanged, so a camp still doesn't heal. The advisor's frost hint skips fortified units and adds "or fortify it in a winter camp" when the unit can still dig in.
+- AI: `makeCamp` in `ai.js` – after the strikes, AI units that would freeze and haven't moved or attacked fortify (≈ 44 camps per game in a 20-game sample).
+- UI: the fortify button shows "⛺ winter camp" (and the tooltip explains) when it would spare frost, the unit panel shows "⛺ Winter camp: …" instead of the frost warning, the frost line and the tile panel mention fortifying. Help text updated.
+- Balance (20 AI-vs-AI games, default settings with fog, 300 half-turns max): wins 7 : 12, 1 stalemate, ~81 half-turns – in line with earlier samples.
+- No state structure change (`state.version` stays 35).
+- Test adjusted (not weakened): the winter advisor test expected the text to end with "bring it home." – a unit that can still fortify now gets "… bring it home or fortify it in a winter camp."; the new test checks both endings.
+- Tests: +1 logic (camp spares frost but no healing, chronicle counts only the freezing unit, a moved unit can't make camp, no camp outside winter, advisor text and silence for a camp, AI `makeCamp` only for its own unmoved units). Smoke test: the fortify button offers the winter camp, F digs in, the panel shows the camp line, the advisor hint disappears (`artifacts/screenshot-camp.png`).
+- Status: `npm run check` green (137 logic tests + smoke).
+
 ## 2026-11-23 – Winter advisor (v0.45.0, same run)
 - Phase 21, second task of this run (the version was bumped once for the run). Frost is easy to forget until the HP are already gone, and the season badge only says what the season does, not which of your units is at risk.
 - In `game.js`: `outsideHome` (not in own territory nor an own city – `frostBound` now uses it), `winterNear` (`'now'` in winter, `'soon'` in the last round before it, else null). `adviseTurn` gets a `frost` hint (❄, order 2.5 – right after wounded units in danger): the most wounded own unit outside home with ≤ `SEASONS.adviseHp` (60 %) HP that can still move and hasn't attacked, not the one the `wounded` hint already names, and not a 1-HP unit (frost can't hurt it). Text "Winter comes next turn – … start bringing it home." / "… is out in the winter cold – it loses 1 HP a turn outside your land; bring it home."; a click selects the unit.

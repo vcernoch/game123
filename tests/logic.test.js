@@ -38,8 +38,8 @@ import { soundFor, createLimiter, createSound, SOUND_NAMES } from '../src/sound.
 import { readFileSync } from 'node:fs';
 import { GAME_VERSION, GAME_DATE } from '../src/version.js';
 import { pathExists, generateMap, dirTo } from '../src/map.js';
-import { seasonAt, seasonKind, seasonInfo, seasonStarted, riverCrossCost, frostLoss, frostBound, harvestGold, outsideHome, winterNear } from '../src/game.js';
-import { frostGoals } from '../src/ai.js';
+import { seasonAt, seasonKind, seasonInfo, seasonStarted, riverCrossCost, frostLoss, frostBound, harvestGold, outsideHome, winterNear, winterCamp, campSaves } from '../src/game.js';
+import { frostGoals, makeCamp } from '../src/ai.js';
 import { SEASONS, ROAD_COST } from '../src/rules.js';
 import { distance, key, neighbors } from '../src/hex.js';
 import {
@@ -5813,7 +5813,7 @@ test('seasons: the advisor warns about wounded units out in the cold, from the l
   s.turn = 10;
   assert.equal(winterNear(s), 'now');
   tip = frostTip();
-  assert.match(tip.text, /is out in the winter cold – it loses 1 HP a turn outside your land; bring it home\.$/);
+  assert.match(tip.text, /is out in the winter cold – it loses 1 HP a turn outside your land; bring it home or fortify it in a winter camp\.$/);
   b.movesLeft = 0; // a unit that can't move any more gets no hint
   assert.equal(frostTip().unitId, a.id);
   a.hp = full(a);
@@ -5825,4 +5825,65 @@ test('seasons: the advisor warns about wounded units out in the cold, from the l
   const off = createGame({ seed: 1, fog: false, seasons: false });
   off.turn = 10;
   assert.equal(winterNear(off), null);
+});
+
+test('winter camp: a fortified unit outside home doesn\'t freeze (but doesn\'t heal), the advisor and the AI use it', () => {
+  const s = createGame({ seed: 1, fog: false, happenings: false });
+  s.units = [];
+  const tiles = Object.values(s.tiles).filter((t) => TERRAIN[t.terrain].passable && !cityAt(s, t.q, t.r));
+  const outside = tiles.filter((t) => territoryOwner(s, t.q, t.r) === undefined);
+  const home = tiles.find((t) => territoryOwner(s, t.q, t.r) === 0);
+  const camp = spawnUnit(s, 'warrior', 0, outside[0].q, outside[0].r);
+  const open = spawnUnit(s, 'warrior', 0, outside[1].q, outside[1].r);
+  const warm = spawnUnit(s, 'warrior', 0, home.q, home.r);
+  for (const u of s.units) { u.hp = 5; u.moved = false; u.movesLeft = 2; u.hasAttacked = false; }
+  s.turn = 10; // winter
+  assert.equal(campSaves(s, camp), true);
+  assert.equal(campSaves(s, warm), false, 'no frost at home – nothing to save');
+  assert.ok(fortify(s, camp.id));
+  assert.equal(winterCamp(s, camp), true);
+  assert.equal(campSaves(s, camp), false, 'already in camp');
+  assert.equal(frostLoss(s, camp), 0);
+  assert.equal(frostBound(s, camp), true, 'still no healing outside home');
+  assert.equal(frostLoss(s, open), 1);
+  endTurn(s);
+  assert.equal(camp.hp, 5, 'neither frost nor healing');
+  assert.equal(open.hp, 4);
+  assert.ok(s.log.some((e) => e.msg === `${PLAYERS[0].name}: winter frost – 1 unit outside home lost HP`));
+  // a unit that already moved can't make camp; outside winter there is no camp
+  const m = createGame({ seed: 1, fog: false, happenings: false });
+  m.units = [];
+  const u = spawnUnit(m, 'warrior', 0, outside[0].q, outside[0].r);
+  u.hp = 5; u.moved = true; m.turn = 10;
+  assert.equal(campSaves(m, u), false);
+  u.moved = false; m.turn = 4; // summer
+  fortify(m, u.id);
+  assert.equal(winterCamp(m, u), false);
+  // the advisor no longer nags about a unit in camp, and offers the camp for one that can still dig in
+  const a = createGame({ seed: 1, fog: false, happenings: false });
+  a.units = [];
+  const w = spawnUnit(a, 'warrior', 0, outside[0].q, outside[0].r);
+  w.hp = 3; w.movesLeft = 2; w.hasAttacked = false; w.moved = false;
+  a.turn = 10;
+  assert.match(adviseTurn(a, 0).find((t) => t.kind === 'frost').text, /or fortify it in a winter camp\.$/);
+  w.moved = true;
+  assert.match(adviseTurn(a, 0).find((t) => t.kind === 'frost').text, /bring it home\.$/, 'a moved unit can only go home');
+  w.moved = false; w.fortified = true;
+  assert.equal(adviseTurn(a, 0).find((t) => t.kind === 'frost'), undefined);
+  // AI: units of the AI that stayed put outside its land fortify at the end of its turn; the player's are left alone
+  const h = createGame({ seed: 1, fog: false, happenings: false });
+  h.units = [];
+  const stay = spawnUnit(h, 'warrior', 1, outside[0].q, outside[0].r);
+  const walked = spawnUnit(h, 'warrior', 1, outside[1].q, outside[1].r);
+  const mine = spawnUnit(h, 'warrior', 0, outside[2].q, outside[2].r);
+  for (const x of h.units) { x.hp = 5; x.moved = false; x.hasAttacked = false; }
+  walked.moved = true;
+  h.turn = 10; h.current = 1;
+  makeCamp(h, 1);
+  assert.equal(stay.fortified, true);
+  assert.ok(!walked.fortified);
+  assert.ok(!mine.fortified);
+  endTurn(h);
+  assert.equal(stay.hp, 5);
+  assert.equal(walked.hp, 4);
 });

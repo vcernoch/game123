@@ -5,7 +5,7 @@ import {
   unitAt, getUnit, tileAt, fortify, difficultyOf, visibleTiles, exploredTiles, build, hasBuilding, unitCost, buildingCost, factionOf,
   threatTiles, cityAt, upgradeOptions, upgradeUnit, ruinBelieved, canPillage, pillage, isPillaged, repair, pillageTurnsLeft, territoryOwner,
   swapPartners, swapUnits, canBuildRoad, buildRoad, roadLinks, citySize, tradeTargets, cutsAt, cityUnrest,
-  focusOf, setFocus, citySieged, canLevy, levy, marchReach, forceMarch, canWithdraw, pursuitTile, perkOptions, learnPerk, frostBound,
+  focusOf, setFocus, citySieged, canLevy, levy, marchReach, forceMarch, canWithdraw, pursuitTile, perkOptions, learnPerk, frostBound, campSaves,
 } from './game.js';
 import { UNIT_TYPES, TERRAIN, ROADWORK, GROWTH, FOCUS, LEVY, FORCED_MARCH, PURSUIT, PERKS, SEASONS } from './rules.js';
 
@@ -60,6 +60,7 @@ export function runAITurn(state) {
   for (const u of state.units.filter((x) => x.owner === me && x.raided)) withdraw(state, u, danger.get());
   // pursuit: foot soldiers that destroyed a defender advance when it is safe or presses an enemy city
   for (const u of state.units.filter((x) => x.owner === me && x.pursuit)) pursue(state, u, know, danger.get());
+  makeCamp(state, me);
   recruit(state, me);
   buildSomething(state, me);
   layRoad(state, me, know);
@@ -460,6 +461,11 @@ export function goalsFor(state, unit, know = aiKnowledge(state, unit.owner)) {
   }
   for (const u of state.units) if (u.owner !== unit.owner && know.sees(u.q, u.r)) goals.push({ q: u.q, r: u.r, w: 1.1, enemy: true });
   return goals.some((g) => !g.ruin && !g.pillage && !g.repair && !g.blockade) ? goals : [...goals, ...exploreGoals(state, know)];
+}
+
+// Winter camp: units that stayed put outside their land in winter fortify instead of losing HP to the frost.
+export function makeCamp(state, me) {
+  for (const u of state.units.filter((x) => x.owner === me && campSaves(state, x))) fortify(state, u.id);
 }
 
 // Winter: a unit freezing outside its own territory with at most aiFrostHp of its HP left heads for the
