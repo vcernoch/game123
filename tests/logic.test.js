@@ -13,7 +13,7 @@ import {
   armyOverview, unitStatus, unitWhere, ARMY_STATUS, ruinBelieved, ruinKind, exploreRuin,
   exploreTarget, canExplore, setExplore, followExplore, canPillage, pillage, isPillaged, pillageTurnsLeft, cityAt, canRepair, repair,
   rallyPath, rallyTarget, canRally, setRally, clearRally, canSwap, swapPartners, swapUnits,
-  canBuildRoad, buildRoad, roadLinks, canFell, fellForest, canSentry, sentry, checkSentries, SENTRY_TEXT, volleyTarget, cityVolleys, animSpeedOf, nextAnimSpeed,
+  canBuildRoad, buildRoad, roadLinks, canFell, fellForest, canPlant, plantForest, saplingRoundsLeft, canSentry, sentry, checkSentries, SENTRY_TEXT, volleyTarget, cityVolleys, animSpeedOf, nextAnimSpeed,
   unitTitle, heroName, hallOfFame, inspiredBy, inspireBonus, inspiredUnits, timelineFor, leadChanges, whose, adviseTurn, suggestRecruit,
   citySize, growthLeft, citySieged, growthText, growCities, tradeRoute, tradeText, cutRoutes, routesCutBy,
   cityUnrest, unrestCalm, unrestTurnsLeft, unrestText, calmCities, focusOf, cityFocus, setFocus, focusText,
@@ -29,14 +29,14 @@ import {
   dangerMap, dangerPenalty, moveTowardsGoal, DANGER, unexploredLand, SCOUT_WHEN_UNKNOWN, aiKnowledge,
   upgradeSomething, UPGRADE_HORSE_RADIUS, strikeLinedUp, pillageGoals, PILLAGE_DETOUR, repairGoals, REPAIR_DETOUR,
   relieveWounded, RELIEF_MIN_HP, layRoad, blockadeGoals, BLOCKADE_DETOUR, pickFocus, setFocuses, shouldLevy, withdraw, pursue,
-  pickPerk, learnPerks, fellTimber,
+  pickPerk, learnPerks, fellTimber, plantSaplings,
 } from '../src/ai.js';
 import { decideTap } from '../src/input.js';
 import { SHORTCUTS, keyAction, recruitKey } from '../src/keys.js';
 import { chartSvg, summaryRows, hallOfFameHtml, timelineHtml } from '../src/stats.js';
 import { soundFor, createLimiter, createSound, SOUND_NAMES } from '../src/sound.js';
 import { readFileSync } from 'node:fs';
-import { TIMBER as TIMBER_RULES } from '../src/rules.js';
+import { TIMBER as TIMBER_RULES, PLANTING as PLANTING_RULES } from '../src/rules.js';
 import { GAME_VERSION, GAME_DATE } from '../src/version.js';
 import { pathExists, generateMap, dirTo } from '../src/map.js';
 import { seasonAt, seasonKind, seasonInfo, seasonStarted, riverCrossCost, frostLoss, frostBound, harvestGold, outsideHome, winterNear, winterCamp, campSaves } from '../src/game.js';
@@ -5703,7 +5703,7 @@ test('seasons: the year turns every 3 rounds; thaw, frozen rivers, harvest; off 
   assert.equal(m.version, STATE_VERSION);
   assert.equal(m.seasons, false);
   assert.equal(stateProblem(m), null);
-  assert.equal(STATE_VERSION, 36); // woodcutting (v36) came after seasons (v35)
+  assert.ok(STATE_VERSION >= 36); // woodcutting (v36) came after seasons (v35)
 });
 
 test('seasons: winter frost outside own territory, season news in the chronicle, the AI heads home', () => {
@@ -6005,4 +6005,157 @@ test('woodcutting: who can\'t, and the AI fells timber only when short of gold a
     }
   }
   assert.ok(felled >= 1, `forests felled: ${felled}`);
+});
+
+// Plains of the player's own territory next to the capital with a fresh warrior on it (see fellSetup).
+function plantSetup(seed = 3) {
+  const t = fellSetup(seed);
+  t.tile.terrain = 'plains';
+  t.s.gold[0] = 10;
+  return t;
+}
+
+test('planting: saplings cost gold, end the turn, replay, and grow into a forest after the set rounds', () => {
+  const { s, tile, u } = plantSetup();
+  s.happenings = false;
+  assert.ok(canPlant(s, u));
+  const before = cloneState(s);
+  const ev = plantForest(s, u.id);
+  assert.equal(ev.type, 'plant');
+  assert.equal(s.gold[0], 10 - PLANTING_RULES.gold);
+  assert.equal(tile.terrain, 'plains', 'nothing grows yet');
+  assert.equal(tile.sapling, s.turn + PLANTING_RULES.rounds);
+  assert.equal(saplingRoundsLeft(s, tile), PLANTING_RULES.rounds);
+  assert.equal(u.movesLeft, 0);
+  assert.ok(u.hasAttacked, 'the unit\'s turn is over');
+  assert.ok(!canPlant(s, u), 'not twice');
+  assert.match(s.log.at(-1).msg, /^You: Warrior planted saplings \(−3 gold, a forest in 4 rounds\)$/);
+  const evs = drainEvents(s);
+  for (const e of evs) applyEvent(before, e);
+  assert.deepEqual(snapshot(before), snapshot(s));
+  assert.equal(before.gold[0], s.gold[0]);
+  assert.equal(tileAt(before, tile.q, tile.r).sapling, tile.sapling);
+  assert.deepEqual(eventTiles(before, ev), [{ q: tile.q, r: tile.r }]);
+  assert.equal(isUndoableMove(cloneState(s), s, evs, 0), false);
+  assert.equal(soundFor(ev, 0), 'build');
+  assert.equal(keyAction('n').type, 'plant');
+  assert.equal(keyAction('N').type, 'plant');
+  // saves keep the saplings, an old save migrates, nonsense is rejected
+  const back = importGame(exportGame(s, GAME_VERSION));
+  assert.equal(back.state.tiles[key(tile.q, tile.r)].sapling, tile.sapling);
+  const old = cloneState(s);
+  old.version = 36;
+  assert.equal(migrateState(old).version, STATE_VERSION);
+  const bad = cloneState(s);
+  bad.tiles[key(tile.q, tile.r)].sapling = 'soon';
+  assert.match(stateProblem(bad), /saplings/);
+  // the forest grows at the start of the round the saplings wait for – not a round earlier
+  const ready = tile.sapling;
+  while (s.turn < ready - 1) { endTurn(s); endTurn(s); }
+  assert.equal(tile.terrain, 'plains');
+  assert.equal(saplingRoundsLeft(s, tile), 1);
+  const defBefore = defenseValue(s, u);
+  endTurn(s); endTurn(s);
+  assert.equal(s.turn, ready);
+  assert.equal(tile.terrain, 'forest');
+  assert.equal(tile.sapling, undefined);
+  assert.ok(tile.planted, 'new woods on plains of the map');
+  assert.ok(!tile.felled);
+  assert.ok(defenseValue(s, u) > defBefore, 'the new forest gives cover');
+  assert.ok(logFor(s, 0).some((l) => /^🌲 You: saplings grew into a forest$/.test(l.msg)));
+  assert.equal(stateProblem(cloneState(s)), null);
+  // the new forest can be felled again – it stays "planted" (plains on the map), and a felled forest grows back
+  u.movesLeft = 2; u.hasAttacked = false;
+  assert.ok(fellForest(s, u.id));
+  assert.ok(tile.planted && tile.felled);
+  const f = fellSetup();
+  fellForest(f.s, f.u.id);
+  f.s.gold[0] = 10;
+  f.u.movesLeft = 2; f.u.hasAttacked = false;
+  assert.ok(plantForest(f.s, f.u.id));
+  f.s.turn = f.tile.sapling - 1;
+  f.s.current = 1;
+  endTurn(f.s);
+  assert.equal(f.tile.terrain, 'forest');
+  assert.ok(!f.tile.felled && !f.tile.planted, 'the map\'s forest is back');
+});
+
+test('planting: who can\'t, and the AI replants only with gold to spare and no enemy near', () => {
+  const t = plantSetup();
+  const cases = [
+    ['attacked', (s, u) => { u.hasAttacked = true; }],
+    ['no moves', (s, u) => { u.movesLeft = 0; }],
+    ['not own turn', (s) => { s.current = 1; }],
+    ['not plains', (s, u) => { tileAt(s, u.q, u.r).terrain = 'forest'; }],
+    ['hills', (s, u) => { tileAt(s, u.q, u.r).terrain = 'hills'; }],
+    ['already planted', (s, u) => { tileAt(s, u.q, u.r).sapling = s.turn + 2; }],
+    ['a resource', (s, u) => { tileAt(s, u.q, u.r).resource = 'gold'; }],
+    ['a ruin', (s, u) => { tileAt(s, u.q, u.r).ruin = true; }],
+    ['in a city', (s, u) => { const c = s.cities.find((x) => x.owner === 0); u.q = c.q; u.r = c.r; tileAt(s, c.q, c.r).terrain = 'plains'; }],
+    ['outside own territory', (s, u) => {
+      const far = Object.values(s.tiles).find((x) => isPassable(s, x.q, x.r) && !cityAt(s, x.q, x.r) && territoryOwner(s, x.q, x.r) !== 0);
+      far.terrain = 'plains';
+      u.q = far.q; u.r = far.r;
+    }],
+    ['game over', (s) => { s.winner = 1; }],
+  ];
+  for (const [why, spoil] of cases) {
+    const s = cloneState(t.s);
+    const u = getUnit(s, t.u.id);
+    spoil(s, u);
+    assert.ok(!canPlant(s, u), why);
+    assert.equal(plantForest(s, u.id), null, why);
+  }
+  const poor = cloneState(t.s);
+  poor.gold[0] = PLANTING_RULES.gold - 1;
+  assert.ok(canPlant(poor, getUnit(poor, t.u.id), { affordable: false }));
+  assert.ok(!canPlant(poor, getUnit(poor, t.u.id)), 'not enough gold');
+
+  // AI: an idle unit replants the felled forest it stands on only with gold to spare, unfortified, no enemy close
+  const s = createGame({ seed: 3, fog: false });
+  s.current = 1;
+  const cap = s.cities.find((c) => c.capital && c.owner === 1);
+  s.units = [];
+  const tile = Object.values(s.tiles).find((x) => isPassable(s, x.q, x.r) && !x.resource && !x.ruin && !cityAt(s, x.q, x.r)
+    && territoryOwner(s, x.q, x.r) === 1 && distance(x, cap) === 1);
+  tile.terrain = 'plains';
+  for (const n of neighbors(tile.q, tile.r)) { const nt = tileAt(s, n.q, n.r); if (nt && nt.terrain === 'forest') nt.terrain = 'plains'; }
+  const w = spawnUnit(s, 'warrior', 1, tile.q, tile.r);
+  w.movesLeft = 2; w.hasAttacked = false;
+  s.gold[1] = PLANTING_RULES.aiReserve + PLANTING_RULES.gold;
+  assert.equal(plantSaplings(s, 1), null, 'bare plains with no woods around are left alone');
+  tile.felled = true;
+  s.gold[1] = PLANTING_RULES.aiReserve + PLANTING_RULES.gold - 1;
+  assert.equal(plantSaplings(s, 1), null, 'no gold to spare');
+  s.gold[1] = PLANTING_RULES.aiReserve + PLANTING_RULES.gold;
+  w.fortified = true;
+  assert.equal(plantSaplings(s, 1), null, 'keeps a fortified position');
+  delete w.fortified;
+  const foe = neighbors(tile.q, tile.r).find((n) => isPassable(s, n.q, n.r) && !cityAt(s, n.q, n.r));
+  const enemy = spawnUnit(s, 'warrior', 0, foe.q, foe.r);
+  assert.equal(plantSaplings(s, 1), null, 'not with an enemy next to it');
+  s.units = s.units.filter((x) => x.id !== enemy.id);
+  assert.equal(plantSaplings(s, 1).type, 'plant');
+  assert.equal(tile.sapling, s.turn + PLANTING_RULES.rounds);
+  assert.equal(s.gold[1], PLANTING_RULES.aiReserve);
+
+  // AI-vs-AI games plant some saplings, always in their own territory, and the forests grow; states stay valid
+  let planted = 0;
+  let grown = 0;
+  for (const seed of [7, 10, 12]) {
+    const g = createGame({ seed });
+    for (let i = 0; i < 120 && g.winner === null; i++) {
+      runAITurn(g);
+      for (const e of drainEvents(g).filter((x) => x.type === 'plant')) {
+        planted++;
+        assert.equal(territoryOwner(g, e.q, e.r), e.player);
+      }
+      if (g.winner === null) endTurn(g);
+      drainEvents(g);
+    }
+    grown += Object.values(g.tiles).filter((x) => x.planted).length;
+    assert.equal(stateProblem(cloneState(g)), null);
+  }
+  assert.ok(planted >= 1, `saplings planted: ${planted}`);
+  assert.ok(grown >= 1, `forests grown: ${grown}`);
 });

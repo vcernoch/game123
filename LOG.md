@@ -2,6 +2,19 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-25 – Planting (v0.48.0)
+- **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.38.0–v0.48.0) is ahead of `main` (v0.37.0) – please merge it.
+- Starting state green (139 logic tests + smoke).
+- Phase 22 (working the land), own improvement. Woodcutting was one-way: every felled forest was gone for good. Now the woods can be replanted – a slow investment (3 gold now, cover and 6 gold of timber later) and a way to grow cover in front of your own cities.
+- `PLANTING` in `rules.js` (gold 3, rounds 4, AI reserve 20). In `game.js`: `canPlant`, `plantForest` (`tile.sapling` = the round it grows, unit's turn ends, `plant` event replayed by `applyEvent` and placed by `eventTiles`, chronicle line), `saplingRoundsLeft`, `growSaplings` at the start of each round (next to the pillage recovery): the tile becomes forest; a felled tile loses `felled`, plains of the map get `tile.planted` (kept even if felled again, so "Same map again" can restore every tile); one "🌲 … saplings grew into a forest" chronicle line per owner, seen by the owner and whoever sees the tiles. `stateProblem` validates saplings (integer round, only on plains).
+- AI (`ai.js`): `plantSaplings` at the end of its turn – with gold ≥ 23, one unfortified unit with a move left on own plains plants, preferring felled tiles, else plains next to a forest; never with a visible enemy within 3 tiles. ≈ 5–6 plantings per game.
+- UI: "🌱 Plant forest (3 gold)" in the unit panel (disabled without gold), key N (in the `?` overlay), "🌱 saplings −3" floater, build sound, green sprouts drawn on the tile, the tile panel says "saplings (a forest in N rounds)" / "planted forest". Woodcutting texts no longer say "for good". Help text updated.
+- Balance (20 AI-vs-AI games, default settings with fog, 300 half-turns max): wins 6 : 10, 4 stalemates – in line with earlier samples.
+- State structure: `state.version` 37 (`tile.sapling`, `tile.planted`; nothing to migrate).
+- Test adjusted (not weakened): the seasons test pinned `STATE_VERSION` at 36 – it now checks `>= 36`.
+- Tests: +2 logic (gold, turn ends, replay, save/migration/validation, key N, grows exactly at the set round and gives cover, chronicle, a planted forest stays "planted" when felled, a felled map forest grows back clean; every "can't" case and the gold check; AI only with gold to spare, unfortified, no enemy near, not on bare plains away from woods; AI-vs-AI games plant in their own territory and forests grow, states stay valid). Smoke test: the panel button plants, gold and chronicle, the tile panel counts down (`artifacts/screenshot-plant.png`); "Same map again" comparison restores planted tiles.
+- Status: `npm run check` green (141 logic tests + smoke).
+
 ## 2026-11-24 – Woodcutting (v0.47.0)
 - **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.38.0–v0.47.0) is ahead of `main` (v0.37.0) – please merge it.
 - Starting state green (137 logic tests + smoke).

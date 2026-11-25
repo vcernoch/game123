@@ -25,6 +25,8 @@ export const SHORTCUTS = [
     match: (k) => k === 'b' || k === 'B' },
   { keys: 'H', text: 'fell the forest of your territory under the selected unit (timber gold; the tile becomes plains)', action: () => ({ type: 'fell' }),
     match: (k) => k === 'h' || k === 'H' },
+  { keys: 'N', text: 'plant saplings on plains of your territory under the selected unit (costs a little gold; a forest grows in a few rounds)',
+    action: () => ({ type: 'plant' }), match: (k) => k === 'n' || k === 'N' },
   { keys: 'S', text: 'swap places with a neighbouring unit of yours (then tap it; at once if there is only one)', action: () => ({ type: 'swap' }),
     match: (k) => k === 's' || k === 'S' },
   { keys: 'G', text: 'set the rally point of the selected city: units recruited there march to it', action: () => ({ type: 'rally' }),

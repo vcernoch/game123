@@ -129,6 +129,7 @@ Check off `[x]` when done. Add new ideas to the end of the relevant phase or to 
 
 ## Phase 22 – working the land (own improvements)
 - [x] Woodcutting (🪓 / H): a unit that hasn't attacked and has a move left fells a forest of its own territory (not a city, resource or ruin) for +6 gold and ends its turn; the tile becomes plains for good (stumps on the map) – cheaper to cross, but no forest cover and no shelter from charges; the AI fells timber when its treasury runs dry and no enemy is near
+- [x] Planting (🌱 / N): a unit that hasn't attacked and has a move left plants saplings on plains of its own territory (not a city, resource or ruin) for 3 gold and ends its turn; 4 rounds later they are a forest – a felled forest grows back, bare plains become new woods; sprouts on the map, the tile panel counts down; the AI replants its felled forests (or plains next to its woods) with gold to spare
 
 ## Ideas (unordered)
 - Diplomacy with multiple AIs

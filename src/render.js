@@ -56,7 +56,8 @@ export function render(ctx, state, view = {}) {
       ctx.fillStyle = TERRAIN[t.terrain].color;
       ctx.fill();
       drawTerrainDetail(ctx, t.terrain, c.x, c.y);
-      if (t.felled) drawStumps(ctx, c.x, c.y);
+      if (t.felled && t.terrain !== 'forest') drawStumps(ctx, c.x, c.y);
+      if (t.sapling !== undefined) drawSaplings(ctx, c.x, c.y);
       if (t.road) drawRoad(ctx, state, t, c);
       if (t.resource) drawResource(ctx, t.resource, c.x + 13, c.y - 12);
       if (t.resource && isPillaged(state, t)) drawPillaged(ctx, c.x + 13, c.y - 12);
@@ -702,6 +703,28 @@ function drawBridge(ctx, p1, p2) {
   ctx.lineWidth = 1;
   ctx.fillRect(-5, -7, 10, 14);
   ctx.strokeRect(-5, -7, 10, 14);
+  ctx.restore();
+}
+
+// Saplings: four small green sprouts on plains that will be a forest in a few rounds.
+function drawSaplings(ctx, x, y) {
+  ctx.save();
+  ctx.lineCap = 'round';
+  for (const [dx, dy] of [[-12, 9], [-3, 1], [6, 9], [12, -1]]) {
+    ctx.strokeStyle = '#5b3d1c';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(x + dx, y + dy + 3);
+    ctx.lineTo(x + dx, y + dy - 2);
+    ctx.stroke();
+    ctx.fillStyle = '#3f9a3a';
+    ctx.beginPath();
+    ctx.moveTo(x + dx, y + dy - 8);
+    ctx.lineTo(x + dx - 3.5, y + dy - 1);
+    ctx.lineTo(x + dx + 3.5, y + dy - 1);
+    ctx.closePath();
+    ctx.fill();
+  }
   ctx.restore();
 }
 

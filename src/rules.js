@@ -218,9 +218,17 @@ export const ROADWORK = { gold: 4, aiReserve: 16 };
 
 // Woodcutting: a unit of any kind that hasn't attacked and still has moves left, standing on a forest tile of
 // its own territory (not a city, a resource or a ruin), can fell the forest for `gold`: the tile becomes plains
-// for good (no forest cover, cost or charge protection any more) and the unit's turn ends. The AI fells only
-// with less than `aiBelow` gold and no visible enemy within `aiSafe` tiles, one unit at a time.
+// (no forest cover, cost or charge protection any more – until saplings are planted there, see PLANTING) and the
+// unit's turn ends. The AI fells only with less than `aiBelow` gold and no visible enemy within `aiSafe` tiles,
+// one unit at a time.
 export const TIMBER = { gold: 6, aiBelow: 12, aiSafe: 3 };
+
+// Planting: a unit of any kind that hasn't attacked and still has moves left, standing on plains of its own
+// territory (not a city, a resource or a ruin, no saplings yet), can plant saplings for `gold`; the unit's turn
+// ends. At the start of round `rounds` later the saplings have grown into a forest – a felled forest grows back,
+// fresh plains become new forest. The AI replants its felled forests (or plains next to its forests) with gold
+// above `aiReserve`, never with a visible enemy within TIMBER.aiSafe tiles, at most once per turn.
+export const PLANTING = { gold: 3, rounds: 4, aiReserve: 20 };
 
 // Ancient ruins: scattered over the map in pairs (one nearer each capital, about equally far, so neither
 // side is favoured). The first unit of any kind to end its move on a ruin explores it and gets one reward.

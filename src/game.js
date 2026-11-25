@@ -4,7 +4,7 @@ import { generateMap, hasRiverEdge } from './map.js';
 import {
   TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY, VISION, DIFFICULTY, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, ROAD_COST, RIVER, FLANK, HIGH_GROUND, CHARGE, SKIRMISH, PURSUIT, INSPIRE,
   FACTIONS, NO_FACTION, MAP_SIZES, HAPPENINGS, FORTIFY, TERRITORY, RESOURCES,
-  UPGRADES, UPGRADE, DISBAND, SIGHTINGS, RUINS, EXPLORE, PILLAGE, REPAIR, ROADWORK, TIMBER, SENTRY, VOLLEY, FORCED_MARCH, ANIM_SPEEDS, HEROES, MILESTONES, ADVISOR, GROWTH, TRADE, UNREST, FOCUS, LEVY, PERKS, SEASONS,
+  UPGRADES, UPGRADE, DISBAND, SIGHTINGS, RUINS, EXPLORE, PILLAGE, REPAIR, ROADWORK, TIMBER, PLANTING, SENTRY, VOLLEY, FORCED_MARCH, ANIM_SPEEDS, HEROES, MILESTONES, ADVISOR, GROWTH, TRADE, UNREST, FOCUS, LEVY, PERKS, SEASONS,
 } from './rules.js';
 import { createRng } from './rng.js';
 
@@ -132,7 +132,7 @@ function countStat(state, name, player) {
   state.stats[name][player]++;
 }
 
-export const STATE_VERSION = 36;
+export const STATE_VERSION = 37;
 
 // Converts a saved state of an older version to the current one; returns null for an unknown format.
 export function migrateState(s) {
@@ -284,6 +284,10 @@ export function migrateState(s) {
   if (s.version === 35) {
     // woodcutting arrived in version 36 – a missing `tile.felled` means the terrain came with the map
     s.version = 36;
+  }
+  if (s.version === 36) {
+    // planting arrived in version 37 – a missing `tile.sapling` / `tile.planted` means nothing was planted
+    s.version = 37;
   }
   return s.version === STATE_VERSION ? s : null;
 }
@@ -539,6 +543,12 @@ export function applyEvent(state, ev) {
     const u = getUnit(state, ev.unitId);
     if (u) { u.movesLeft = 0; u.hasAttacked = true; delete u.fortified; delete u.sentry; }
     if (ev.gold) state.gold[ev.player] += ev.gold;
+  } else if (ev.type === 'plant') {
+    const t = tileAt(state, ev.q, ev.r);
+    if (t) t.sapling = ev.until;
+    const u = getUnit(state, ev.unitId);
+    if (u) { u.movesLeft = 0; u.hasAttacked = true; delete u.fortified; delete u.sentry; }
+    if (ev.gold) state.gold[ev.player] -= ev.gold;
   } else if (ev.type === 'volley') {
     const u = getUnit(state, ev.unitId);
     if (u) u.hp = ev.hp;
@@ -2439,6 +2449,7 @@ export function endTurn(state) {
   if (state.current === 0) {
     state.turn++;
     recoverPillaged(state);
+    growSaplings(state);
     recordHistory(state);
     if (seasonStarted(state)) {
       const k = seasonKind(state);
@@ -2542,8 +2553,8 @@ export function buildRoad(state, unitId) {
 }
 
 // ---------- woodcutting ----------
-// A felled forest turns into plains for good; `tile.felled` remembers it was forest when the map was made
-// (the stumps are drawn, "Same map again" restores the forest).
+// A felled forest turns into plains (until saplings are planted there); `tile.felled` remembers the trees that
+// stood there (the stumps are drawn; "Same map again" restores the forest unless `tile.planted`, see planting).
 
 // Can the unit fell the forest it stands on? An own unit of the current player (any kind) that hasn't
 // attacked and has moves left, on a forest tile of its own territory that is not a city, a resource or a ruin.
@@ -2573,6 +2584,70 @@ export function fellForest(state, unitId) {
   emit(state, ev);
   addLog(state, `${PLAYERS[unit.owner].name}: ${UNIT_TYPES[unit.type].name} felled a forest (+${TIMBER.gold} gold)`, { by: unit.owner, at: [tile] });
   return ev;
+}
+
+// ---------- planting ----------
+// tile.sapling = the round at whose start the saplings on these plains become a forest. A forest growing on a
+// felled tile loses `felled` (the stumps are gone); one growing on plains of the map gets `tile.planted`, which
+// stays even if it is felled again later – so `planted` means "plains on the map" and "Same map again" can
+// restore every tile.
+
+// Can the unit plant saplings on the tile it stands on? An own unit of the current player (any kind) that
+// hasn't attacked and has moves left, on plains of its own territory without saplings, not a city, a resource
+// or a ruin. `affordable` = also checks the gold.
+export function canPlant(state, unit, { affordable = true } = {}) {
+  if (!unit || unit.owner !== state.current || state.winner !== null) return false;
+  if (unit.hasAttacked || unit.movesLeft <= 0) return false;
+  const tile = tileAt(state, unit.q, unit.r);
+  if (!tile || tile.terrain !== 'plains' || tile.sapling !== undefined || tile.resource || tile.ruin) return false;
+  if (cityAt(state, unit.q, unit.r) || territoryOwner(state, unit.q, unit.r) !== unit.owner) return false;
+  return !affordable || state.gold[unit.owner] >= PLANTING.gold;
+}
+
+// Rounds until the saplings on a tile have grown (0 = no saplings).
+export function saplingRoundsLeft(state, tile) {
+  return tile && tile.sapling !== undefined ? Math.max(1, tile.sapling - state.turn) : 0;
+}
+
+// Plants saplings under the unit. Returns the 'plant' event or null when not allowed.
+export function plantForest(state, unitId) {
+  const unit = getUnit(state, unitId);
+  if (!canPlant(state, unit)) return null;
+  const tile = tileAt(state, unit.q, unit.r);
+  tile.sapling = state.turn + PLANTING.rounds;
+  state.gold[unit.owner] -= PLANTING.gold;
+  unit.movesLeft = 0;
+  unit.hasAttacked = true;
+  delete unit.fortified;
+  delete unit.goto;
+  delete unit.explore;
+  delete unit.sentry;
+  const ev = { type: 'plant', unitId: unit.id, player: unit.owner, q: tile.q, r: tile.r, gold: PLANTING.gold, until: tile.sapling };
+  emit(state, ev);
+  addLog(state, `${PLAYERS[unit.owner].name}: ${UNIT_TYPES[unit.type].name} planted saplings (−${PLANTING.gold} gold, a forest in ${PLANTING.rounds} rounds)`, {
+    by: unit.owner, at: [tile],
+  });
+  return ev;
+}
+
+// At the start of a round, saplings whose time has come grow into a forest (one chronicle line per owner,
+// seen by the owner of the land and whoever sees the tiles).
+function growSaplings(state) {
+  const grown = new Map(); // territory owner (or null) -> tiles
+  for (const t of Object.values(state.tiles)) {
+    if (t.sapling === undefined || state.turn < t.sapling) continue;
+    delete t.sapling;
+    t.terrain = 'forest';
+    if (t.felled) delete t.felled;
+    else t.planted = true;
+    const owner = territoryOwner(state, t.q, t.r);
+    if (!grown.has(owner)) grown.set(owner, []);
+    grown.get(owner).push(t);
+  }
+  for (const [owner, tiles] of grown) {
+    const whose = owner === null ? 'Saplings' : `${PLAYERS[owner].name}: saplings`;
+    addLog(state, `🌲 ${whose} grew into ${tiles.length === 1 ? 'a forest' : `${tiles.length} forests`}`, { by: owner, at: tiles });
+  }
 }
 
 // ---------- pillage ----------
@@ -2952,7 +3027,7 @@ export function eventTiles(st, ev) {
   if (ev.type === 'fortify' || ev.type === 'upgrade') return at(getUnit(st, ev.unitId));
   if (ev.type === 'volley') return [...at(ev), ...city()];
   if (ev.type === 'focus' || ev.type === 'perk') return []; // the owner's choice – nothing to watch
-  if (['march', 'disband', 'ruin', 'pillage', 'repair', 'road', 'fell'].includes(ev.type)) return at(ev);
+  if (['march', 'disband', 'ruin', 'pillage', 'repair', 'road', 'fell', 'plant'].includes(ev.type)) return at(ev);
   return null;
 }
 
@@ -3276,6 +3351,7 @@ export function stateProblem(s) {
   if (!s.tiles || typeof s.tiles !== 'object' || Array.isArray(s.tiles)) return 'no map';
   for (const [k, t] of Object.entries(s.tiles)) {
     if (!t || k !== key(t.q, t.r) || !TERRAIN[t.terrain]) return `bad tile ${k}`;
+    if (t.sapling !== undefined && !(isInt(t.sapling) && t.sapling >= 1 && t.terrain === 'plains')) return `bad saplings on ${k}`;
   }
   if (!Array.isArray(s.cities) || !s.cities.length) return 'no cities';
   if (!Array.isArray(s.units)) return 'no units';

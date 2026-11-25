@@ -7,7 +7,7 @@ import {
   upgradeOptions, upgradeUnit, canDisband, disbandRefund, disbandUnit, chargeReady, movesAfterAttack, pursuesInto,
   updateSightings, lastSeen, lastSeenAt, lastSeenText, armyOverview, ARMY_STATUS, ruinBelieved,
   canExplore, setExplore, canPillage, pillage, isPillaged, pillageTurnsLeft, canRepair, repair,
-  rallyPath, setRally, clearRally, swapPartners, swapUnits, canBuildRoad, buildRoad, canFell, fellForest, timelineFor, adviseTurn, suggestRecruit, growthText, tradeText, tradeRoute, unrestText, focusOf, focusText, setFocus, levy, levyProblem, setRecruitOrder, clearRecruitOrder, recruitOrderText, enemyTurnReplay,
+  rallyPath, setRally, clearRally, swapPartners, swapUnits, canBuildRoad, buildRoad, canFell, fellForest, canPlant, plantForest, saplingRoundsLeft, timelineFor, adviseTurn, suggestRecruit, growthText, tradeText, tradeRoute, unrestText, focusOf, focusText, setFocus, levy, levyProblem, setRecruitOrder, clearRecruitOrder, recruitOrderText, enemyTurnReplay,
   perkAttackMult, perkOptions, perkChoices, perkText, learnPerk, seasonInfo, seasonStarted, riverCrossCost, frostBound, frostLoss, harvestGold, winterCamp, campSaves,
 } from './game.js';
 import { createAnimator } from './anim.js';
@@ -20,7 +20,7 @@ import { SHORTCUTS, keyAction, recruitKey } from './keys.js';
 import { render, canvasSize, pickHex, tileCenter } from './render.js';
 import { key } from './hex.js';
 import {
-  UNIT_TYPES, TERRAIN, PLAYERS, DIFFICULTY, BUILDINGS, RANKS, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FORTIFY, FORCED_MARCH, TERRITORY, ECONOMY, RESOURCES, HIGH_GROUND, CHARGE, INSPIRE, RUINS, PILLAGE, REPAIR, ROADWORK, TIMBER, SENTRY, FOCUS, LEVY, PERKS, SEASONS,
+  UNIT_TYPES, TERRAIN, PLAYERS, DIFFICULTY, BUILDINGS, RANKS, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FORTIFY, FORCED_MARCH, TERRITORY, ECONOMY, RESOURCES, HIGH_GROUND, CHARGE, INSPIRE, RUINS, PILLAGE, REPAIR, ROADWORK, TIMBER, PLANTING, SENTRY, FOCUS, LEVY, PERKS, SEASONS,
 } from './rules.js';
 
 const SAVE_KEY = 'game123-save';
@@ -325,7 +325,11 @@ function updateHud() {
       html += `<button data-road class="secondary wide-btn" ${ok ? '' : 'disabled'} title="Lay a road on this tile of your territory: moving between road tiles costs ½; costs ${ROADWORK.gold} gold and ends the unit's turn (B)">🛤 Build road (${ROADWORK.gold} gold)</button>`;
     }
     if (u.owner === 0 && !busy() && canFell(state, u)) {
-      html += `<button data-fell class="secondary wide-btn" title="Fell this forest of your territory for timber: +${TIMBER.gold} gold, but the tile becomes plains for good – no forest cover, no shelter from cavalry charges; ends the unit's turn (H)">🪓 Fell forest (+${TIMBER.gold} gold)</button>`;
+      html += `<button data-fell class="secondary wide-btn" title="Fell this forest of your territory for timber: +${TIMBER.gold} gold, but the tile becomes plains – no forest cover, no shelter from cavalry charges – until saplings grow there again; ends the unit's turn (H)">🪓 Fell forest (+${TIMBER.gold} gold)</button>`;
+    }
+    if (u.owner === 0 && !busy() && canPlant(state, u, { affordable: false })) {
+      const ok = canPlant(state, u);
+      html += `<button data-plant class="secondary wide-btn" ${ok ? '' : 'disabled'} title="Plant saplings on these plains of your territory: in ${PLANTING.rounds} rounds they grow into a forest (cover for defenders, timber to fell later); costs ${PLANTING.gold} gold and ends the unit's turn (N)">🌱 Plant forest (${PLANTING.gold} gold)</button>`;
     }
     if (u.raided && u.movesLeft > 0) {
       html += `<p class="march">🏇 Hit and run: ${fmt(u.movesLeft)} move left to pull back – no second attack, no foreign city</p>`;
@@ -438,7 +442,9 @@ function updateHud() {
         : ` · river (crossing +${riverCrossCost(state)} move${riverCrossCost(state) > RIVER.crossCost ? ' – swollen by the thaw' : ''}, defender +${Math.round(RIVER.defBonus * 100)} %)`;
     const high = HIGH_GROUND.terrain.includes(tile.terrain) ? ` · high ground (attack +${Math.round(HIGH_GROUND.atkBonus * 100)} % against units below)` : '';
     const noCharge = CHARGE.blockedBy.includes(tile.terrain) ? ' · no cavalry charge' : '';
-    const felled = tile.felled ? ' · felled forest (stumps)' : '';
+    const felled = tile.sapling !== undefined
+      ? ` · saplings (a forest in ${saplingRoundsLeft(state, tile)} round${saplingRoundsLeft(state, tile) === 1 ? '' : 's'})`
+      : tile.felled ? ' · felled forest (stumps)' : tile.planted ? ' · planted forest' : '';
     html = `<p>${t.name}${felled}${t.passable ? ` · move ${t.cost} · defense +${Math.round(t.defBonus * 100)} %` : ' · impassable'}${high}${noCharge}${road}${river}</p>`;
     if (tile.terrain && t.passable && zocTiles(state, 0).has(key(hover.q, hover.r))) {
       html += '<p class="hint">Enemy zone of control – a unit that steps here must stop</p>';
@@ -1220,6 +1226,7 @@ $('info').addEventListener('click', (ev) => {
   if (ev.target.closest('button[data-repair]')) { repairSelected(); return; }
   if (ev.target.closest('button[data-road]')) { roadSelected(); return; }
   if (ev.target.closest('button[data-fell]')) { fellSelected(); return; }
+  if (ev.target.closest('button[data-plant]')) { plantSelected(); return; }
   if (ev.target.closest('button[data-disband]')) { disbandSelected(); return; }
   const uBtn = ev.target.closest('button[data-upgrade]');
   if (uBtn) { upgradeSelected(uBtn.dataset.upgrade); return; }
@@ -1257,6 +1264,7 @@ window.addEventListener('keydown', (ev) => {
   else if (act.type === 'repair') repairSelected();
   else if (act.type === 'road') roadSelected();
   else if (act.type === 'fell') fellSelected();
+  else if (act.type === 'plant') plantSelected();
   else if (act.type === 'disband') disbandSelected();
   else if (act.type === 'recruit') recruitSelected(act.unitType);
   else if (act.type === 'help') $('keys-dialog').showModal();
@@ -1438,6 +1446,17 @@ function fellSelected() {
   if (!u || u.owner !== 0 || !canFell(state, u)) return;
   const before = cloneState(state);
   fellForest(state, u.id);
+  undoStack = [];
+  afterAction(before);
+}
+
+// Plants saplings under the selected unit (N / button in the panel).
+function plantSelected() {
+  if (busy() || state.winner !== null) return;
+  const u = selectedUnit();
+  if (!u || u.owner !== 0 || !canPlant(state, u)) return;
+  const before = cloneState(state);
+  plantForest(state, u.id);
   undoStack = [];
   afterAction(before);
 }

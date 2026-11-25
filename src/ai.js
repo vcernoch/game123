@@ -4,10 +4,10 @@ import {
   reachable, attackTargets, previewAttack, moveUnit, attack, buyUnit,
   unitAt, getUnit, tileAt, fortify, difficultyOf, visibleTiles, exploredTiles, build, hasBuilding, unitCost, buildingCost, factionOf,
   threatTiles, cityAt, upgradeOptions, upgradeUnit, ruinBelieved, canPillage, pillage, isPillaged, repair, pillageTurnsLeft, territoryOwner,
-  swapPartners, swapUnits, canBuildRoad, buildRoad, roadLinks, canFell, fellForest, citySize, tradeTargets, cutsAt, cityUnrest,
+  swapPartners, swapUnits, canBuildRoad, buildRoad, roadLinks, canFell, fellForest, canPlant, plantForest, citySize, tradeTargets, cutsAt, cityUnrest,
   focusOf, setFocus, citySieged, canLevy, levy, marchReach, forceMarch, canWithdraw, pursuitTile, perkOptions, learnPerk, frostBound, campSaves,
 } from './game.js';
-import { UNIT_TYPES, TERRAIN, ROADWORK, TIMBER, GROWTH, FOCUS, LEVY, FORCED_MARCH, PURSUIT, PERKS, SEASONS } from './rules.js';
+import { UNIT_TYPES, TERRAIN, ROADWORK, TIMBER, PLANTING, GROWTH, FOCUS, LEVY, FORCED_MARCH, PURSUIT, PERKS, SEASONS } from './rules.js';
 
 // What the AI knows about the map. On hard it sees everything, otherwise only what it has explored and sees.
 export function aiKnowledge(state, me) {
@@ -66,6 +66,7 @@ export function runAITurn(state) {
   recruit(state, me);
   buildSomething(state, me);
   layRoad(state, me, know);
+  plantSaplings(state, me, know);
   setFocuses(state, me, know);
   learnPerks(state, me); // units promoted in this turn's fights
 }
@@ -135,6 +136,23 @@ export function fellTimber(state, me, know = aiKnowledge(state, me), garrisons =
     .filter((x) => x.owner === me && !x.fortified && !garrisons.has(x.id) && canFell(state, x) && !enemiesNear(state, x, know, TIMBER.aiSafe).length)
     .sort((a, b) => a.id - b.id)[0];
   return u ? fellForest(state, u.id) : null;
+}
+
+// Planting: with spare gold, one idle unit a turn replants a felled forest of its own territory it stands on
+// (or plains next to an own forest – timber for later), never with a visible enemy within TIMBER.aiSafe tiles;
+// fortified units keep their posts. Returns the 'plant' event or null.
+export function plantSaplings(state, me, know = aiKnowledge(state, me)) {
+  if (state.gold[me] < PLANTING.aiReserve + PLANTING.gold) return null;
+  let best = null;
+  let bestScore = 0;
+  for (const u of state.units) {
+    if (u.owner !== me || u.fortified || !canPlant(state, u) || enemiesNear(state, u, know, TIMBER.aiSafe).length) continue;
+    const tile = tileAt(state, u.q, u.r);
+    const woods = neighbors(u.q, u.r).some((n) => { const t = tileAt(state, n.q, n.r); return t && t.terrain === 'forest'; });
+    const score = tile.felled ? 2 : woods ? 1 : 0;
+    if (score > bestScore || (score && score === bestScore && u.id < best.id)) { best = u; bestScore = score; }
+  }
+  return best ? plantForest(state, best.id) : null;
 }
 
 // Carries out lined-up melee strikes in the order they were planned (later plans assume the earlier hits);
