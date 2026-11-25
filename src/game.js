@@ -4,7 +4,7 @@ import { generateMap, hasRiverEdge } from './map.js';
 import {
   TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY, VISION, DIFFICULTY, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, ROAD_COST, RIVER, FLANK, HIGH_GROUND, CHARGE, SKIRMISH, PURSUIT, INSPIRE,
   FACTIONS, NO_FACTION, MAP_SIZES, HAPPENINGS, FORTIFY, TERRITORY, RESOURCES,
-  UPGRADES, UPGRADE, DISBAND, SIGHTINGS, RUINS, EXPLORE, PILLAGE, REPAIR, ROADWORK, TIMBER, PLANTING, SENTRY, VOLLEY, FORCED_MARCH, ANIM_SPEEDS, HEROES, MILESTONES, ADVISOR, GROWTH, TRADE, UNREST, FOCUS, LEVY, PERKS, SEASONS,
+  UPGRADES, UPGRADE, DISBAND, SIGHTINGS, RUINS, EXPLORE, PILLAGE, REPAIR, ROADWORK, TIMBER, PLANTING, FARMS, SENTRY, VOLLEY, FORCED_MARCH, ANIM_SPEEDS, HEROES, MILESTONES, ADVISOR, GROWTH, TRADE, UNREST, FOCUS, LEVY, PERKS, SEASONS,
 } from './rules.js';
 import { createRng } from './rng.js';
 
@@ -132,7 +132,7 @@ function countStat(state, name, player) {
   state.stats[name][player]++;
 }
 
-export const STATE_VERSION = 37;
+export const STATE_VERSION = 38;
 
 // Converts a saved state of an older version to the current one; returns null for an unknown format.
 export function migrateState(s) {
@@ -288,6 +288,10 @@ export function migrateState(s) {
   if (s.version === 36) {
     // planting arrived in version 37 – a missing `tile.sapling` / `tile.planted` means nothing was planted
     s.version = 37;
+  }
+  if (s.version === 37) {
+    // farms arrived in version 38 – a missing `tile.farm` means no farm
+    s.version = 38;
   }
   return s.version === STATE_VERSION ? s : null;
 }
@@ -546,6 +550,12 @@ export function applyEvent(state, ev) {
   } else if (ev.type === 'plant') {
     const t = tileAt(state, ev.q, ev.r);
     if (t) t.sapling = ev.until;
+    const u = getUnit(state, ev.unitId);
+    if (u) { u.movesLeft = 0; u.hasAttacked = true; delete u.fortified; delete u.sentry; }
+    if (ev.gold) state.gold[ev.player] -= ev.gold;
+  } else if (ev.type === 'farm') {
+    const t = tileAt(state, ev.q, ev.r);
+    if (t) t.farm = true;
     const u = getUnit(state, ev.unitId);
     if (u) { u.movesLeft = 0; u.hasAttacked = true; delete u.fortified; delete u.sentry; }
     if (ev.gold) state.gold[ev.player] -= ev.gold;
@@ -835,9 +845,10 @@ export function citySize(city) {
 
 // Owner's turns still needed to reach the next size (null at the largest size or for a neutral city).
 // A commerce focus halts growth (null too); a granary halves the wait.
-export function growthLeft(city) {
+// With `state`, working farms next to the city speed it up (see FARMS).
+export function growthLeft(city, state = null) {
   const size = citySize(city);
-  const rate = cityFocus(city).growth;
+  const rate = state ? growthRate(state, city) : cityFocus(city).growth;
   if (city.owner === null || size >= GROWTH.maxSize || !rate) return null;
   return Math.max(1, Math.ceil((GROWTH.turns[size - 1] - (city.growth || 0)) / rate));
 }
@@ -860,8 +871,9 @@ export function growthText(state, city) {
   if (cityUnrest(city)) return `${base} · growth halted: unrest`;
   if (citySieged(state, city)) return `${base} · growth halted: enemy at the gates`;
   if (!cityFocus(city).growth) return `${base} · growth halted: ${cityFocus(city).name.toLowerCase()} focus`;
-  const left = growthLeft(city);
-  return `${base} · grows in ${left} turn${left === 1 ? '' : 's'}`;
+  const left = growthLeft(city, state);
+  const farms = workingFarms(state, city).length;
+  return `${base} · grows in ${left} turn${left === 1 ? '' : 's'}${farms ? ` (🌾 ${farms} farm${farms === 1 ? '' : 's'})` : ''}`;
 }
 
 // At the start of a player's turn their cities grow (before income, so a new size pays at once).
@@ -871,7 +883,7 @@ export function growCities(state, player) {
   const grown = [];
   for (const city of state.cities.filter((c) => c.owner === player)) {
     const size = citySize(city);
-    const rate = cityFocus(city).growth;
+    const rate = growthRate(state, city);
     if (size >= GROWTH.maxSize || !rate || citySieged(state, city) || cityUnrest(city)) continue;
     city.growth = (city.growth || 0) + rate;
     if (city.growth < GROWTH.turns[size - 1]) continue;
@@ -2599,7 +2611,7 @@ export function canPlant(state, unit, { affordable = true } = {}) {
   if (!unit || unit.owner !== state.current || state.winner !== null) return false;
   if (unit.hasAttacked || unit.movesLeft <= 0) return false;
   const tile = tileAt(state, unit.q, unit.r);
-  if (!tile || tile.terrain !== 'plains' || tile.sapling !== undefined || tile.resource || tile.ruin) return false;
+  if (!tile || tile.terrain !== 'plains' || tile.sapling !== undefined || tile.farm || tile.resource || tile.ruin) return false;
   if (cityAt(state, unit.q, unit.r) || territoryOwner(state, unit.q, unit.r) !== unit.owner) return false;
   return !affordable || state.gold[unit.owner] >= PLANTING.gold;
 }
@@ -2648,6 +2660,70 @@ function growSaplings(state) {
     const whose = owner === null ? 'Saplings' : `${PLAYERS[owner].name}: saplings`;
     addLog(state, `🌲 ${whose} grew into ${tiles.length === 1 ? 'a forest' : `${tiles.length} forests`}`, { by: owner, at: tiles });
   }
+}
+
+// ---------- farms ----------
+// tile.farm = true: fields on plains next to a city (see FARMS in rules.js). A farm is kept when the city
+// changes hands – it feeds whoever holds the city.
+
+// Farm tiles next to the city that work right now: no unit of another player stands on them.
+export function cityFarms(state, city) {
+  return neighbors(city.q, city.r).map((n) => tileAt(state, n.q, n.r)).filter((t) => t && t.farm);
+}
+export function workingFarms(state, city) {
+  if (city.owner === null) return [];
+  return cityFarms(state, city).filter((t) => {
+    const u = unitAt(state, t.q, t.r);
+    return !u || u.owner === city.owner;
+  }).slice(0, FARMS.perCity);
+}
+
+// Growth points the city gains per turn of its owner: its focus rate, plus one per working farm (up to
+// FARMS.perCity) – but farms can't restart growth a focus halts.
+export function growthRate(state, city) {
+  const rate = cityFocus(city).growth;
+  return rate ? rate + workingFarms(state, city).length : 0;
+}
+
+// Can the unit lay out a farm on the tile it stands on? An own unit of the current player (any kind) that
+// hasn't attacked and has moves left, on plains of its own territory right next to an own city with room for
+// another farm, without a farm or saplings, not a city, a resource or a ruin. `affordable` = also checks the gold.
+export function canFarm(state, unit, { affordable = true } = {}) {
+  if (!unit || unit.owner !== state.current || state.winner !== null) return false;
+  if (unit.hasAttacked || unit.movesLeft <= 0) return false;
+  const tile = tileAt(state, unit.q, unit.r);
+  if (!tile || tile.terrain !== 'plains' || tile.farm || tile.sapling !== undefined || tile.resource || tile.ruin) return false;
+  if (cityAt(state, unit.q, unit.r) || territoryOwner(state, unit.q, unit.r) !== unit.owner) return false;
+  if (!farmCities(state, tile, unit.owner).length) return false;
+  return !affordable || state.gold[unit.owner] >= FARMS.gold;
+}
+
+// Own cities next to the tile that still have room for a farm.
+export function farmCities(state, tile, player) {
+  return neighbors(tile.q, tile.r).map((n) => cityAt(state, n.q, n.r))
+    .filter((c) => c && c.owner === player && cityFarms(state, c).length < FARMS.perCity);
+}
+
+// Lays out a farm under the unit. Returns the 'farm' event or null when not allowed.
+export function buildFarm(state, unitId) {
+  const unit = getUnit(state, unitId);
+  if (!canFarm(state, unit)) return null;
+  const tile = tileAt(state, unit.q, unit.r);
+  const city = farmCities(state, tile, unit.owner)[0];
+  tile.farm = true;
+  state.gold[unit.owner] -= FARMS.gold;
+  unit.movesLeft = 0;
+  unit.hasAttacked = true;
+  delete unit.fortified;
+  delete unit.goto;
+  delete unit.explore;
+  delete unit.sentry;
+  const ev = { type: 'farm', unitId: unit.id, player: unit.owner, q: tile.q, r: tile.r, gold: FARMS.gold };
+  emit(state, ev);
+  addLog(state, `${PLAYERS[unit.owner].name}: ${UNIT_TYPES[unit.type].name} laid out a farm by ${city.name} (−${FARMS.gold} gold)`, {
+    by: unit.owner, at: [tile],
+  });
+  return ev;
 }
 
 // ---------- pillage ----------
@@ -3027,7 +3103,7 @@ export function eventTiles(st, ev) {
   if (ev.type === 'fortify' || ev.type === 'upgrade') return at(getUnit(st, ev.unitId));
   if (ev.type === 'volley') return [...at(ev), ...city()];
   if (ev.type === 'focus' || ev.type === 'perk') return []; // the owner's choice – nothing to watch
-  if (['march', 'disband', 'ruin', 'pillage', 'repair', 'road', 'fell', 'plant'].includes(ev.type)) return at(ev);
+  if (['march', 'disband', 'ruin', 'pillage', 'repair', 'road', 'fell', 'plant', 'farm'].includes(ev.type)) return at(ev);
   return null;
 }
 
@@ -3352,6 +3428,7 @@ export function stateProblem(s) {
   for (const [k, t] of Object.entries(s.tiles)) {
     if (!t || k !== key(t.q, t.r) || !TERRAIN[t.terrain]) return `bad tile ${k}`;
     if (t.sapling !== undefined && !(isInt(t.sapling) && t.sapling >= 1 && t.terrain === 'plains')) return `bad saplings on ${k}`;
+    if (t.farm !== undefined && !(t.farm === true && t.terrain === 'plains')) return `bad farm on ${k}`;
   }
   if (!Array.isArray(s.cities) || !s.cities.length) return 'no cities';
   if (!Array.isArray(s.units)) return 'no units';

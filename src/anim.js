@@ -123,6 +123,9 @@ export function createAnimator(redraw, isVisible = () => true, onShow = () => {}
     } else if (ev.type === 'plant') {
       addFloater(tileCenter(ev.q, ev.r), `🌱 saplings −${ev.gold}`, '#a8e08a');
       await tween(PAUSE_MS * 2, () => {});
+    } else if (ev.type === 'farm') {
+      addFloater(tileCenter(ev.q, ev.r), `🌾 farm −${ev.gold}`, '#f0d98a');
+      await tween(PAUSE_MS * 2, () => {});
     } else if (ev.type === 'fell') {
       addFloater(tileCenter(ev.q, ev.r), `🪓 timber +${ev.gold}`, '#e8d3a6');
       await tween(PAUSE_MS * 2, () => {});

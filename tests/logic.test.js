@@ -13,7 +13,7 @@ import {
   armyOverview, unitStatus, unitWhere, ARMY_STATUS, ruinBelieved, ruinKind, exploreRuin,
   exploreTarget, canExplore, setExplore, followExplore, canPillage, pillage, isPillaged, pillageTurnsLeft, cityAt, canRepair, repair,
   rallyPath, rallyTarget, canRally, setRally, clearRally, canSwap, swapPartners, swapUnits,
-  canBuildRoad, buildRoad, roadLinks, canFell, fellForest, canPlant, plantForest, saplingRoundsLeft, canSentry, sentry, checkSentries, SENTRY_TEXT, volleyTarget, cityVolleys, animSpeedOf, nextAnimSpeed,
+  canBuildRoad, buildRoad, roadLinks, canFell, fellForest, canPlant, plantForest, saplingRoundsLeft, canFarm, buildFarm, cityFarms, workingFarms, growthRate, farmCities, canSentry, sentry, checkSentries, SENTRY_TEXT, volleyTarget, cityVolleys, animSpeedOf, nextAnimSpeed,
   unitTitle, heroName, hallOfFame, inspiredBy, inspireBonus, inspiredUnits, timelineFor, leadChanges, whose, adviseTurn, suggestRecruit,
   citySize, growthLeft, citySieged, growthText, growCities, tradeRoute, tradeText, cutRoutes, routesCutBy,
   cityUnrest, unrestCalm, unrestTurnsLeft, unrestText, calmCities, focusOf, cityFocus, setFocus, focusText,
@@ -29,14 +29,14 @@ import {
   dangerMap, dangerPenalty, moveTowardsGoal, DANGER, unexploredLand, SCOUT_WHEN_UNKNOWN, aiKnowledge,
   upgradeSomething, UPGRADE_HORSE_RADIUS, strikeLinedUp, pillageGoals, PILLAGE_DETOUR, repairGoals, REPAIR_DETOUR,
   relieveWounded, RELIEF_MIN_HP, layRoad, blockadeGoals, BLOCKADE_DETOUR, pickFocus, setFocuses, shouldLevy, withdraw, pursue,
-  pickPerk, learnPerks, fellTimber, plantSaplings,
+  pickPerk, learnPerks, fellTimber, plantSaplings, layFarm, farmGoals,
 } from '../src/ai.js';
 import { decideTap } from '../src/input.js';
 import { SHORTCUTS, keyAction, recruitKey } from '../src/keys.js';
 import { chartSvg, summaryRows, hallOfFameHtml, timelineHtml } from '../src/stats.js';
 import { soundFor, createLimiter, createSound, SOUND_NAMES } from '../src/sound.js';
 import { readFileSync } from 'node:fs';
-import { TIMBER as TIMBER_RULES, PLANTING as PLANTING_RULES } from '../src/rules.js';
+import { TIMBER as TIMBER_RULES, PLANTING as PLANTING_RULES, FARMS as FARM_RULES } from '../src/rules.js';
 import { GAME_VERSION, GAME_DATE } from '../src/version.js';
 import { pathExists, generateMap, dirTo } from '../src/map.js';
 import { seasonAt, seasonKind, seasonInfo, seasonStarted, riverCrossCost, frostLoss, frostBound, harvestGold, outsideHome, winterNear, winterCamp, campSaves } from '../src/game.js';
@@ -6142,7 +6142,8 @@ test('planting: who can\'t, and the AI replants only with gold to spare and no e
   // AI-vs-AI games plant some saplings, always in their own territory, and the forests grow; states stay valid
   let planted = 0;
   let grown = 0;
-  for (const seed of [7, 10, 12]) {
+  // (seed 10 ran into a long stalemate before farms – the AI mostly plants in long wars; 16 is such a game now)
+  for (const seed of [7, 16, 12]) {
     const g = createGame({ seed });
     for (let i = 0; i < 120 && g.winner === null; i++) {
       runAITurn(g);
@@ -6158,4 +6159,195 @@ test('planting: who can\'t, and the AI replants only with gold to spare and no e
   }
   assert.ok(planted >= 1, `saplings planted: ${planted}`);
   assert.ok(grown >= 1, `forests grown: ${grown}`);
+});
+
+// A warrior on plains of own territory right next to the own capital, with gold for a farm.
+function farmSetup(seed = 3) {
+  const t = plantSetup(seed);
+  t.s.happenings = false;
+  return t;
+}
+
+// Another free plains tile next to the city (own territory), or null.
+function farmSpot(s, city, not = []) {
+  const t = neighbors(city.q, city.r).map((n) => tileAt(s, n.q, n.r)).find((x) => x && isPassable(s, x.q, x.r) && !x.resource && !x.ruin
+    && !cityAt(s, x.q, x.r) && !unitAt(s, x.q, x.r) && territoryOwner(s, x.q, x.r) === city.owner && !not.includes(x));
+  if (t) t.terrain = 'plains';
+  return t || null;
+}
+
+test('farms: a farm costs gold, ends the turn, replays, and makes the city next to it grow faster', () => {
+  const { s, cap, tile, u } = farmSetup();
+  assert.ok(STATE_VERSION >= 38, 'farms arrived in version 38');
+  assert.ok(canFarm(s, u));
+  assert.deepEqual(farmCities(s, tile, 0).map((c) => c.id), [cap.id]);
+  assert.equal(growthRate(s, cap), 1);
+  assert.equal(growthLeft(cap, s), GROWTH.turns[0]);
+  const before = cloneState(s);
+  const ev = buildFarm(s, u.id);
+  assert.equal(ev.type, 'farm');
+  assert.equal(s.gold[0], 10 - FARM_RULES.gold);
+  assert.equal(tile.farm, true);
+  assert.equal(tile.terrain, 'plains');
+  assert.equal(u.movesLeft, 0);
+  assert.ok(u.hasAttacked, 'the unit\'s turn is over');
+  assert.ok(!canFarm(s, u), 'not twice');
+  assert.ok(!canPlant(s, u), 'no saplings on a farm');
+  assert.match(s.log.at(-1).msg, new RegExp(`^You: Warrior laid out a farm by ${cap.name} \\(−5 gold\\)$`));
+  const evs = drainEvents(s);
+  for (const e of evs) applyEvent(before, e);
+  assert.deepEqual(snapshot(before), snapshot(s));
+  assert.equal(before.gold[0], s.gold[0]);
+  assert.equal(tileAt(before, tile.q, tile.r).farm, true);
+  assert.deepEqual(eventTiles(before, ev), [{ q: tile.q, r: tile.r }]);
+  assert.equal(soundFor(ev, 0), 'build');
+  assert.equal(keyAction('k').type, 'farm');
+  assert.equal(keyAction('K').type, 'farm');
+  // the farm feeds the capital: +1 growth a turn
+  assert.deepEqual(workingFarms(s, cap), [tile]);
+  assert.equal(growthRate(s, cap), 2);
+  assert.equal(growthLeft(cap, s), Math.ceil(GROWTH.turns[0] / 2));
+  assert.equal(growthLeft(cap), GROWTH.turns[0], 'without the state only the focus counts');
+  assert.match(growthText(s, cap), /grows in 3 turns \(🌾 1 farm\)$/);
+  cap.growth = 0;
+  growCities(s, 0);
+  assert.equal(cap.growth, 2);
+  // a second farm adds another point – a third one isn't allowed
+  const second = farmSpot(s, cap, [tile]);
+  second.farm = true;
+  assert.equal(growthRate(s, cap), 3);
+  assert.match(growthText(s, cap), /\(🌾 2 farms\)$/);
+  const third = farmSpot(s, cap, [tile, second]);
+  if (third && farmCities(s, third, 0).length === 0) {
+    const w = spawnUnit(s, 'warrior', 0, third.q, third.r);
+    w.movesLeft = 2; w.hasAttacked = false;
+    assert.ok(!canFarm(s, w), `only ${FARM_RULES.perCity} farms per city`);
+    s.units = s.units.filter((x) => x.id !== w.id);
+  }
+  // an enemy on a farm tramples it; a commerce focus still halts growth; a farm doesn't help a fully grown city
+  s.units = s.units.filter((x) => x.id !== u.id);
+  const foe = spawnUnit(s, 'warrior', 1, tile.q, tile.r);
+  assert.deepEqual(workingFarms(s, cap), [second]);
+  assert.equal(growthRate(s, cap), 2);
+  s.units = s.units.filter((x) => x.id !== foe.id);
+  cap.focus = 'commerce';
+  assert.equal(growthRate(s, cap), 0);
+  assert.equal(growthLeft(cap, s), null);
+  delete cap.focus;
+  cap.size = GROWTH.maxSize;
+  assert.equal(growthLeft(cap, s), null);
+  // a farm feeds whoever holds the city
+  cap.size = 1;
+  cap.owner = 1;
+  assert.equal(growthRate(s, cap), 3);
+  cap.owner = 0;
+  // saves keep the farm, an old save migrates, nonsense is rejected
+  const back = importGame(exportGame(s, GAME_VERSION));
+  assert.equal(back.error, undefined);
+  assert.equal(back.state.tiles[key(tile.q, tile.r)].farm, true);
+  const old = cloneState(s);
+  old.version = 37;
+  assert.equal(migrateState(old).version, STATE_VERSION);
+  const bad = cloneState(s);
+  bad.tiles[key(tile.q, tile.r)].farm = 'yes';
+  assert.match(stateProblem(bad), /farm/);
+  const hilly = cloneState(s);
+  hilly.tiles[key(tile.q, tile.r)].terrain = 'hills';
+  assert.match(stateProblem(hilly), /farm/);
+  assert.equal(stateProblem(cloneState(s)), null);
+});
+
+test('farms: who can\'t, and the AI farms around its growing cities only with gold to spare and no enemy near', () => {
+  const t = farmSetup();
+  const cases = [
+    ['attacked', (s, u) => { u.hasAttacked = true; }],
+    ['no moves', (s, u) => { u.movesLeft = 0; }],
+    ['not own turn', (s) => { s.current = 1; }],
+    ['forest', (s, u) => { tileAt(s, u.q, u.r).terrain = 'forest'; }],
+    ['hills', (s, u) => { tileAt(s, u.q, u.r).terrain = 'hills'; }],
+    ['already a farm', (s, u) => { tileAt(s, u.q, u.r).farm = true; }],
+    ['saplings', (s, u) => { tileAt(s, u.q, u.r).sapling = s.turn + 2; }],
+    ['a resource', (s, u) => { tileAt(s, u.q, u.r).resource = 'gold'; }],
+    ['a ruin', (s, u) => { tileAt(s, u.q, u.r).ruin = true; }],
+    ['in a city', (s, u) => { const c = s.cities.find((x) => x.owner === 0); u.q = c.q; u.r = c.r; tileAt(s, c.q, c.r).terrain = 'plains'; }],
+    ['city full of farms', (s, u) => {
+      const c = s.cities.find((x) => x.id === t.cap.id);
+      const tile = tileAt(s, u.q, u.r);
+      const spots = [];
+      for (let i = 0; i < FARM_RULES.perCity; i++) { const sp = farmSpot(s, c, [tile, ...spots]); sp.farm = true; spots.push(sp); }
+    }],
+    ['enemy city next to it', (s) => { s.cities.find((x) => x.id === t.cap.id).owner = 1; }],
+    ['not next to a city', (s, u) => {
+      const own = Object.values(s.tiles).find((x) => isPassable(s, x.q, x.r) && territoryOwner(s, x.q, x.r) === 0 && !unitAt(s, x.q, x.r)
+        && !cityAt(s, x.q, x.r) && !neighbors(x.q, x.r).some((n) => cityAt(s, n.q, n.r)));
+      own.terrain = 'plains';
+      u.q = own.q; u.r = own.r;
+    }],
+    ['game over', (s) => { s.winner = 1; }],
+  ];
+  for (const [why, spoil] of cases) {
+    const s = cloneState(t.s);
+    const u = getUnit(s, t.u.id);
+    spoil(s, u);
+    assert.ok(!canFarm(s, u), why);
+    assert.equal(buildFarm(s, u.id), null, why);
+  }
+  const poor = cloneState(t.s);
+  poor.gold[0] = FARM_RULES.gold - 1;
+  assert.ok(canFarm(poor, getUnit(poor, t.u.id), { affordable: false }));
+  assert.ok(!canFarm(poor, getUnit(poor, t.u.id)), 'not enough gold');
+
+  // AI: an idle unit by a growing city lays out a farm only with gold to spare, unfortified, no enemy close
+  const s = createGame({ seed: 3, fog: false });
+  s.current = 1;
+  const cap = s.cities.find((c) => c.capital && c.owner === 1);
+  s.units = [];
+  const tile = farmSpot(s, cap);
+  const w = spawnUnit(s, 'warrior', 1, tile.q, tile.r);
+  w.movesLeft = 2; w.hasAttacked = false;
+  s.gold[1] = FARM_RULES.aiReserve + FARM_RULES.gold - 1;
+  assert.equal(layFarm(s, 1), null, 'no gold to spare');
+  s.gold[1] = FARM_RULES.aiReserve + FARM_RULES.gold;
+  w.fortified = true;
+  assert.equal(layFarm(s, 1), null, 'keeps a fortified position');
+  delete w.fortified;
+  cap.size = GROWTH.maxSize;
+  assert.equal(layFarm(s, 1), null, 'a fully grown city needs no farm');
+  cap.size = 1;
+  cap.focus = 'commerce';
+  assert.equal(layFarm(s, 1), null, 'a commerce city doesn\'t grow');
+  delete cap.focus;
+  const foe = neighbors(tile.q, tile.r).find((n) => isPassable(s, n.q, n.r) && !cityAt(s, n.q, n.r));
+  const enemy = spawnUnit(s, 'warrior', 0, foe.q, foe.r);
+  assert.equal(layFarm(s, 1), null, 'not with an enemy next to it');
+  s.units = s.units.filter((x) => x.id !== enemy.id);
+  assert.equal(layFarm(s, 1).type, 'farm');
+  assert.equal(tile.farm, true);
+  assert.equal(s.gold[1], FARM_RULES.aiReserve);
+  // the AI is drawn to a free farm spot next to it
+  const other = spawnUnit(s, 'warrior', 1, cap.q, cap.r);
+  farmSpot(s, cap, [tile]);
+  s.gold[1] = FARM_RULES.aiReserve + FARM_RULES.gold;
+  const spots = farmGoals(s, other, aiKnowledge(s, 1));
+  assert.ok(spots.length >= 1 && spots.every((g) => g.farm && !tileAt(s, g.q, g.r).farm && distance(g, cap) === 1));
+  s.gold[1] = 0;
+  assert.deepEqual(farmGoals(s, other, aiKnowledge(s, 1)), [], 'no goals without gold');
+
+  // AI-vs-AI games lay out farms next to own cities; states stay valid
+  let farms = 0;
+  for (const seed of [7, 10, 12]) {
+    const g = createGame({ seed });
+    for (let i = 0; i < 120 && g.winner === null; i++) {
+      runAITurn(g);
+      for (const e of drainEvents(g).filter((x) => x.type === 'farm')) {
+        farms++;
+        assert.equal(territoryOwner(g, e.q, e.r), e.player);
+        assert.ok(neighbors(e.q, e.r).some((n) => { const c = cityAt(g, n.q, n.r); return c && c.owner === e.player; }));
+      }
+      if (g.winner === null) endTurn(g);
+      drainEvents(g);
+    }
+    assert.equal(stateProblem(cloneState(g)), null);
+  }
+  assert.ok(farms >= 1, `farms laid out: ${farms}`);
 });

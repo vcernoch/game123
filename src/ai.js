@@ -4,10 +4,10 @@ import {
   reachable, attackTargets, previewAttack, moveUnit, attack, buyUnit,
   unitAt, getUnit, tileAt, fortify, difficultyOf, visibleTiles, exploredTiles, build, hasBuilding, unitCost, buildingCost, factionOf,
   threatTiles, cityAt, upgradeOptions, upgradeUnit, ruinBelieved, canPillage, pillage, isPillaged, repair, pillageTurnsLeft, territoryOwner,
-  swapPartners, swapUnits, canBuildRoad, buildRoad, roadLinks, canFell, fellForest, canPlant, plantForest, citySize, tradeTargets, cutsAt, cityUnrest,
+  swapPartners, swapUnits, canBuildRoad, buildRoad, roadLinks, canFell, fellForest, canPlant, plantForest, canFarm, buildFarm, farmCities, growthRate, citySize, tradeTargets, cutsAt, cityUnrest,
   focusOf, setFocus, citySieged, canLevy, levy, marchReach, forceMarch, canWithdraw, pursuitTile, perkOptions, learnPerk, frostBound, campSaves,
 } from './game.js';
-import { UNIT_TYPES, TERRAIN, ROADWORK, TIMBER, PLANTING, GROWTH, FOCUS, LEVY, FORCED_MARCH, PURSUIT, PERKS, SEASONS } from './rules.js';
+import { UNIT_TYPES, TERRAIN, ROADWORK, TIMBER, PLANTING, FARMS, GROWTH, FOCUS, LEVY, FORCED_MARCH, PURSUIT, PERKS, SEASONS } from './rules.js';
 
 // What the AI knows about the map. On hard it sees everything, otherwise only what it has explored and sees.
 export function aiKnowledge(state, me) {
@@ -25,6 +25,7 @@ export function runAITurn(state) {
   upgradeSomething(state, me, know);
   const garrisons = assignGarrisons(state, me, know);
   fellTimber(state, me, know, garrisons); // a unit that walked onto own forest last turn cuts it before it moves on
+  layFarm(state, me, know, garrisons); // … and one that walked onto a farm spot lays it out
   const danger = dangerMap(state, me, know);
   // archers and catapults go first so melee units can finish weakened targets (focus fire)
   const ids = state.units
@@ -67,6 +68,7 @@ export function runAITurn(state) {
   buildSomething(state, me);
   layRoad(state, me, know);
   plantSaplings(state, me, know);
+  layFarm(state, me, know);
   setFocuses(state, me, know);
   learnPerks(state, me); // units promoted in this turn's fights
 }
@@ -153,6 +155,24 @@ export function plantSaplings(state, me, know = aiKnowledge(state, me)) {
     if (score > bestScore || (score && score === bestScore && u.id < best.id)) { best = u; bestScore = score; }
   }
   return best ? plantForest(state, best.id) : null;
+}
+
+// Farms: with spare gold, one idle unit a turn lays out a farm on the plains it stands on next to an own city
+// that still grows (not fully grown, its focus lets it grow), never with a visible enemy within TIMBER.aiSafe
+// tiles; fortified units keep their posts. The smallest city first. Returns the 'farm' event or null.
+export function layFarm(state, me, know = aiKnowledge(state, me), garrisons = new Map()) {
+  if (state.gold[me] < FARMS.aiReserve + FARMS.gold) return null;
+  let best = null;
+  let bestScore = -Infinity;
+  for (const u of state.units) {
+    if (u.owner !== me || u.fortified || garrisons.has(u.id) || !canFarm(state, u) || enemiesNear(state, u, know, TIMBER.aiSafe).length) continue;
+    const growing = farmCities(state, tileAt(state, u.q, u.r), me)
+      .filter((c) => citySize(c) < GROWTH.maxSize && growthRate(state, c) > 0);
+    if (!growing.length) continue;
+    const score = -Math.min(...growing.map(citySize));
+    if (score > bestScore || (score === bestScore && u.id < best.id)) { best = u; bestScore = score; }
+  }
+  return best ? buildFarm(state, best.id) : null;
 }
 
 // Carries out lined-up melee strikes in the order they were planned (later plans assume the earlier hits);
@@ -486,12 +506,12 @@ export function goalsFor(state, unit, know = aiKnowledge(state, unit.owner)) {
   if (home.length) return home;
   const goals = [...ruinGoals(state, unit, know), ...repairGoals(state, unit), ...timberGoals(state, unit, know)];
   if (UNIT_TYPES[unit.type].noCapture) return [...goals, ...exploreGoals(state, know)];
-  goals.push(...pillageGoals(state, unit, know), ...blockadeGoals(state, unit, know));
+  goals.push(...farmGoals(state, unit, know), ...pillageGoals(state, unit, know), ...blockadeGoals(state, unit, know));
   for (const c of state.cities) {
     if (c.owner !== unit.owner && know.knows(c.q, c.r)) goals.push({ q: c.q, r: c.r, w: (c.owner === null ? 1 : 1.3) + (citySize(c) - 1) * GROWTH.aiGoalBonus });
   }
   for (const u of state.units) if (u.owner !== unit.owner && know.sees(u.q, u.r)) goals.push({ q: u.q, r: u.r, w: 1.1, enemy: true });
-  return goals.some((g) => !g.ruin && !g.pillage && !g.repair && !g.blockade && !g.timber) ? goals : [...goals, ...exploreGoals(state, know)];
+  return goals.some((g) => !g.ruin && !g.pillage && !g.repair && !g.blockade && !g.timber && !g.farm) ? goals : [...goals, ...exploreGoals(state, know)];
 }
 
 // Winter camp: units that stayed put outside their land in winter fortify instead of losing HP to the frost.
@@ -561,6 +581,19 @@ export function timberGoals(state, unit, know) {
     .filter((t) => t && t.terrain === 'forest' && !t.resource && !t.ruin && !cityAt(state, t.q, t.r)
       && territoryOwner(state, t.q, t.r) === unit.owner && !unitAt(state, t.q, t.r))
     .map((t) => ({ q: t.q, r: t.r, w: 0.85, timber: true }));
+}
+
+// Farms: with gold to spare, a unit in its own land with no enemy near is drawn to a free farm spot right
+// next to it (plains by an own growing city with room for a farm).
+export function farmGoals(state, unit, know) {
+  if (state.gold[unit.owner] < FARMS.aiReserve + FARMS.gold || territoryOwner(state, unit.q, unit.r) !== unit.owner) return [];
+  if (enemiesNear(state, unit, know, TIMBER.aiSafe).length) return [];
+  return neighbors(unit.q, unit.r)
+    .map((n) => tileAt(state, n.q, n.r))
+    .filter((t) => t && t.terrain === 'plains' && !t.farm && t.sapling === undefined && !t.resource && !t.ruin
+      && !cityAt(state, t.q, t.r) && territoryOwner(state, t.q, t.r) === unit.owner && !unitAt(state, t.q, t.r)
+      && farmCities(state, t, unit.owner).some((c) => citySize(c) < GROWTH.maxSize && growthRate(state, c) > 0))
+    .map((t) => ({ q: t.q, r: t.r, w: 0.85, farm: true }));
 }
 
 function exploreGoals(state, know) {

@@ -2,6 +2,19 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-25 – Farms (v0.49.0)
+- **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.38.0–v0.49.0) is ahead of `main` (v0.37.0) – please merge it.
+- Starting state green (141 logic tests + smoke).
+- Phase 22 (working the land), own improvement. City growth could only be steered by the focus, which costs gold every turn. Farms are a one-time investment in the land around a city: a small city can be grown into a rich one without giving up the Balanced or Fortress focus.
+- `FARMS` in `rules.js` (gold 5, perCity 2, AI reserve 18). In `game.js`: `cityFarms`, `workingFarms` (an enemy unit on the tile tramples it), `growthRate` (focus rate + working farms, but 0 stays 0 – commerce still halts growth), `farmCities`, `canFarm`, `buildFarm` (`tile.farm`, turn ends, `farm` event replayed by `applyEvent` and placed by `eventTiles`, chronicle line "… laid out a farm by <city>"). `growCities` uses `growthRate`; `growthLeft(city, state)` counts farms when given the state; `growthText` adds "(🌾 N farms)". Planting is not allowed on a farm. `stateProblem` validates farms (only `true`, only on plains).
+- AI (`ai.js`): `layFarm` – with gold ≥ 23, one unfortified non-garrison unit on a farm spot next to an own growing city (not fully grown, focus lets it grow) lays a farm, smallest city first; called before the units move and at the end of the turn (after planting); `farmGoals` – with that gold, a unit in its own land with no enemy near is drawn to a free farm spot next to it (not scouts). ≈ 4–5 farms per game.
+- UI: "🌾 Build farm (5 gold)" in the unit panel (names the city, disabled without gold), key K (in the `?` overlay), "🌾 farm −5" floater, build sound, wheat and green field strips drawn on the tile, the tile panel says "farm (the city next to it grows faster)". Help text updated.
+- Balance (AI vs AI, default settings, 300 half-turns max, 40 games): with farms 22 : 16, 2 stalemates; without 23 : 14, 3 stalemates – within noise.
+- State structure: `state.version` 38 (`tile.farm`; nothing to migrate).
+- Test adjusted (not weakened): the planting test's AI-vs-AI check relied on seed 10 being a long stalemate (the only one of its three seeds where the AI planted at all). With farms that game ends at turn 24, so seed 16 (a long war now) replaces it; the assertion is unchanged.
+- Tests: +2 logic (gold, turn ends, replay, key K, faster growth with 1 and 2 farms, trampling, commerce and full size, a captured city keeps the farm's benefit, save/migration/validation; every "can't" case and the gold check; AI only with gold to spare, unfortified, not for grown or commerce cities, not with an enemy near; farm goals; AI-vs-AI farms always next to own cities, states valid). Smoke test: the panel button lays a farm, gold, chronicle, growth text, tile panel (`artifacts/screenshot-farm.png`); "Same map again" comparison ignores farms.
+- Status: `npm run check` green (143 logic tests + smoke).
+
 ## 2026-11-25 – Planting (v0.48.0)
 - **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.38.0–v0.48.0) is ahead of `main` (v0.37.0) – please merge it.
 - Starting state green (139 logic tests + smoke).

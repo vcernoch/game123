@@ -7,7 +7,7 @@ import {
   upgradeOptions, upgradeUnit, canDisband, disbandRefund, disbandUnit, chargeReady, movesAfterAttack, pursuesInto,
   updateSightings, lastSeen, lastSeenAt, lastSeenText, armyOverview, ARMY_STATUS, ruinBelieved,
   canExplore, setExplore, canPillage, pillage, isPillaged, pillageTurnsLeft, canRepair, repair,
-  rallyPath, setRally, clearRally, swapPartners, swapUnits, canBuildRoad, buildRoad, canFell, fellForest, canPlant, plantForest, saplingRoundsLeft, timelineFor, adviseTurn, suggestRecruit, growthText, tradeText, tradeRoute, unrestText, focusOf, focusText, setFocus, levy, levyProblem, setRecruitOrder, clearRecruitOrder, recruitOrderText, enemyTurnReplay,
+  rallyPath, setRally, clearRally, swapPartners, swapUnits, canBuildRoad, buildRoad, canFell, fellForest, canPlant, plantForest, saplingRoundsLeft, canFarm, buildFarm, farmCities, timelineFor, adviseTurn, suggestRecruit, growthText, tradeText, tradeRoute, unrestText, focusOf, focusText, setFocus, levy, levyProblem, setRecruitOrder, clearRecruitOrder, recruitOrderText, enemyTurnReplay,
   perkAttackMult, perkOptions, perkChoices, perkText, learnPerk, seasonInfo, seasonStarted, riverCrossCost, frostBound, frostLoss, harvestGold, winterCamp, campSaves,
 } from './game.js';
 import { createAnimator } from './anim.js';
@@ -20,7 +20,7 @@ import { SHORTCUTS, keyAction, recruitKey } from './keys.js';
 import { render, canvasSize, pickHex, tileCenter } from './render.js';
 import { key } from './hex.js';
 import {
-  UNIT_TYPES, TERRAIN, PLAYERS, DIFFICULTY, BUILDINGS, RANKS, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FORTIFY, FORCED_MARCH, TERRITORY, ECONOMY, RESOURCES, HIGH_GROUND, CHARGE, INSPIRE, RUINS, PILLAGE, REPAIR, ROADWORK, TIMBER, PLANTING, SENTRY, FOCUS, LEVY, PERKS, SEASONS,
+  UNIT_TYPES, TERRAIN, PLAYERS, DIFFICULTY, BUILDINGS, RANKS, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FORTIFY, FORCED_MARCH, TERRITORY, ECONOMY, RESOURCES, HIGH_GROUND, CHARGE, INSPIRE, RUINS, PILLAGE, REPAIR, ROADWORK, TIMBER, PLANTING, FARMS, SENTRY, FOCUS, LEVY, PERKS, SEASONS,
 } from './rules.js';
 
 const SAVE_KEY = 'game123-save';
@@ -331,6 +331,11 @@ function updateHud() {
       const ok = canPlant(state, u);
       html += `<button data-plant class="secondary wide-btn" ${ok ? '' : 'disabled'} title="Plant saplings on these plains of your territory: in ${PLANTING.rounds} rounds they grow into a forest (cover for defenders, timber to fell later); costs ${PLANTING.gold} gold and ends the unit's turn (N)">🌱 Plant forest (${PLANTING.gold} gold)</button>`;
     }
+    if (u.owner === 0 && !busy() && canFarm(state, u, { affordable: false })) {
+      const ok = canFarm(state, u);
+      const by = farmCities(state, tileAt(state, u.q, u.r), 0).map((c) => c.name).join(' and ');
+      html += `<button data-farm class="secondary wide-btn" ${ok ? '' : 'disabled'} title="Lay out a farm on these plains next to ${by}: each working farm (up to ${FARMS.perCity} per city) adds +1 to the city's growth every turn; an enemy standing on it tramples the crop; costs ${FARMS.gold} gold and ends the unit's turn (K)">🌾 Build farm (${FARMS.gold} gold)</button>`;
+    }
     if (u.raided && u.movesLeft > 0) {
       html += `<p class="march">🏇 Hit and run: ${fmt(u.movesLeft)} move left to pull back – no second attack, no foreign city</p>`;
     }
@@ -445,7 +450,8 @@ function updateHud() {
     const felled = tile.sapling !== undefined
       ? ` · saplings (a forest in ${saplingRoundsLeft(state, tile)} round${saplingRoundsLeft(state, tile) === 1 ? '' : 's'})`
       : tile.felled ? ' · felled forest (stumps)' : tile.planted ? ' · planted forest' : '';
-    html = `<p>${t.name}${felled}${t.passable ? ` · move ${t.cost} · defense +${Math.round(t.defBonus * 100)} %` : ' · impassable'}${high}${noCharge}${road}${river}</p>`;
+    const farm = tile.farm ? ' · farm (the city next to it grows faster)' : '';
+    html = `<p>${t.name}${felled}${farm}${t.passable ? ` · move ${t.cost} · defense +${Math.round(t.defBonus * 100)} %` : ' · impassable'}${high}${noCharge}${road}${river}</p>`;
     if (tile.terrain && t.passable && zocTiles(state, 0).has(key(hover.q, hover.r))) {
       html += '<p class="hint">Enemy zone of control – a unit that steps here must stop</p>';
     }
@@ -1227,6 +1233,7 @@ $('info').addEventListener('click', (ev) => {
   if (ev.target.closest('button[data-road]')) { roadSelected(); return; }
   if (ev.target.closest('button[data-fell]')) { fellSelected(); return; }
   if (ev.target.closest('button[data-plant]')) { plantSelected(); return; }
+  if (ev.target.closest('button[data-farm]')) { farmSelected(); return; }
   if (ev.target.closest('button[data-disband]')) { disbandSelected(); return; }
   const uBtn = ev.target.closest('button[data-upgrade]');
   if (uBtn) { upgradeSelected(uBtn.dataset.upgrade); return; }
@@ -1265,6 +1272,7 @@ window.addEventListener('keydown', (ev) => {
   else if (act.type === 'road') roadSelected();
   else if (act.type === 'fell') fellSelected();
   else if (act.type === 'plant') plantSelected();
+  else if (act.type === 'farm') farmSelected();
   else if (act.type === 'disband') disbandSelected();
   else if (act.type === 'recruit') recruitSelected(act.unitType);
   else if (act.type === 'help') $('keys-dialog').showModal();
@@ -1457,6 +1465,17 @@ function plantSelected() {
   if (!u || u.owner !== 0 || !canPlant(state, u)) return;
   const before = cloneState(state);
   plantForest(state, u.id);
+  undoStack = [];
+  afterAction(before);
+}
+
+// Lays out a farm under the selected unit (K / button in the panel).
+function farmSelected() {
+  if (busy() || state.winner !== null) return;
+  const u = selectedUnit();
+  if (!u || u.owner !== 0 || !canFarm(state, u)) return;
+  const before = cloneState(state);
+  buildFarm(state, u.id);
   undoStack = [];
   afterAction(before);
 }

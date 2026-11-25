@@ -810,10 +810,10 @@ try {
   await page.screenshot({ path: 'artifacts/screenshot-mobile.png', fullPage: true });
 
   // "Same map again" on the game-over banner restarts the same map with the same settings
-  // (looted ruins, pillaged resources, built roads, felled forests and planted saplings are the only changes a game makes to its map – undo them before comparing)
+  // (looted ruins, pillaged resources, built roads, felled forests, planted saplings and farms are the only changes a game makes to its map – undo them before comparing)
   const endTiles = await page.evaluate(() => JSON.stringify(Object.fromEntries(Object.entries(window.__game.getState().tiles)
     .map(([k, t]) => {
-      const { ruinGone, pillagedUntil, roadBuilt, felled, sapling, planted, ...rest } = t;
+      const { ruinGone, pillagedUntil, roadBuilt, felled, sapling, planted, farm, ...rest } = t;
       if (roadBuilt) delete rest.road;
       if (felled) rest.terrain = 'forest';
       if (planted) rest.terrain = 'plains';
@@ -1507,6 +1507,48 @@ try {
   await page.mouse.move(sprout.x, sprout.y);
   if (!(await page.textContent('#info')).includes('saplings (a forest in 4 rounds)')) throw new Error('planting: the tile panel does not mention the saplings');
   await page.screenshot({ path: 'artifacts/screenshot-plant.png' });
+
+  // farms: a warrior on plains next to the capital lays out a farm with the panel button – gold, chronicle, faster growth
+  const field = await page.evaluate(async () => {
+    const g = await import('./src/game.js');
+    const rnd = await import('./src/render.js');
+    window.__game.newGame(31, { fog: false, happenings: false });
+    const st = window.__game.getState();
+    st.units = st.units.filter((u) => u.owner !== 0);
+    st.gold[0] = 7;
+    const cap = st.cities.find((c) => c.capital && c.owner === 0);
+    const hexDist = (a, b) => Math.max(Math.abs(a.q - b.q), Math.abs(a.r - b.r), Math.abs(a.q + a.r - b.q - b.r));
+    const t = Object.values(st.tiles).find((x) => hexDist(x, cap) === 1 && g.isFree(st, x.q, x.r) && !x.resource && !x.ruin
+      && g.territoryOwner(st, x.q, x.r) === 0);
+    if (!t) return { error: 'no tile' };
+    t.terrain = 'plains';
+    const u = g.spawnUnit(st, 'warrior', 0, t.q, t.r);
+    u.movesLeft = 2; u.hasAttacked = false;
+    g.drainEvents(st);
+    window.__game.refresh();
+    const rect = document.getElementById('board').getBoundingClientRect();
+    const k = rect.width / rnd.canvasSize(st).w;
+    const c = rnd.tileCenter(t.q, t.r);
+    return { q: t.q, r: t.r, cap: cap.id, x: rect.left + c.x * k, y: rect.top + c.y * k };
+  });
+  if (field.error) throw new Error(`farms: ${field.error}`);
+  await page.mouse.click(field.x, field.y);
+  if (!(await page.textContent('#info')).includes('Build farm (5 gold)')) throw new Error('farms: no button in the unit panel');
+  await page.click('#info button[data-farm]');
+  await page.waitForFunction(() => !window.__game.isBusy(), null, { timeout: 10000 });
+  const farmed = await page.evaluate(async (p) => {
+    const g = await import('./src/game.js');
+    const st = window.__game.getState();
+    const cap = st.cities.find((c) => c.id === p.cap);
+    return { farm: st.tiles[`${p.q},${p.r}`].farm, gold: st.gold[0], log: document.getElementById('log').textContent, growth: g.growthText(st, cap) };
+  }, field);
+  if (farmed.farm !== true || farmed.gold !== 2 || !farmed.log.includes('laid out a farm') || !farmed.growth.includes('🌾 1 farm')) {
+    throw new Error(`farms: ${JSON.stringify(farmed)}`);
+  }
+  await page.keyboard.press('Escape');
+  await page.mouse.move(field.x, field.y);
+  if (!(await page.textContent('#info')).includes('farm (the city next to it grows faster)')) throw new Error('farms: the tile panel does not mention the farm');
+  await page.screenshot({ path: 'artifacts/screenshot-farm.png' });
 
   // rivers: large map without fog, hovering a river tile shows its description in the panel
   await page.setViewportSize({ width: 1280, height: 800 });

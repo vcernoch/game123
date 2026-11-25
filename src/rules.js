@@ -230,6 +230,16 @@ export const TIMBER = { gold: 6, aiBelow: 12, aiSafe: 3 };
 // above `aiReserve`, never with a visible enemy within TIMBER.aiSafe tiles, at most once per turn.
 export const PLANTING = { gold: 3, rounds: 4, aiReserve: 20 };
 
+// Farms: a unit of any kind that hasn't attacked and still has moves left, standing on plains of its own
+// territory right next to an own city (not a city, a resource, a ruin or saplings, no farm yet), can lay out a
+// farm for `gold`; the unit's turn ends. Every working farm next to a city adds +1 to the city's growth each
+// turn – up to `perCity` farms count – but only while the city grows at all (a commerce focus, unrest or a siege
+// still halt it, and a fully grown city gains nothing). A farm feeds whoever holds the city next to it; an
+// enemy unit standing on it tramples the crop (it doesn't count while the unit stays). The AI lays out farms
+// next to its growing cities with gold above `aiReserve`, never with a visible enemy within TIMBER.aiSafe tiles,
+// at most once per turn.
+export const FARMS = { gold: 5, perCity: 2, aiReserve: 18 };
+
 // Ancient ruins: scattered over the map in pairs (one nearer each capital, about equally far, so neither
 // side is favoured). The first unit of any kind to end its move on a ruin explores it and gets one reward.
 // perPair: one pair per this many map tiles (small 1, medium 2, large 4 pairs).

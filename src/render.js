@@ -58,6 +58,7 @@ export function render(ctx, state, view = {}) {
       drawTerrainDetail(ctx, t.terrain, c.x, c.y);
       if (t.felled && t.terrain !== 'forest') drawStumps(ctx, c.x, c.y);
       if (t.sapling !== undefined) drawSaplings(ctx, c.x, c.y);
+      if (t.farm) drawFarm(ctx, c.x, c.y);
       if (t.road) drawRoad(ctx, state, t, c);
       if (t.resource) drawResource(ctx, t.resource, c.x + 13, c.y - 12);
       if (t.resource && isPillaged(state, t)) drawPillaged(ctx, c.x + 13, c.y - 12);
@@ -724,6 +725,29 @@ function drawSaplings(ctx, x, y) {
     ctx.lineTo(x + dx + 3.5, y + dy - 1);
     ctx.closePath();
     ctx.fill();
+  }
+  ctx.restore();
+}
+
+// A farm: a few furrowed field strips in wheat and green, slanted like ploughed land.
+function drawFarm(ctx, x, y) {
+  ctx.save();
+  const strips = [['#d9b54a', -14], ['#8fb04a', -5], ['#d9b54a', 4], ['#b9a04a', 13]];
+  for (const [color, dx] of strips) {
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(x + dx - 5, y + 12);
+    ctx.lineTo(x + dx + 1, y + 12);
+    ctx.lineTo(x + dx + 5, y - 4);
+    ctx.lineTo(x + dx - 1, y - 4);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(90, 60, 20, 0.55)';
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    ctx.moveTo(x + dx - 2, y + 12);
+    ctx.lineTo(x + dx + 2, y - 4);
+    ctx.stroke();
   }
   ctx.restore();
 }
