@@ -112,7 +112,7 @@ export function createAnimator(redraw, isVisible = () => true, onShow = () => {}
       addFloater(tileCenter(ev.q, ev.r), ruinFloat(ev), '#d9cbff');
       await tween(PAUSE_MS * 2, () => {});
     } else if (ev.type === 'pillage') {
-      addFloater(tileCenter(ev.q, ev.r), `🔥 pillaged +${ev.gold}`, '#ffb36b');
+      addFloater(tileCenter(ev.q, ev.r), `🔥 ${ev.farm ? 'farm burnt' : 'pillaged'} +${ev.gold}`, '#ffb36b');
       await tween(PAUSE_MS * 2, () => {});
     } else if (ev.type === 'repair') {
       addFloater(tileCenter(ev.q, ev.r), '🔧 repaired', '#bfe8a6');

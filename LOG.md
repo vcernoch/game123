@@ -2,6 +2,18 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-26 – Burning farms (v0.50.0)
+- **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.38.0–v0.50.0) is ahead of `main` (v0.37.0) – please merge it.
+- Starting state green (143 logic tests + smoke).
+- Phase 22 was done, so a new Phase 23 (raids on the land), own improvement taken from Ideas. Farms were a safe one-time investment – an enemy standing on one only trampled the crop while it stayed. Now a raid can destroy one, so farms on an exposed side of a city are a risk worth guarding.
+- `PILLAGE.farmGold` 3 in `rules.js`. In `game.js`: `canPillage` also accepts a farm in another player's territory (same rules: not a scout, hasn't attacked, a move left, not in a city); new `pillageKind` ('farm' / 'resource' / null); `pillage` hands farms to `burnFarm` – `tile.farm` is removed (no recovery timer – the owner has to lay it out again for 5 gold), +3 gold, the unit's turn ends, a `pillage` event with `farm: true` (replayed by `applyEvent`), chronicle line "… burnt a farm by <city>". `turnReport` counts `burnt` separately: "A farm of yours was burnt." (red bar, ✕ on the tile).
+- AI: `pillageGoals` also lists enemy farms (w 0.9, below a resource's 0.95) – only farms it **sees** right now, since a farm may have been laid out since the AI last saw the tile (resources are part of the map, so `knows` is enough for them). The existing pillage call burns a farm it stands on.
+- UI: "🔥 Burn farm (+3 gold)" in the unit panel instead of Pillage on a farm, "🔥 farm burnt +3" floater, `?` overlay text for P, help text.
+- Balance (20 AI-vs-AI games, default settings with fog, 300 half-turns max): wins 6 : 13, 1 stalemate; 19 farms laid out, 2 burnt – a rare raid, within the noise of earlier samples.
+- No state structure change (`state.version` stays 38).
+- Tests: +2 logic (gold, farm gone, no timer, turn ends, chronicle, exact replay, event tiles, sounds, turn report texts incl. plural and red bar, raider is no victim, growth back to 1, owner can farm again, valid state; scout / attacked / no moves / not own turn / own farm / game over can't; AI goal for a visible farm with weight, none for a farm in the fog; a real AI turn burns a farm its unit stands on).
+- Status: `npm run check` green (145 logic tests + smoke).
+
 ## 2026-11-25 – Farms (v0.49.0)
 - **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.38.0–v0.49.0) is ahead of `main` (v0.37.0) – please merge it.
 - Starting state green (141 logic tests + smoke).

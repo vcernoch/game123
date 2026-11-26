@@ -6,7 +6,7 @@ import {
   rankOf, rankMult, buildingCost, inspiredUnits, unitMove, factionOf, riverDefense, flankers, zocTiles, threatTiles, exportGame, importGame, saveFileName, parseSeed, restartOptions,
   upgradeOptions, upgradeUnit, canDisband, disbandRefund, disbandUnit, chargeReady, movesAfterAttack, pursuesInto,
   updateSightings, lastSeen, lastSeenAt, lastSeenText, armyOverview, ARMY_STATUS, ruinBelieved,
-  canExplore, setExplore, canPillage, pillage, isPillaged, pillageTurnsLeft, canRepair, repair,
+  canExplore, setExplore, canPillage, pillageKind, pillage, isPillaged, pillageTurnsLeft, canRepair, repair,
   rallyPath, setRally, clearRally, swapPartners, swapUnits, canBuildRoad, buildRoad, canFell, fellForest, canPlant, plantForest, saplingRoundsLeft, canFarm, buildFarm, farmCities, timelineFor, adviseTurn, suggestRecruit, growthText, tradeText, tradeRoute, unrestText, focusOf, focusText, setFocus, levy, levyProblem, setRecruitOrder, clearRecruitOrder, recruitOrderText, enemyTurnReplay,
   perkAttackMult, perkOptions, perkChoices, perkText, learnPerk, seasonInfo, seasonStarted, riverCrossCost, frostBound, frostLoss, harvestGold, winterCamp, campSaves,
 } from './game.js';
@@ -313,7 +313,9 @@ function updateHud() {
     if (u.owner === 0 && !busy() && canExplore(state, u)) {
       html += '<button data-explore class="secondary wide-btn" title="Walk into the fog by itself each turn until nothing is left or an enemy shows up (X)">🧭 Explore</button>';
     }
-    if (u.owner === 0 && !busy() && canPillage(state, u)) {
+    if (u.owner === 0 && !busy() && pillageKind(state, u) === 'farm') {
+      html += `<button data-pillage class="secondary wide-btn" title="Burn this enemy farm: +${PILLAGE.farmGold} gold, the fields are gone for good and the city next to it grows slower; ends the unit's turn (P)">🔥 Burn farm (+${PILLAGE.farmGold} gold)</button>`;
+    } else if (u.owner === 0 && !busy() && canPillage(state, u)) {
       html += `<button data-pillage class="secondary wide-btn" title="Plunder this enemy resource: +${PILLAGE.gold} gold, it gives its owner nothing for ${PILLAGE.turns} turns; ends the unit's turn (P)">🔥 Pillage (+${PILLAGE.gold} gold)</button>`;
     }
     if (u.owner === 0 && !busy() && canRepair(state, u, { affordable: false })) {

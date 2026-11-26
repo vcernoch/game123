@@ -205,7 +205,9 @@ export const RESOURCES = {
 // Pillage: a unit (not a scout) that hasn't attacked and still has moves left, standing on a resource tile in
 // enemy territory, can plunder it: its side gains `gold`, the unit's turn ends and the resource gives its owner
 // nothing (no income, no discount) during its owner's next `turns` turns, then it recovers by itself.
-export const PILLAGE = { gold: 6, turns: 4 };
+// The same unit can burn an enemy farm it stands on (see FARMS): its side gains `farmGold`, the farm is gone for
+// good (the owner has to lay it out anew) and the unit's turn ends.
+export const PILLAGE = { gold: 6, turns: 4, farmGold: 3 };
 
 // Repair: a unit of any kind that hasn't attacked and still has moves left, standing on a pillaged resource in its
 // own territory, can rebuild it for `gold`: the resource works again right away and the unit's turn ends.

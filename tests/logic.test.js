@@ -11,7 +11,7 @@ import {
   upgradeOptions, upgradeUnit, upgradeCost, canDisband, disbandRefund, disbandUnit,
   turnReport, reportText, reportIsBad, updateSightings, lastSeen, lastSeenAt, lastSeenText,
   armyOverview, unitStatus, unitWhere, ARMY_STATUS, ruinBelieved, ruinKind, exploreRuin,
-  exploreTarget, canExplore, setExplore, followExplore, canPillage, pillage, isPillaged, pillageTurnsLeft, cityAt, canRepair, repair,
+  exploreTarget, canExplore, setExplore, followExplore, canPillage, pillageKind, pillage, isPillaged, pillageTurnsLeft, cityAt, canRepair, repair,
   rallyPath, rallyTarget, canRally, setRally, clearRally, canSwap, swapPartners, swapUnits,
   canBuildRoad, buildRoad, roadLinks, canFell, fellForest, canPlant, plantForest, saplingRoundsLeft, canFarm, buildFarm, cityFarms, workingFarms, growthRate, farmCities, canSentry, sentry, checkSentries, SENTRY_TEXT, volleyTarget, cityVolleys, animSpeedOf, nextAnimSpeed,
   unitTitle, heroName, hallOfFame, inspiredBy, inspireBonus, inspiredUnits, timelineFor, leadChanges, whose, adviseTurn, suggestRecruit,
@@ -6350,4 +6350,117 @@ test('farms: who can\'t, and the AI farms around its growing cities only with go
     assert.equal(stateProblem(cloneState(g)), null);
   }
   assert.ok(farms >= 1, `farms laid out: ${farms}`);
+});
+
+// The AI's capital with a farm next to it and a raider of the player standing on it.
+function burnSetup() {
+  const s = createGame({ seed: 3, fog: false, happenings: false });
+  s.units = [];
+  const cap = s.cities.find((c) => c.capital && c.owner === 1);
+  const tile = farmSpot(s, cap);
+  tile.farm = true;
+  const u = spawnUnit(s, 'warrior', 0, tile.q, tile.r);
+  u.movesLeft = 1; u.hasAttacked = false;
+  drainEvents(s);
+  return { s, cap, tile, u };
+}
+
+test('burning farms: a raider burns an enemy farm for gold, it is gone for good, the event replays and is reported', () => {
+  const { s, cap, tile, u } = burnSetup();
+  assert.equal(territoryOwner(s, tile.q, tile.r), 1);
+  assert.ok(canPillage(s, u));
+  assert.equal(pillageKind(s, u), 'farm');
+  const gold = s.gold[0];
+  const before = cloneState(s);
+  const ev = pillage(s, u.id);
+  assert.equal(ev.type, 'pillage');
+  assert.equal(ev.farm, true);
+  assert.equal(ev.victim, 1);
+  assert.equal(s.gold[0], gold + PILLAGE.farmGold);
+  assert.equal(tile.farm, undefined, 'the farm is gone');
+  assert.equal(tile.pillagedUntil, undefined, 'no recovery timer – it has to be laid out anew');
+  assert.equal(u.movesLeft, 0);
+  assert.ok(u.hasAttacked);
+  assert.ok(!canPillage(s, u), 'nothing left to burn');
+  assert.equal(pillageKind(s, u), null);
+  assert.equal(cityFarms(s, cap).length, 0);
+  assert.match(s.log.at(-1).msg, new RegExp(`^You: Warrior burnt a farm by ${cap.name} \\(\\+${PILLAGE.farmGold} gold\\)$`));
+  const evs = drainEvents(s);
+  const replay = cloneState(before);
+  for (const e of evs) applyEvent(replay, e);
+  assert.deepEqual(snapshot(replay), snapshot(s));
+  assert.equal(replay.gold[0], s.gold[0]);
+  assert.equal(tileAt(replay, tile.q, tile.r).farm, undefined);
+  assert.deepEqual(eventTiles(before, ev), [{ q: tile.q, r: tile.r }]);
+  assert.equal(soundFor(ev, 0), 'pillage');
+  assert.equal(soundFor(ev, 1), 'bane');
+  // the victim's turn report names the burnt farm and turns red; a resource pillage still reads as before
+  const rep = turnReport(before, evs, 1);
+  assert.equal(rep.burnt, 1);
+  assert.equal(rep.pillaged, 0);
+  assert.deepEqual(rep.spots, [{ q: tile.q, r: tile.r, kind: 'pillage' }]);
+  assert.equal(reportText(rep), 'Enemy turn: A farm of yours was burnt.');
+  assert.ok(reportIsBad(rep));
+  assert.equal(reportText({ ...rep, burnt: 2 }), 'Enemy turn: 2 farms of yours were burnt.');
+  assert.equal(turnReport(before, evs, 0).burnt, 0, 'the raider is not the victim');
+  // the city loses the farm's growth; its owner can lay it out again
+  assert.equal(growthRate(s, cap), 1);
+  s.current = 1;
+  const w = spawnUnit(s, 'warrior', 1, tile.q, tile.r);
+  s.units = s.units.filter((x) => x.id !== u.id);
+  w.movesLeft = 1; w.hasAttacked = false;
+  s.gold[1] = FARM_RULES.gold;
+  assert.ok(canFarm(s, w), 'the owner can farm the burnt field again');
+  assert.equal(stateProblem(cloneState(s)), null);
+});
+
+test('burning farms: who can\'t, and the AI raids farms it can see but not ones hidden in the fog', () => {
+  const t = burnSetup();
+  const cases = [
+    ['scout', (s, u) => { u.type = 'scout'; }],
+    ['attacked', (s, u) => { u.hasAttacked = true; }],
+    ['no moves', (s, u) => { u.movesLeft = 0; }],
+    ['not own turn', (s) => { s.current = 1; }],
+    ['own farm', (s) => { s.cities.find((c) => c.id === t.cap.id).owner = 0; }],
+    ['game over', (s) => { s.winner = 0; }],
+  ];
+  for (const [why, spoil] of cases) {
+    const s = cloneState(t.s);
+    const u = getUnit(s, t.u.id);
+    spoil(s, u);
+    assert.ok(!canPillage(s, u), why);
+    assert.equal(pillage(s, u.id), null, why);
+    assert.equal(tileAt(s, t.tile.q, t.tile.r).farm, true, why);
+  }
+  // the AI: a farm of the player in sight is a goal (a little below a resource), one in the fog is not
+  const s = createGame({ seed: 3, fog: true, difficulty: 'normal', happenings: false });
+  s.units = [];
+  const cap = s.cities.find((c) => c.capital && c.owner === 0);
+  const tile = farmSpot(s, cap);
+  tile.farm = true;
+  const away = Object.values(s.tiles).find((x) => isPassable(s, x.q, x.r) && distance(x, tile) === 2 && !cityAt(s, x.q, x.r)
+    && territoryOwner(s, x.q, x.r) !== 1);
+  s.current = 1;
+  const h = spawnUnit(s, 'horseman', 1, away.q, away.r);
+  updateExplored(s, 1);
+  const know = aiKnowledge(s, 1);
+  assert.ok(know.sees(tile.q, tile.r));
+  const goal = pillageGoals(s, h, know).find((g) => g.q === tile.q && g.r === tile.r);
+  assert.ok(goal && goal.pillage, 'a visible farm is a raid goal');
+  assert.ok(goal.w < 1 && goal.w > 0.8);
+  const blind = { sees: () => false, knows: () => true };
+  assert.ok(!pillageGoals(s, h, blind).some((g) => g.q === tile.q && g.r === tile.r), 'a farm in the fog is not');
+  // a real AI turn: a raider already standing on the farm burns it
+  const s2 = cloneState(t.s);
+  s2.units = [];
+  const own = s2.cities.find((c) => c.capital && c.owner === 0);
+  const spot = farmSpot(s2, own);
+  spot.farm = true;
+  s2.current = 1;
+  const r = spawnUnit(s2, 'warrior', 1, spot.q, spot.r);
+  r.movesLeft = UNIT_TYPES.warrior.moves; r.hasAttacked = false;
+  s2.gold[1] = 0;
+  runAITurn(s2);
+  assert.equal(spot.farm, undefined, 'the AI burnt the farm');
+  assert.ok(s2.log.some((e) => /AI: Warrior burnt a farm by/.test(e.msg)));
 });

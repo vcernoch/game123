@@ -17,7 +17,7 @@ export const SHORTCUTS = [
   { keys: 'W', text: 'sentry: the selected unit keeps watch (a wounded one rests until healed) and Tab skips it until an enemy comes near',
     action: () => ({ type: 'sentry' }), match: (k) => k === 'w' || k === 'W' },
   { keys: 'X', text: 'send the selected unit exploring the fog on its own', action: () => ({ type: 'explore' }), match: (k) => k === 'x' || k === 'X' },
-  { keys: 'P', text: 'pillage the enemy resource under the selected unit (gold for you, no income for its owner)', action: () => ({ type: 'pillage' }),
+  { keys: 'P', text: 'pillage the enemy resource or burn the enemy farm under the selected unit (gold for you, a loss for its owner)', action: () => ({ type: 'pillage' }),
     match: (k) => k === 'p' || k === 'P' },
   { keys: 'R', text: 'repair a pillaged resource of yours under the selected unit (costs a little gold)', action: () => ({ type: 'repair' }),
     match: (k) => k === 'r' || k === 'R' },

@@ -538,14 +538,17 @@ function ruinGoals(state, unit, know) {
     .map((t) => ({ q: t.q, r: t.r, w: 0.9, ruin: true }));
 }
 
-// Working enemy resources the AI knows of, close by, are worth plundering (gold for it, lost income for the enemy).
+// Working enemy resources and farms the AI knows of, close by, are worth plundering (gold for it, lost income or
+// growth for the enemy). A farm is a little less tempting than a resource and must be in sight (it may have been laid
+// out since the AI last saw the tile).
 export const PILLAGE_DETOUR = 4; // tiles
 export function pillageGoals(state, unit, know) {
   return Object.values(state.tiles)
-    .filter((t) => t.resource && !isPillaged(state, t) && know.knows(t.q, t.r) && distance(t, unit) <= PILLAGE_DETOUR
+    .filter((t) => ((t.resource && !isPillaged(state, t) && know.knows(t.q, t.r)) || (t.farm && know.sees(t.q, t.r)))
+      && distance(t, unit) <= PILLAGE_DETOUR
       && !cityAt(state, t.q, t.r))
     .filter((t) => { const o = territoryOwner(state, t.q, t.r); return o !== undefined && o !== null && o !== unit.owner; })
-    .map((t) => ({ q: t.q, r: t.r, w: 0.95, pillage: true }));
+    .map((t) => ({ q: t.q, r: t.r, w: t.farm ? 0.9 : 0.95, pillage: true }));
 }
 
 // Known enemy road tiles close by where the unit would cut a working trade route (one blockader per route

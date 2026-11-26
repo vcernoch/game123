@@ -132,6 +132,8 @@ Check off `[x]` when done. Add new ideas to the end of the relevant phase or to 
 - [x] Planting (🌱 / N): a unit that hasn't attacked and has a move left plants saplings on plains of its own territory (not a city, resource or ruin) for 3 gold and ends its turn; 4 rounds later they are a forest – a felled forest grows back, bare plains become new woods; sprouts on the map, the tile panel counts down; the AI replants its felled forests (or plains next to its woods) with gold to spare
 - [x] Farms (🌾 / K): a unit that hasn't attacked and has a move left lays out a farm on plains of its own territory right next to an own city (not a resource, ruin or saplings) for 5 gold and ends its turn; each working farm (up to 2 per city) adds +1 to the city's growth every turn, only while the city grows at all; an enemy standing on a farm tramples it; a farm feeds whoever holds the city; the AI farms around its growing cities with gold to spare
 
+## Phase 23 – raids on the land (own improvements)
+- [x] Burning farms (🔥 / P): a raider (not a scout) that hasn't attacked and has a move left burns an enemy farm it stands on for +3 gold and ends its turn; the farm is gone for good until its owner lays it out anew; chronicle, floater and the enemy turn report ("A farm of yours was burnt."); the AI raids farms it can see (a little below resources)
+
 ## Ideas (unordered)
 - Diplomacy with multiple AIs
-- Burning farms: let a raider pillage an enemy farm like a resource (now an enemy on it only tramples the crop)

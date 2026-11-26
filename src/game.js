@@ -525,7 +525,8 @@ export function applyEvent(state, ev) {
     if (u && ev.xp !== undefined) { u.xp = ev.xp; u.hp = ev.hp; if (ev.name) u.name = ev.name; }
   } else if (ev.type === 'pillage') {
     const t = tileAt(state, ev.q, ev.r);
-    if (t) t.pillagedUntil = ev.until;
+    if (t && ev.farm) delete t.farm;
+    else if (t) t.pillagedUntil = ev.until;
     const u = getUnit(state, ev.unitId);
     if (u) { u.movesLeft = 0; u.hasAttacked = true; delete u.fortified; delete u.sentry; }
     if (ev.gold) state.gold[ev.player] += ev.gold;
@@ -2747,14 +2748,21 @@ function recoverPillaged(state) {
 }
 
 // Can the unit pillage the tile it stands on? An own unit of the current player that can still capture
-// (not a scout), hasn't attacked and has moves left, on a working resource in another player's territory.
+// (not a scout), hasn't attacked and has moves left, on a working resource or a farm in another player's territory.
 export function canPillage(state, unit) {
   if (!unit || unit.owner !== state.current || state.winner !== null) return false;
   if (UNIT_TYPES[unit.type].noCapture || unit.hasAttacked || unit.movesLeft <= 0) return false;
   const tile = tileAt(state, unit.q, unit.r);
-  if (!tile || !tile.resource || isPillaged(state, tile) || cityAt(state, unit.q, unit.r)) return false;
+  if (!tile || cityAt(state, unit.q, unit.r)) return false;
+  if (!tile.farm && (!tile.resource || isPillaged(state, tile))) return false;
   const realm = territoryOwner(state, unit.q, unit.r);
   return realm !== undefined && realm !== null && realm !== unit.owner;
+}
+
+// What pillaging the tile under the unit would do: 'farm' (burn an enemy farm), 'resource' or null.
+export function pillageKind(state, unit) {
+  if (!canPillage(state, unit)) return null;
+  return tileAt(state, unit.q, unit.r).farm ? 'farm' : 'resource';
 }
 
 // Pillages the resource under the unit. Returns the 'pillage' event or null when not allowed.
@@ -2764,6 +2772,7 @@ export function pillage(state, unitId) {
   const tile = tileAt(state, unit.q, unit.r);
   const victim = territoryOwner(state, unit.q, unit.r);
   const city = state.cities.find((c) => c.id === territoryMap(state).get(key(tile.q, tile.r)));
+  if (tile.farm) return burnFarm(state, unit, tile, victim);
   // the owner misses exactly PILLAGE.turns of its own turns: if it moves before the pillager in a round, its
   // next turn is in the next round
   tile.pillagedUntil = state.turn + PILLAGE.turns + (victim < unit.owner ? 1 : 0);
@@ -2778,6 +2787,26 @@ export function pillage(state, unitId) {
     resource: tile.resource, gold: PILLAGE.gold, until: tile.pillagedUntil };
   emit(state, ev);
   addLog(state, `${PLAYERS[unit.owner].name}: ${UNIT_TYPES[unit.type].name} pillaged ${RESOURCES[tile.resource].name.toLowerCase()} near ${city.name} (+${PILLAGE.gold} gold, out of use for ${PILLAGE.turns} turns)`,
+    { by: unit.owner, also: [victim], at: [tile] });
+  return ev;
+}
+
+// Burns the enemy farm under the unit (part of pillage): the fields are gone for good, the raider takes a little
+// loot. The chronicle names the city the farm fed (the nearest neighbouring city of the victim, else the realm's).
+function burnFarm(state, unit, tile, victim) {
+  const fed = neighbors(tile.q, tile.r).map((n) => cityAt(state, n.q, n.r)).find((c) => c && c.owner === victim)
+    || state.cities.find((c) => c.id === territoryMap(state).get(key(tile.q, tile.r)));
+  delete tile.farm;
+  state.gold[unit.owner] += PILLAGE.farmGold;
+  unit.movesLeft = 0;
+  unit.hasAttacked = true;
+  delete unit.fortified;
+  delete unit.goto;
+  delete unit.explore;
+  delete unit.sentry;
+  const ev = { type: 'pillage', farm: true, unitId: unit.id, player: unit.owner, victim, q: tile.q, r: tile.r, gold: PILLAGE.farmGold };
+  emit(state, ev);
+  addLog(state, `${PLAYERS[unit.owner].name}: ${UNIT_TYPES[unit.type].name} burnt a farm by ${fed.name} (+${PILLAGE.farmGold} gold)`,
     { by: unit.owner, also: [victim], at: [tile] });
   return ev;
 }
@@ -3026,10 +3055,10 @@ export function logFor(state, viewer) {
 // before = state before the enemy turn, events = what happened in it. The events are replayed on a copy,
 // so units recruited during the turn are known too. Only things the viewer always knows about are
 // counted (attacks on own units, lost cities), so nothing hidden in the fog leaks out.
-// Returns { lost: { type: count }, wounded, fell, citiesLost: [phrases like 'the city Oakford'], pillaged, spots: [{ q, r, kind }] }.
+// Returns { lost: { type: count }, wounded, fell, citiesLost: [phrases like 'the city Oakford'], pillaged, burnt (farms), spots: [{ q, r, kind }] }.
 export function turnReport(before, events, viewer) {
   const st = cloneState(before);
-  const rep = { lost: {}, wounded: 0, fell: 0, citiesLost: [], pillaged: 0, spots: [] };
+  const rep = { lost: {}, wounded: 0, fell: 0, citiesLost: [], pillaged: 0, burnt: 0, spots: [] };
   const wounded = new Set();
   for (const ev of events) {
     if (ev.type === 'attack') {
@@ -3056,7 +3085,8 @@ export function turnReport(before, events, viewer) {
     } else if (ev.type === 'disband') {
       wounded.delete(ev.unitId);
     } else if (ev.type === 'pillage' && ev.victim === viewer && ev.player !== viewer) {
-      rep.pillaged++; // the owner always notices: the resource stops paying
+      if (ev.farm) rep.burnt = (rep.burnt || 0) + 1; // the owner always notices: the farm is gone
+      else rep.pillaged++; // the owner always notices: the resource stops paying
       rep.spots.push({ q: ev.q, r: ev.r, kind: 'pillage' });
     }
     applyEvent(st, ev);
@@ -3077,6 +3107,7 @@ export function reportText(rep) {
   const parts = [];
   if (losses.length) parts.push(`you lost ${joinList(losses)}.`);
   if (rep.pillaged) parts.push(`${rep.pillaged === 1 ? 'A resource' : `${rep.pillaged} resources`} of yours ${rep.pillaged === 1 ? 'was' : 'were'} pillaged.`);
+  if (rep.burnt) parts.push(`${rep.burnt === 1 ? 'A farm' : `${rep.burnt} farms`} of yours ${rep.burnt === 1 ? 'was' : 'were'} burnt.`);
   if (rep.wounded) parts.push(`${rep.wounded} unit${rep.wounded === 1 ? ' was' : 's were'} wounded.`);
   if (rep.fell) parts.push(`${rep.fell} attacker${rep.fell === 1 ? '' : 's'} fell to your counterattacks.`);
   if (!parts.length) return '';
@@ -3085,7 +3116,7 @@ export function reportText(rep) {
 
 // Whether the report contains a loss (the banner turns red).
 export function reportIsBad(rep) {
-  return Object.keys(rep.lost).length > 0 || rep.citiesLost.length > 0 || rep.wounded > 0 || (rep.pillaged || 0) > 0;
+  return Object.keys(rep.lost).length > 0 || rep.citiesLost.length > 0 || rep.wounded > 0 || (rep.pillaged || 0) > 0 || (rep.burnt || 0) > 0;
 }
 
 // ---------- enemy turn replay ----------
