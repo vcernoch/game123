@@ -23,6 +23,7 @@ import {
   isSkirmisher, movesAfterAttack, canWithdraw, isPursuer, pursuitTile, pursuesInto,
   eventTiles, eventSeen, enemyTurnReplay,
   perksOf, hasPerk, perkChoices, perkOptions, perkProblem, learnPerk, medicBonus, perkText, perkAttackMult,
+  raidThreat,
 } from '../src/game.js';
 import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
@@ -6463,4 +6464,86 @@ test('burning farms: who can\'t, and the AI raids farms it can see but not ones 
   runAITurn(s2);
   assert.equal(spot.farm, undefined, 'the AI burnt the farm');
   assert.ok(s2.log.some((e) => /AI: Warrior burnt a farm by/.test(e.msg)));
+});
+
+test('raid alert: the advisor warns about a visible raider on or next to an own farm or resource and names a defender', () => {
+  const s = createGame({ seed: 3, fog: true, happenings: false });
+  s.units = [];
+  s.gold[0] = 0;
+  const cap = s.cities.find((c) => c.capital && c.owner === 0);
+  const tile = farmSpot(s, cap);
+  tile.farm = true;
+  spawnUnit(s, 'warrior', 0, cap.q, cap.r).movesLeft = 0; // keeps the capital guarded and sees the farm
+  const raids = () => adviseTurn(s, 0).filter((t) => t.kind === 'raid');
+  assert.deepEqual(raids(), [], 'no raider, no alert');
+  assert.equal(raidThreat(s, 0, []), null);
+  // an enemy warrior standing on the farm, with nobody able to strike it
+  const e = spawnUnit(s, 'warrior', 1, tile.q, tile.r);
+  updateExplored(s, 0);
+  let tips = raids();
+  assert.equal(tips.length, 1);
+  assert.equal(tips[0].icon, '🔥');
+  assert.equal(tips[0].text, `An enemy Warrior stands on your farm by ${cap.name} and can burn it next turn.`);
+  assert.deepEqual([tips[0].q, tips[0].r], [tile.q, tile.r]);
+  assert.equal(tips[0].unitId, undefined);
+  // a fresh archer that can hit it and survive is named as the striker
+  const spot = Object.values(s.tiles).find((x) => isPassable(s, x.q, x.r) && distance(x, tile) === 2 && !cityAt(s, x.q, x.r) && !unitAt(s, x.q, x.r));
+  const a = spawnUnit(s, 'archer', 0, spot.q, spot.r);
+  a.movesLeft = UNIT_TYPES.archer.move; a.hasAttacked = false;
+  assert.ok(attackTargets(s, a).includes(e));
+  tips = raids();
+  assert.match(tips[0].text, /and can burn it next turn – strike it with Archer\.$/);
+  assert.equal(tips[0].unitId, a.id);
+  assert.deepEqual([tips[0].q, tips[0].r], [a.q, a.r]);
+  // the archer has already shot: nobody can step onto an occupied farm, so no defender is named
+  a.hasAttacked = true;
+  assert.equal(raids()[0].unitId, undefined);
+  // the raider steps next to the farm: a melee unit of the player that can't reach it but can walk onto the farm guards it
+  const side = neighbors(tile.q, tile.r).map((n) => tileAt(s, n.q, n.r)).find((x) => x && isPassable(s, x.q, x.r)
+    && !cityAt(s, x.q, x.r) && !unitAt(s, x.q, x.r) && !x.resource
+    && neighbors(x.q, x.r).every((n) => !tileAt(s, n.q, n.r)?.resource));
+  e.q = side.q; e.r = side.r;
+  s.units = s.units.filter((u) => u.id !== a.id);
+  const g = spawnUnit(s, 'warrior', 0, cap.q, cap.r); // stands in the capital next to the farm
+  s.units = s.units.filter((u) => u.id === g.id || u.owner === 1);
+  g.movesLeft = UNIT_TYPES.warrior.move; g.hasAttacked = false;
+  updateExplored(s, 0);
+  assert.ok(reachable(s, g).has(key(tile.q, tile.r)));
+  tips = raids();
+  const strikes = attackTargets(s, g).includes(e) && !previewAttack(s, g, e).dies;
+  assert.equal(tips[0].text, `An enemy Warrior is next to your farm by ${cap.name} and can burn it next turn – ${strikes ? 'strike it with' : 'move'} Warrior${strikes ? '' : ' onto it to guard it'}.`);
+  assert.equal(tips[0].unitId, g.id);
+  g.hasAttacked = true; // can't strike any more – walking there is still possible
+  assert.ok(reachable(s, g).has(key(tile.q, tile.r)));
+  assert.match(raids()[0].text, /– move Warrior onto it to guard it\.$/);
+  e.q = tile.q; e.r = tile.r;
+  g.movesLeft = 0;
+  // a scout can't raid; a raider two tiles away is no alert yet; one hidden in the fog is not told
+  e.type = 'scout';
+  assert.deepEqual(raids(), []);
+  e.type = 'warrior';
+  assert.equal(raids().length, 1);
+  assert.equal(raidThreat(s, 0, []), null, 'only the enemies passed in (the visible ones) count');
+  const two = Object.values(s.tiles).find((x) => isPassable(s, x.q, x.r) && distance(x, tile) === 2 && !unitAt(s, x.q, x.r));
+  e.q = two.q; e.r = two.r;
+  assert.notEqual(raidThreat(s, 0, [e])?.tile, tile, 'two tiles away the farm is not in danger yet');
+  e.q = tile.q; e.r = tile.r;
+  // a resource: a working one is threatened, a pillaged one isn't
+  tile.farm = undefined;
+  delete tile.farm;
+  tile.resource = 'gold';
+  assert.equal(raids()[0].text, `An enemy Warrior stands on your gold mine near ${cap.name} and can pillage it next turn.`);
+  tile.pillagedUntil = s.turn + 3;
+  assert.notEqual(raidThreat(s, 0, [e])?.tile, tile, 'a pillaged resource has nothing left to lose');
+  delete tile.pillagedUntil;
+  // only own land: the same farm in the enemy's territory is not the player's worry
+  s.cities.find((c) => c.id === cap.id).owner = 1;
+  assert.deepEqual(raids(), []);
+  s.cities.find((c) => c.id === cap.id).owner = 0;
+  // ordering: the raid hint sits after repair and before unrest; nothing changed in the state
+  assert.ok(ADVISOR.kinds.raid.order > ADVISOR.kinds.repair.order && ADVISOR.kinds.raid.order < ADVISOR.kinds.unrest.order);
+  const before = JSON.stringify(s);
+  adviseTurn(s, 0);
+  assert.equal(JSON.stringify(s), before);
+  assert.deepEqual(adviseTurn(s, 1), [], 'not on the other side\'s turn');
 });

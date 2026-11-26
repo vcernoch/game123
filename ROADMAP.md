@@ -134,6 +134,7 @@ Check off `[x]` when done. Add new ideas to the end of the relevant phase or to 
 
 ## Phase 23 – raids on the land (own improvements)
 - [x] Burning farms (🔥 / P): a raider (not a scout) that hasn't attacked and has a move left burns an enemy farm it stands on for +3 gold and ends its turn; the farm is gone for good until its owner lays it out anew; chronicle, floater and the enemy turn report ("A farm of yours was burnt."); the AI raids farms it can see (a little below resources)
+- [x] Raid alert (🔥 advisor hint): a visible enemy raider (not a scout) standing on or next to an own farm or working resource is flagged before it can burn or pillage it; the hint names a unit that can strike it and survive, else one that can walk onto the free tile to guard it
 
 ## Ideas (unordered)
 - Diplomacy with multiple AIs

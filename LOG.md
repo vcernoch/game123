@@ -2,6 +2,16 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-26 – Raid alert (v0.51.0)
+- **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.38.0–v0.51.0) is ahead of `main` (v0.37.0) – please merge it.
+- Starting state green (145 logic tests + smoke).
+- Phase 23 (raids on the land), own improvement. The AI now burns farms and pillages resources, but the player only learned about it in the next turn report – after the damage. The advisor now warns while there is still time to react.
+- `raidThreat(state, player, enemies)` in `game.js` (pure, fog-safe – only the visible enemies passed in): the nearest visible raider (not a scout) standing on (first) or next to an own farm or unpillaged resource outside a city in own territory. `adviseTurn` adds a `raid` hint (🔥, order 5.1 – after repair, before unrest): "An enemy Warrior stands on / is next to your farm by <city> (your gold mine near <city>) and can burn (pillage) it next turn", plus "– strike it with <unit>." for an own unit that can attack it without dying (a kill first, then most damage), else "– move <unit> onto it to guard it." for the nearest unit that can reach the free tile. A click selects that unit (or shows the tile).
+- UI: red border for the raid hint like other urgent ones, help text lists it. No state structure change (`state.version` stays 38).
+- Noticed (not changed): the burning-farms AI test sets `movesLeft = UNIT_TYPES.warrior.moves`, but the field is `move`, so it sets `undefined`; the test still passes because the raider needs no movement. Worth a cleanup some day.
+- Tests: +1 logic (no raider no hint, raider on the farm without a defender, archer striker named and selected, no defender once it has shot, raider next to the farm with a warrior to strike or guard, scout ignored, only visible enemies count, two tiles away no alarm, resource vs pillaged resource, foreign land, order, no side effects, not on the other side's turn).
+- Status: `npm run check` green (146 logic tests + smoke).
+
 ## 2026-11-26 – Burning farms (v0.50.0)
 - **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.38.0–v0.50.0) is ahead of `main` (v0.37.0) – please merge it.
 - Starting state green (143 logic tests + smoke).

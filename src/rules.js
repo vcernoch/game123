@@ -347,6 +347,7 @@ export const ADVISOR = {
     capture:    { icon: '🏰', order: 3 },
     ruin:       { icon: '🏛', order: 4 },
     repair:     { icon: '🔧', order: 5 },
+    raid:       { icon: '🔥', order: 5.1 },
     unrest:     { icon: '✊', order: 5.2 },
     trade:      { icon: '🛤', order: 5.5 },
     perk:       { icon: '★', order: 5.8 },

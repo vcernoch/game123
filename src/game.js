@@ -3282,6 +3282,29 @@ export function adviseTurn(state, player) {
     }
   }
 
+  // a raid in the making: a visible raider (not a scout) stands on or right next to an own farm or working
+  // resource – on its next turn it can burn or pillage it. The nearest raider counts (on the tile first); the hint
+  // names a unit that can strike it and survive, else one that can walk onto a free tile to guard it.
+  const raid = raidThreat(state, player, enemies);
+  if (raid) {
+    const { tile, e, d } = raid;
+    const terr = territoryMap(state);
+    const city = state.cities.find((c) => c.id === terr.get(key(tile.q, tile.r)));
+    const what = tile.farm ? `your farm by ${city.name}` : `your ${RESOURCES[tile.resource].name.toLowerCase()} near ${city.name}`;
+    const striker = mine.filter((u) => attackTargets(state, u).includes(e))
+      .map((u) => ({ u, p: previewAttack(state, u, e) })).filter((x) => !x.p.dies)
+      .sort((a, b) => (b.p.kills ? 1 : 0) - (a.p.kills ? 1 : 0) || b.p.damage - a.p.damage || a.u.id - b.u.id)[0]?.u;
+    const guard = striker || d === 0 ? null
+      : mine.filter((u) => moves.get(u.id)?.has(key(tile.q, tile.r))).sort((a, b) => distance(a, tile) - distance(b, tile) || a.id - b.id)[0];
+    const deed = tile.farm ? 'burn' : 'pillage';
+    const how = striker ? ` – strike it with ${unitTitle(striker)}.`
+      : guard ? ` – move ${unitTitle(guard)} onto it to guard it.`
+      : '.';
+    const helper = striker || guard;
+    add('raid', `An enemy ${UNIT_TYPES[e.type].name} ${d === 0 ? 'stands on' : 'is next to'} ${what} and can ${deed} it next turn${how}`,
+      helper || tile, helper ? { unitId: helper.id } : {});
+  }
+
   // a restless city without a garrison that a unit can walk into this turn (nearest unit first)
   unrest: for (const c of cities.filter((x) => cityUnrest(x) && !unitAt(state, x.q, x.r))) {
     const near = mine.filter((u) => moves.get(u.id)?.has(key(c.q, c.r))).sort((a, b) => distance(a, c) - distance(b, c) || a.id - b.id);
@@ -3345,6 +3368,25 @@ export function adviseTurn(state, player) {
   }
 
   return tips.sort((a, b) => ADVISOR.kinds[a.kind].order - ADVISOR.kinds[b.kind].order).slice(0, ADVISOR.limit);
+}
+
+// The raid the player should worry about most: { tile, e, d } for a visible enemy raider (not a scout) standing
+// on (d 0) or next to (d 1) an own farm or unpillaged resource outside a city, or null. On-tile raiders come
+// first, then the lowest unit id, so the hint stays stable.
+export function raidThreat(state, player, enemies) {
+  const raiders = enemies.filter((e) => !UNIT_TYPES[e.type].noCapture).sort((a, b) => a.id - b.id);
+  if (!raiders.length) return null;
+  let best = null;
+  for (const tile of Object.values(state.tiles)) {
+    if (!tile.farm && !(tile.resource && !isPillaged(state, tile))) continue;
+    if (cityAt(state, tile.q, tile.r) || territoryOwner(state, tile.q, tile.r) !== player) continue;
+    for (const e of raiders) {
+      const d = distance(tile, e);
+      if (d > 1) continue;
+      if (!best || d < best.d || (d === best.d && e.id < best.e.id)) best = { tile, e, d };
+    }
+  }
+  return best;
 }
 
 // "an Archer", "a Spearman"

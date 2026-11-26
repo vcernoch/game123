@@ -188,7 +188,7 @@ kbd { font: 600 11px ui-monospace, monospace; background: #3c434f; color: var(--
 .tip-row { width: 100%; display: grid; grid-template-columns: 24px minmax(0, 1fr); align-items: start; gap: 8px; padding: 6px 8px;
   text-align: left; font-weight: 400; font-size: 13px; line-height: 1.35; background: #2b3039; color: var(--text); border: 1px solid transparent; overflow-wrap: anywhere; }
 .tip-row .ic { text-align: center; }
-.tip-row.undefended, .tip-row.wounded { border-color: #a5523f; }
+.tip-row.undefended, .tip-row.wounded, .tip-row.raid { border-color: #a5523f; }
 .tip-row.finish { border-color: #8a7330; }
 #army { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; max-height: 260px; overflow-y: auto; }
 .army-row { width: 100%; display: grid; grid-template-columns: 28px minmax(0, 1fr) auto auto; align-items: center; gap: 8px;
