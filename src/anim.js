@@ -96,7 +96,7 @@ export function createAnimator(redraw, isVisible = () => true, onShow = () => {}
       if (ev.defenderPromoted && !ev.killed) promo(cd);
     } else if (ev.type === 'capture') {
       const c = st.cities.find((x) => x.id === ev.cityId);
-      if (c) addFloater(tileCenter(c.q, c.r), 'Captured!', '#ffe27a');
+      if (c) addFloater(tileCenter(c.q, c.r), ev.sack ? `Captured! 💰 sacked ${ev.sack}` : 'Captured!', '#ffe27a');
       await tween(PAUSE_MS * 2, () => {});
     } else if (ev.type === 'spawn') {
       await tween(PAUSE_MS, () => {});

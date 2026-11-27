@@ -209,6 +209,11 @@ export const RESOURCES = {
 // good (the owner has to lay it out anew) and the unit's turn ends.
 export const PILLAGE = { gold: 6, turns: 4, farmGold: 3 };
 
+// Sack: a side that takes a city from another player (not a neutral one) carries off a part of the loser's
+// treasury – `share` of it (`capitalShare` for a capital), rounded down, at most `max` gold. Hoarding gold behind
+// a weak garrison is a risk; neutral cities have no treasury to sack.
+export const SACK = { share: 0.25, capitalShare: 0.5, max: 20 };
+
 // Repair: a unit of any kind that hasn't attacked and still has moves left, standing on a pillaged resource in its
 // own territory, can rebuild it for `gold`: the resource works again right away and the unit's turn ends.
 export const REPAIR = { gold: 3 };

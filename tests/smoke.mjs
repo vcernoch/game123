@@ -1771,13 +1771,14 @@ try {
   await page.screenshot({ path: 'artifacts/screenshot-camp.png' });
 
   // treasury: a click on the header gold opens the ledger, its total matches the header, a restless city
-  // shows its lost gold, a city row selects the city, I closes it again; no horizontal scroll on a phone
+  // shows its lost gold, the sack line says what a lost city would cost, a city row selects the city, I closes it again; no horizontal scroll on a phone
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.evaluate(() => {
     window.__game.newGame(2, { fog: false });
     const st = window.__game.getState();
     const c = st.cities.find((x) => x.id === 5);
     c.owner = 0; c.unrest = 2;
+    st.gold[0] = 40; // the sack line: a quarter (10) for a city, half (20) for the capital
     window.__game.refresh();
   });
   await page.click('#treasury-open');
@@ -1791,7 +1792,8 @@ try {
     text: document.getElementById('treasury').textContent,
   }));
   if (!ledger.open || ledger.total !== ledger.income || !ledger.count.startsWith(ledger.income) || ledger.rows.length !== 2
-    || !ledger.rows[0].startsWith('★') || !ledger.rows.some((r) => r.includes('unrest: −')) || !/Losing \d+ gold a turn: unrest\./.test(ledger.text)) {
+    || !ledger.rows[0].startsWith('★') || !ledger.rows.some((r) => r.includes('unrest: −')) || !/Losing \d+ gold a turn: unrest\./.test(ledger.text)
+    || !ledger.text.includes('🏴 A city lost to the enemy is sacked – it carries off gold: a city −10, your capital −20.')) {
     throw new Error(`treasury: ${JSON.stringify(ledger)}`);
   }
   await page.evaluate(() => document.getElementById('treasury-panel').scrollIntoView());

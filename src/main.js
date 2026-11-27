@@ -8,7 +8,7 @@ import {
   updateSightings, lastSeen, lastSeenAt, lastSeenText, armyOverview, ARMY_STATUS, ruinBelieved,
   canExplore, setExplore, canPillage, pillageKind, pillage, isPillaged, pillageTurnsLeft, canRepair, repair,
   rallyPath, setRally, clearRally, swapPartners, swapUnits, canBuildRoad, buildRoad, canFell, fellForest, canPlant, plantForest, saplingRoundsLeft, canFarm, buildFarm, farmCities, timelineFor, adviseTurn, suggestRecruit, growthText, tradeText, tradeRoute, unrestText, focusOf, focusText, setFocus, levy, levyProblem, setRecruitOrder, clearRecruitOrder, recruitOrderText, enemyTurnReplay,
-  perkAttackMult, perkOptions, perkChoices, perkText, learnPerk, seasonInfo, seasonStarted, riverCrossCost, frostBound, frostLoss, harvestGold, winterCamp, campSaves, incomeLedger, lostText,
+  perkAttackMult, perkOptions, perkChoices, perkText, learnPerk, seasonInfo, seasonStarted, riverCrossCost, frostBound, frostLoss, harvestGold, winterCamp, campSaves, incomeLedger, lostText, sackRisk,
 } from './game.js';
 import { createAnimator } from './anim.js';
 import { decideTap } from './input.js';
@@ -654,6 +654,13 @@ let treasuryKey = '';
 
 const signed = (n) => (n < 0 ? `−${-n}` : `+${n}`);
 
+// What the enemy would carry off from the treasury if it took a city of yours now (see SACK in rules.js).
+function sackNote(risk) {
+  if (!risk.city && !risk.capital) return '';
+  const parts = [risk.city ? `a city −${risk.city}` : '', risk.capital ? `your capital −${risk.capital}` : ''].filter(Boolean);
+  return `<p class="ledger-note sack">🏴 A city lost to the enemy is sacked – it carries off gold: ${parts.join(', ')}.</p>`;
+}
+
 // Treasury panel: the income in the header split by source, then every own city with what it pays and
 // the gold it loses right now. Redrawn only on change (updateHud runs on every mouse move).
 function updateTreasury() {
@@ -676,6 +683,7 @@ function updateTreasury() {
   $('treasury').innerHTML = `<ul class="ledger">${src}<li class="total"><span></span><span>Per turn</span><span class="g">${signed(led.total)}</span></li></ul>
     ${led.lost ? `<p class="ledger-note lost">Losing ${led.lost} gold a turn: ${[...new Set(led.cities.flatMap((c) => c.lost.map((l) => LEDGER.lost[l.kind].name)))].join(', ')}.</p>` : ''}
     <ul class="ledger-cities">${cities}</ul>
+    ${sackNote(sackRisk(state, 0))}
     <p class="ledger-note">At the start of your next turn: about ${state.gold[0]} → ${state.gold[0] + led.total} gold (random events and new seasons can change it).</p>`;
 }
 

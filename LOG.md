@@ -2,6 +2,18 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-27 – Sack (v0.53.0)
+- **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.38.0–v0.53.0) is ahead of `main` (v0.37.0) – please merge it.
+- Starting state green (149 logic tests + smoke).
+- Phase 24 (the treasury), own improvement. Gold in the treasury was perfectly safe – a player could hoard behind a thin garrison with no risk, and taking a city only hurt the loser's income. Now a captured city is sacked, so a big treasury is a reason to spend or guard.
+- `SACK` in `rules.js` (`share` 0.25, `capitalShare` 0.5, `max` 20). In `game.js`: `sackGold(state, victim, city)` (rounded down, never from debt, 0 for neutral cities) and `sackRisk(state, player)` → `{ city, capital }` (null when the player has no such city). `moveUnit` moves the gold from the loser to the captor on capture of a player's city (counted before the Horde loot); the `capture` event carries `sack` and `from`, `applyEvent` replays the transfer exactly; chronicle "captured X (sacked N gold from the AI treasury)" (with the Horde loot: "(loot 5 gold, sacked N gold …)"). `turnReport` counts `sacked` for the victim, `reportText` adds "The enemy carried off N gold from your treasury."
+- UI: "Captured! 💰 sacked N" floater, a "🏴 A city lost to the enemy is sacked – it carries off gold: a city −N, your capital −M." line in the treasury panel, help text. No AI change – the AI sacks automatically when it captures; it spends its gold anyway.
+- Balance (20 AI-vs-AI games, default settings, 300 half-turns max): wins 6 : 14, 0 stalemates (without sack 6 : 13, 1); 38 sacks moved 266 gold in total (~7 per sack).
+- Test adjusted (not weakened): the enemy turn report test's exact text for a lost city now ends with the sacked gold, and it checks the exact amount.
+- No state structure change (`state.version` stays 38; the new event fields are optional).
+- Tests: +2 logic (share, capital share, cap, rounding, debt and neutral give nothing; neutral capture has no sack; enemy town and capital transfers, chronicle, exact replay, game goes on; turn report for loser vs captor and old reports; `sackRisk` incl. no capital; Horde loot + sack; sacks in three real AI-vs-AI games are within bounds and replay). Smoke test: the treasury panel shows the sack line with the exact amounts for 40 gold.
+- Status: `npm run check` green (151 logic tests + smoke).
+
 ## 2026-11-27 – Treasury ledger (v0.52.0)
 - **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.38.0–v0.52.0) is ahead of `main` (v0.37.0) – please merge it.
 - Starting state green (146 logic tests + smoke).

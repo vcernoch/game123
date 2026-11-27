@@ -243,3 +243,4 @@ svg.chart .mark { stroke: #1d2128; stroke-width: 0.8; }
 .ledger-city .lost { color: #ffb4a3; }
 .ledger-note { margin: 6px 0 0; color: var(--muted); }
 .ledger-note.lost { color: #ffb4a3; }
+.ledger-note.sack { color: #ffd59a; }

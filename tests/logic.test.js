@@ -23,7 +23,7 @@ import {
   isSkirmisher, movesAfterAttack, canWithdraw, isPursuer, pursuitTile, pursuesInto,
   eventTiles, eventSeen, enemyTurnReplay,
   perksOf, hasPerk, perkChoices, perkOptions, perkProblem, learnPerk, medicBonus, perkText, perkAttackMult,
-  raidThreat, cityIncomeParts, cityLostIncome, incomeLedger, lostText,
+  raidThreat, cityIncomeParts, cityLostIncome, incomeLedger, lostText, sackGold, sackRisk,
 } from '../src/game.js';
 import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
@@ -47,7 +47,7 @@ import { distance, key, neighbors } from '../src/hex.js';
 import {
   RESOURCES, FORTIFY, TERRITORY, ECONOMY, UNIT_TYPES, TERRAIN, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FLANK, HIGH_GROUND, CHARGE, REPAIR,
   UPGRADES, UPGRADE, DISBAND, RUINS, EXPLORE, PILLAGE,
-  SIGHTINGS, ROADWORK, SENTRY, VOLLEY, ANIM_SPEEDS, HEROES, INSPIRE, MILESTONES, ADVISOR, GROWTH, TRADE, UNREST, FOCUS, LEVY, FORCED_MARCH, SKIRMISH, PURSUIT, PERKS, PLAYERS, LEDGER,
+  SIGHTINGS, ROADWORK, SENTRY, VOLLEY, ANIM_SPEEDS, HEROES, INSPIRE, MILESTONES, ADVISOR, GROWTH, TRADE, UNREST, FOCUS, LEVY, FORCED_MARCH, SKIRMISH, PURSUIT, PERKS, PLAYERS, LEDGER, SACK,
 } from '../src/rules.js';
 
 test('map is deterministic and starting cities are connected', () => {
@@ -2110,7 +2110,11 @@ test('enemy turn report: losses, wounded units, fallen attackers and lost cities
   assert.deepEqual(rep2.lost, { warrior: 1 });
   assert.equal(rep2.wounded, 0);
   assert.deepEqual(rep2.citiesLost, [`the city ${city.name}`]);
-  assert.equal(reportText(rep2), `Enemy turn: you lost Warrior and the city ${city.name}.`);
+  // the city was sacked too (see SACK): a quarter of the player's treasury, capped
+  const sacked = Math.min(SACK.max, Math.floor(before2.gold[0] * SACK.share));
+  assert.ok(sacked > 0, 'precondition: the player had gold to sack');
+  assert.equal(rep2.sacked, sacked);
+  assert.equal(reportText(rep2), `Enemy turn: you lost Warrior and the city ${city.name}. The enemy carried off ${sacked} gold from your treasury.`);
 
   // nothing happened to the player: no text; only attackers fell: not a bad report
   const quiet = { lost: {}, wounded: 0, fell: 0, citiesLost: [], spots: [] };
@@ -6667,4 +6671,132 @@ test('treasury ledger: I toggles the treasury and the overlay lists it', () => {
   assert.ok(SHORTCUTS.some((x) => x.keys === 'I' && /treasury/.test(x.text)));
   const taken = SHORTCUTS.filter((x) => x.match('i', false));
   assert.equal(taken.length, 1, 'no other shortcut claims I');
+});
+
+test('sack: taking an enemy city carries off part of its treasury, the event replays, the turn report and risk tell', () => {
+  const s = createGame({ seed: 3, fog: false, happenings: false, faction: 'kingdom' });
+  s.units = [];
+  const capital1 = s.cities.find((c) => c.owner === 1 && c.capital);
+  const neutrals = s.cities.filter((c) => c.owner === null);
+  const town = neutrals[0];
+  town.owner = 1; // the enemy holds a second city, so losing one doesn't end the game
+  const spare = neutrals[1];
+  spare.owner = 1;
+  const free = (c) => neighbors(c.q, c.r).find((n) => isPassable(s, n.q, n.r) && !cityAt(s, n.q, n.r) && !unitAt(s, n.q, n.r));
+
+  // the share, rounding and cap
+  s.gold[1] = 30;
+  assert.equal(sackGold(s, 1, town), Math.floor(30 * SACK.share));
+  assert.equal(sackGold(s, 1, capital1), Math.floor(30 * SACK.capitalShare));
+  s.gold[1] = 1000;
+  assert.equal(sackGold(s, 1, town), SACK.max);
+  s.gold[1] = 3;
+  assert.equal(sackGold(s, 1, town), 0, 'a quarter of 3 rounds down to nothing');
+  s.gold[1] = -5;
+  assert.equal(sackGold(s, 1, town), 0, 'debt is not sacked');
+  assert.equal(sackGold(s, null, town), 0, 'a neutral city has no treasury');
+
+  // a neutral city: no sack, no extra fields
+  const nc = s.cities.find((c) => c.owner === null);
+  if (nc) {
+    s.gold[1] = 40;
+    const n = free(nc);
+    const w = spawnUnit(s, 'warrior', 0, n.q, n.r);
+    w.movesLeft = 2;
+    const g0 = s.gold[0];
+    assert.ok(moveUnit(s, w.id, nc.q, nc.r));
+    const ev = drainEvents(s).find((e) => e.type === 'capture');
+    assert.equal(ev.sack, undefined);
+    assert.equal(s.gold[0], g0);
+    assert.equal(s.gold[1], 40);
+  }
+
+  // an enemy town: a quarter of 30 = 7 moves over, the chronicle says so
+  s.gold[0] = 10;
+  s.gold[1] = 30;
+  const n2 = free(town);
+  const b = spawnUnit(s, 'warrior', 0, n2.q, n2.r);
+  b.movesLeft = 2;
+  const before = cloneState(s);
+  assert.ok(moveUnit(s, b.id, town.q, town.r));
+  assert.equal(s.gold[0], 17);
+  assert.equal(s.gold[1], 23);
+  const evs = drainEvents(s);
+  const cap = evs.find((e) => e.type === 'capture');
+  assert.equal(cap.sack, 7);
+  assert.equal(cap.from, 1);
+  assert.ok(s.log.some((l) => l.msg.includes(`captured ${town.name} (sacked 7 gold from the ${PLAYERS[1].name} treasury)`)));
+  for (const e of evs) applyEvent(before, e);
+  assert.deepEqual(before.gold, s.gold, 'the sack replays exactly');
+  assert.equal(s.winner, null);
+
+  // the loser's turn report counts it, the captor's doesn't
+  const b0 = cloneState(before);
+  b0.gold = [10, 30];
+  b0.cities.find((c) => c.id === town.id).owner = 1;
+  const repLoser = turnReport(b0, evs, 1);
+  assert.equal(repLoser.sacked, 7);
+  assert.ok(reportText(repLoser).includes('The enemy carried off 7 gold from your treasury.'));
+  assert.ok(reportIsBad(repLoser));
+  assert.equal(turnReport(b0, evs, 0).sacked, 0);
+  const quiet = { lost: {}, wounded: 0, fell: 0, citiesLost: [], spots: [] };
+  assert.equal(reportText(quiet), '', 'old reports without the field still read');
+
+  // the capital: half the treasury, capped
+  s.gold[1] = 60;
+  const n3 = free(capital1);
+  s.units = s.units.filter((u) => !(u.q === capital1.q && u.r === capital1.r));
+  const c = spawnUnit(s, 'horseman', 0, n3.q, n3.r);
+  c.movesLeft = 3;
+  const g0 = s.gold[0];
+  assert.ok(moveUnit(s, c.id, capital1.q, capital1.r));
+  assert.equal(s.gold[0] - g0, SACK.max);
+  assert.equal(s.gold[1], 60 - SACK.max);
+  assert.equal(drainEvents(s).find((e) => e.type === 'capture').sack, SACK.max);
+  assert.equal(s.winner, null, 'the enemy still holds a city');
+
+  // risk: what a lost city would cost each side now
+  s.gold[0] = 40;
+  assert.deepEqual(sackRisk(s, 0), { city: 10, capital: 20 });
+  assert.deepEqual(sackRisk(s, 1), { city: Math.floor(s.gold[1] * SACK.share), capital: null }, 'no capital left');
+  s.gold[0] = 0;
+  assert.deepEqual(sackRisk(s, 0), { city: 0, capital: 0 });
+  assert.doesNotThrow(() => JSON.stringify(s));
+  assert.equal(stateProblem(s), null);
+});
+
+test('sack: Horde loot and the sack add up; whole AI-vs-AI games keep the gold consistent in replays', () => {
+  const s = createGame({ seed: 3, fog: false, happenings: false, faction: 'horde' });
+  s.units = [];
+  const town = s.cities.find((c) => c.owner === null);
+  town.owner = 1;
+  s.gold[0] = 0;
+  s.gold[1] = 40;
+  const n = neighbors(town.q, town.r).find((p) => isPassable(s, p.q, p.r) && !cityAt(s, p.q, p.r));
+  const w = spawnUnit(s, 'warrior', 0, n.q, n.r);
+  w.movesLeft = 2;
+  assert.ok(moveUnit(s, w.id, town.q, town.r));
+  assert.equal(s.gold[0], FACTIONS.horde.captureGold + 10);
+  assert.ok(s.log.some((l) => l.msg.includes(`(loot ${FACTIONS.horde.captureGold} gold, sacked 10 gold`)));
+
+  let sacks = 0;
+  for (const seed of [2, 6, 9]) {
+    const g = createGame({ seed });
+    for (let i = 0; i < 160 && g.winner === null; i++) {
+      drainEvents(g);
+      const before = cloneState(g);
+      runAITurn(g);
+      const evs = drainEvents(g);
+      for (const e of evs) {
+        applyEvent(before, e);
+        if (e.type === 'capture' && e.sack) {
+          sacks++;
+          assert.ok(e.sack > 0 && e.sack <= SACK.max);
+          assert.notEqual(e.from, e.owner);
+        }
+      }
+      endTurn(g);
+    }
+  }
+  assert.ok(sacks > 0, 'some city is sacked in real games');
 });

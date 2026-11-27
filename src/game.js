@@ -4,7 +4,7 @@ import { generateMap, hasRiverEdge } from './map.js';
 import {
   TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY, VISION, DIFFICULTY, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, ROAD_COST, RIVER, FLANK, HIGH_GROUND, CHARGE, SKIRMISH, PURSUIT, INSPIRE,
   FACTIONS, NO_FACTION, MAP_SIZES, HAPPENINGS, FORTIFY, TERRITORY, RESOURCES,
-  UPGRADES, UPGRADE, DISBAND, SIGHTINGS, RUINS, EXPLORE, PILLAGE, REPAIR, ROADWORK, TIMBER, PLANTING, FARMS, SENTRY, VOLLEY, FORCED_MARCH, ANIM_SPEEDS, HEROES, MILESTONES, ADVISOR, GROWTH, TRADE, UNREST, FOCUS, LEVY, PERKS, SEASONS, LEDGER,
+  UPGRADES, UPGRADE, DISBAND, SIGHTINGS, RUINS, EXPLORE, PILLAGE, SACK, REPAIR, ROADWORK, TIMBER, PLANTING, FARMS, SENTRY, VOLLEY, FORCED_MARCH, ANIM_SPEEDS, HEROES, MILESTONES, ADVISOR, GROWTH, TRADE, UNREST, FOCUS, LEVY, PERKS, SEASONS, LEDGER,
 } from './rules.js';
 import { createRng } from './rng.js';
 
@@ -493,6 +493,7 @@ export function applyEvent(state, ev) {
       if (ev.size) { c.size = ev.size; c.growth = 0; }
       if (ev.unrest) c.unrest = ev.unrest; else delete c.unrest;
     }
+    if (ev.sack) { state.gold[ev.from] -= ev.sack; state.gold[ev.owner] += ev.sack; } // the sacked treasury moves
   } else if (ev.type === 'focus') {
     const c = state.cities.find((x) => x.id === ev.cityId);
     if (c) { if (ev.focus === 'balanced') delete c.focus; else c.focus = ev.focus; }
@@ -2102,12 +2103,17 @@ export function moveUnit(state, unitId, q, r) {
     city.growth = 0; // … and starts growing anew
     if (prev !== null) city.unrest = UNREST.turns; // the people of a conquered city resist (neutral ones join willingly)
     else delete city.unrest;
-    emit(state, { type: 'capture', cityId: city.id, owner: unit.owner, size: city.size, unrest: cityUnrest(city) });
+    const sack = prev === null ? 0 : sackGold(state, prev, city); // counted before the gold moves
+    const ev = { type: 'capture', cityId: city.id, owner: unit.owner, size: city.size, unrest: cityUnrest(city) };
+    if (sack) Object.assign(ev, { sack, from: prev });
+    emit(state, ev);
+    if (sack) { state.gold[prev] -= sack; state.gold[unit.owner] += sack; }
     countStat(state, 'captures', unit.owner);
     const loot = factionOf(state, unit.owner).captureGold || 0;
     state.gold[unit.owner] += loot;
     const where = { by: unit.owner, at: [city], also: prev === null ? [] : [prev] };
-    addLog(state, `${PLAYERS[unit.owner].name}: captured ${city.name}${loot ? ` (loot ${loot} gold)` : ''}`, where);
+    const extras = [loot ? `loot ${loot} gold` : '', sack ? `sacked ${sack} gold from the ${PLAYERS[prev].name} treasury` : ''].filter(Boolean);
+    addLog(state, `${PLAYERS[unit.owner].name}: captured ${city.name}${extras.length ? ` (${extras.join(', ')})` : ''}`, where);
     const capital = city.capital && prev !== null;
     const what = prev === null ? `neutral ${city.name}` : capital ? `${whose(prev)} capital` : `${whose(prev)} ${city.name}`;
     addMilestone(state, capital ? 'capital' : 'capture', unit.owner, `${cap(whose(unit.owner))} ${unitTitle(unit)} took ${what}`, where);
@@ -3070,6 +3076,23 @@ function removeUnit(state, id) {
   state.units = state.units.filter((u) => u.id !== id);
 }
 
+// Gold a captor carries off from `victim`'s treasury when it takes `city` from them (see SACK in rules.js).
+// Also tells the player what a lost city would cost them right now.
+export function sackGold(state, victim, city) {
+  if (victim === null || victim === undefined) return 0;
+  const share = city && city.capital ? SACK.capitalShare : SACK.share;
+  return Math.min(SACK.max, Math.floor(Math.max(0, state.gold[victim]) * share));
+}
+
+// What losing a city would cost `player` now: { city, capital } in gold (capital = null without an own capital).
+export function sackRisk(state, player) {
+  const own = state.cities.filter((c) => c.owner === player);
+  return {
+    city: own.some((c) => !c.capital) ? sackGold(state, player, { capital: false }) : null,
+    capital: own.some((c) => c.capital) ? sackGold(state, player, { capital: true }) : null,
+  };
+}
+
 function checkWinner(state) {
   for (let p = 0; p < PLAYERS.length; p++) {
     const hasCity = state.cities.some((c) => c.owner === p);
@@ -3132,10 +3155,10 @@ export function logFor(state, viewer) {
 // before = state before the enemy turn, events = what happened in it. The events are replayed on a copy,
 // so units recruited during the turn are known too. Only things the viewer always knows about are
 // counted (attacks on own units, lost cities), so nothing hidden in the fog leaks out.
-// Returns { lost: { type: count }, wounded, fell, citiesLost: [phrases like 'the city Oakford'], pillaged, burnt (farms), spots: [{ q, r, kind }] }.
+// Returns { lost: { type: count }, wounded, fell, citiesLost: [phrases like 'the city Oakford'], pillaged, burnt (farms), sacked (gold), spots: [{ q, r, kind }] }.
 export function turnReport(before, events, viewer) {
   const st = cloneState(before);
-  const rep = { lost: {}, wounded: 0, fell: 0, citiesLost: [], pillaged: 0, burnt: 0, spots: [] };
+  const rep = { lost: {}, wounded: 0, fell: 0, citiesLost: [], pillaged: 0, burnt: 0, sacked: 0, spots: [] };
   const wounded = new Set();
   for (const ev of events) {
     if (ev.type === 'attack') {
@@ -3155,6 +3178,7 @@ export function turnReport(before, events, viewer) {
       const c = st.cities.find((x) => x.id === ev.cityId);
       if (c && c.owner === viewer && ev.owner !== viewer) {
         rep.citiesLost.push(c.name === 'Your Capital' ? 'your capital' : `the city ${c.name}`);
+        if (ev.sack && ev.from === viewer) rep.sacked = (rep.sacked || 0) + ev.sack;
         rep.spots.push({ q: c.q, r: c.r, kind: 'city' });
       }
     } else if (ev.type === 'volley' && ev.victim === viewer && ev.player !== viewer) {
@@ -3183,6 +3207,7 @@ export function reportText(rep) {
   losses.push(...rep.citiesLost);
   const parts = [];
   if (losses.length) parts.push(`you lost ${joinList(losses)}.`);
+  if (rep.sacked) parts.push(`The enemy carried off ${rep.sacked} gold from your treasury.`);
   if (rep.pillaged) parts.push(`${rep.pillaged === 1 ? 'A resource' : `${rep.pillaged} resources`} of yours ${rep.pillaged === 1 ? 'was' : 'were'} pillaged.`);
   if (rep.burnt) parts.push(`${rep.burnt === 1 ? 'A farm' : `${rep.burnt} farms`} of yours ${rep.burnt === 1 ? 'was' : 'were'} burnt.`);
   if (rep.wounded) parts.push(`${rep.wounded} unit${rep.wounded === 1 ? ' was' : 's were'} wounded.`);
