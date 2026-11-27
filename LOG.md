@@ -2,6 +2,17 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-27 – Treasury ledger (v0.52.0)
+- **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.38.0–v0.52.0) is ahead of `main` (v0.37.0) – please merge it.
+- Starting state green (146 logic tests + smoke).
+- Phase 23 was done, so a new Phase 24 (the treasury), own improvement. The economy now has a dozen sources (growth, trade, unrest, focus, farms via growth, harvest, mines, pillage…), but the header only showed one number "+N". Now the player can see where the gold comes from and what is being lost.
+- `LEDGER` in `rules.js` (source and loss icons/names, in panel order). In `game.js`: `cityIncome` is now the sum of the new `cityIncomeParts(city, state, calm)` – one source of truth, so the ledger can never disagree with the real income (zero parts left out, a `floor` part keeps the old "never below 0"); `cityLostIncome` (unrest = what the city would pay when calm with the turns to calm, pillaged mines with turns until the first works again, a cut trade route); `incomeLedger(state, player)` → `{ total (= incomeOf), sources, cities, lost }` (focus split by focus kind, the AI's difficulty bonus as its own source, capital first then richest); `lostText`.
+- UI: a "💰 Treasury" panel under the advisor (closed by default, the summary shows "+N a turn · M lost"), the header gold is a button that opens it, key I (in the `?` overlay). Sources with totals, then each city row (parts as icons, lost gold in red; a click selects the city), a "Losing N gold a turn: unrest, …" line and the expected gold at the start of the next turn. Help text updated.
+- Cleanup: the burning-farms AI test set `movesLeft = UNIT_TYPES.warrior.moves` (undefined) – now `.move`, as noted last run; the test still passes.
+- No state structure change (`state.version` stays 38). No AI change.
+- Tests: +3 logic (sources and city parts sum to `incomeOf`/`cityIncome`, no side effects, order, faction summed, two focus lines with negative gold, harvest, cut route / pillaged mine / unrest as lost income with turns, no cities, Hard bonus and Easy floor; sums match for both sides every turn of three AI-vs-AI games on Easy/Normal/Hard; key I). Smoke test: a click on the header gold opens the ledger, the total matches the header, a restless city shows its lost gold, a city row selects the city, no horizontal scroll at 390 px, I closes it (`artifacts/screenshot-treasury.png`, `screenshot-treasury-mobile.png`).
+- Status: `npm run check` green (149 logic tests + smoke).
+
 ## 2026-11-26 – Raid alert (v0.51.0)
 - **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.38.0–v0.51.0) is ahead of `main` (v0.37.0) – please merge it.
 - Starting state green (145 logic tests + smoke).

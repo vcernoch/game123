@@ -411,6 +411,30 @@ export const FOCUS = {
 // a visible enemy within `aiThreat` tiles when it can't afford any recruit there.
 export const LEVY = { type: 'warrior', minSize: 2, sizeCost: 1, aiThreat: 3 };
 
+// Treasury ledger: income sources in the order the treasury panel lists them (see incomeLedger in game.js).
+// Lost income (`lost`) is gold the player's cities would pay but don't right now.
+export const LEDGER = {
+  sources: {
+    capital: { icon: '🏰', name: 'Capital' },
+    city: { icon: '🏘', name: 'City taxes' },
+    faction: { icon: '👑', name: 'Faction bonus' },
+    market: { icon: '⚖', name: 'Markets' },
+    temple: { icon: '⛪', name: 'Temples' },
+    mine: { icon: '⛏', name: 'Gold mines' },
+    size: { icon: '●', name: 'Grown cities' },
+    trade: { icon: '🛤', name: 'Trade routes' },
+    harvest: { icon: '🍂', name: 'Autumn harvest' },
+    focus: { icon: '◎', name: 'City focus' },
+    difficulty: { icon: '⚙', name: 'Difficulty' },
+    floor: { icon: '·', name: 'Never below 0' },
+  },
+  lost: {
+    unrest: { icon: '🔥', name: 'unrest' },
+    pillaged: { icon: '⛏', name: 'pillaged mine' },
+    cut: { icon: '🛤', name: 'trade route cut' },
+  },
+};
+
 export const ECONOMY = {
   startGold: 20,
   capitalIncome: 5,

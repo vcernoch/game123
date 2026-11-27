@@ -43,6 +43,8 @@ export const SHORTCUTS = [
     match: (k) => k === 'a' || k === 'A' },
   { keys: 'V', text: 'replay the enemy\'s last turn – what you saw of it (until you end your turn)', action: () => ({ type: 'replay' }),
     match: (k) => k === 'v' || k === 'V' },
+  { keys: 'I', text: 'open or close the treasury: where your income comes from and what you are losing', action: () => ({ type: 'treasury' }),
+    match: (k) => k === 'i' || k === 'I' },
   { keys: 'T', text: 'show or hide the enemy threat overlay', action: () => ({ type: 'threats' }), match: (k) => k === 't' || k === 'T' },
   { keys: 'Z', text: 'undo the last move (if it revealed nothing)', action: () => ({ type: 'undo' }), match: (k) => k === 'z' || k === 'Z' },
   { keys: `1–${RECRUIT_TYPES.length}`, text: `recruit in the selected city (${RECRUIT_TYPES.map((t, i) => `${i + 1} ${UNIT_TYPES[t].name}`).join(', ')}); without gold or room it orders the unit for the start of a later turn`,

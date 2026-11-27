@@ -8,7 +8,7 @@ import {
   updateSightings, lastSeen, lastSeenAt, lastSeenText, armyOverview, ARMY_STATUS, ruinBelieved,
   canExplore, setExplore, canPillage, pillageKind, pillage, isPillaged, pillageTurnsLeft, canRepair, repair,
   rallyPath, setRally, clearRally, swapPartners, swapUnits, canBuildRoad, buildRoad, canFell, fellForest, canPlant, plantForest, saplingRoundsLeft, canFarm, buildFarm, farmCities, timelineFor, adviseTurn, suggestRecruit, growthText, tradeText, tradeRoute, unrestText, focusOf, focusText, setFocus, levy, levyProblem, setRecruitOrder, clearRecruitOrder, recruitOrderText, enemyTurnReplay,
-  perkAttackMult, perkOptions, perkChoices, perkText, learnPerk, seasonInfo, seasonStarted, riverCrossCost, frostBound, frostLoss, harvestGold, winterCamp, campSaves,
+  perkAttackMult, perkOptions, perkChoices, perkText, learnPerk, seasonInfo, seasonStarted, riverCrossCost, frostBound, frostLoss, harvestGold, winterCamp, campSaves, incomeLedger, lostText,
 } from './game.js';
 import { createAnimator } from './anim.js';
 import { decideTap } from './input.js';
@@ -20,7 +20,7 @@ import { SHORTCUTS, keyAction, recruitKey } from './keys.js';
 import { render, canvasSize, pickHex, tileCenter } from './render.js';
 import { key } from './hex.js';
 import {
-  UNIT_TYPES, TERRAIN, PLAYERS, DIFFICULTY, BUILDINGS, RANKS, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FORTIFY, FORCED_MARCH, TERRITORY, ECONOMY, RESOURCES, HIGH_GROUND, CHARGE, INSPIRE, RUINS, PILLAGE, REPAIR, ROADWORK, TIMBER, PLANTING, FARMS, SENTRY, FOCUS, LEVY, PERKS, SEASONS,
+  UNIT_TYPES, TERRAIN, PLAYERS, DIFFICULTY, BUILDINGS, RANKS, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FORTIFY, FORCED_MARCH, TERRITORY, ECONOMY, RESOURCES, HIGH_GROUND, CHARGE, INSPIRE, RUINS, PILLAGE, REPAIR, ROADWORK, TIMBER, PLANTING, FARMS, SENTRY, FOCUS, LEVY, PERKS, SEASONS, LEDGER,
 } from './rules.js';
 
 const SAVE_KEY = 'game123-save';
@@ -527,6 +527,7 @@ function updateHud() {
   updateStats();
   updateArmy();
   updateAdvisor();
+  updateTreasury();
 }
 
 // Rally point part of the own city panel.
@@ -647,6 +648,44 @@ function updateArmy() {
       <span class="hp${hurt}">${r.hp}/${r.maxHp}</span>
       <span class="st">${ARMY_STATUS[r.status].label}</span></button></li>`;
   }).join('');
+}
+
+let treasuryKey = '';
+
+const signed = (n) => (n < 0 ? `−${-n}` : `+${n}`);
+
+// Treasury panel: the income in the header split by source, then every own city with what it pays and
+// the gold it loses right now. Redrawn only on change (updateHud runs on every mouse move).
+function updateTreasury() {
+  const open = $('treasury-panel').open;
+  const led = incomeLedger(state, 0);
+  const k = `${open}:${selectedCityId}:${state.gold[0]}:${busy()}:${JSON.stringify(led)}`;
+  if (k === treasuryKey) return;
+  treasuryKey = k;
+  $('treasury-count').textContent = `${signed(led.total)} a turn${led.lost ? ` · ${led.lost} lost` : ''}`;
+  if (!open) { $('treasury').innerHTML = ''; return; }
+  if (!led.cities.length) { $('treasury').innerHTML = '<p class="hint">You hold no cities, so nothing comes in.</p>'; return; }
+  const src = led.sources.map((x) => `<li><span class="ic">${x.icon}</span><span>${esc(x.name)}</span><span class="g${x.gold < 0 ? ' neg' : ''}">${signed(x.gold)}</span></li>`).join('');
+  const cities = led.cities.map((c) => {
+    const parts = c.parts.map((p) => `${LEDGER.sources[p.kind].icon} ${signed(p.gold)}`).join(' · ') || 'pays nothing';
+    const lost = c.lost.map((l) => `<span class="lost">${esc(lostText(l))}</span>`).join(' · ');
+    return `<li><button type="button" class="ledger-city${c.id === selectedCityId ? ' sel' : ''}" data-ledger-city="${c.id}" ${busy() ? 'disabled' : ''}>
+      <span>${c.capital ? '★ ' : ''}${esc(c.name)}</span><span class="g">${signed(c.gold)}</span>
+      <small>${parts}${lost ? ` · ${lost}` : ''}</small></button></li>`;
+  }).join('');
+  $('treasury').innerHTML = `<ul class="ledger">${src}<li class="total"><span></span><span>Per turn</span><span class="g">${signed(led.total)}</span></li></ul>
+    ${led.lost ? `<p class="ledger-note lost">Losing ${led.lost} gold a turn: ${[...new Set(led.cities.flatMap((c) => c.lost.map((l) => LEDGER.lost[l.kind].name)))].join(', ')}.</p>` : ''}
+    <ul class="ledger-cities">${cities}</ul>
+    <p class="ledger-note">At the start of your next turn: about ${state.gold[0]} → ${state.gold[0] + led.total} gold (random events and new seasons can change it).</p>`;
+}
+
+// Opens the treasury (header gold, I) and brings it into view; a second press closes it.
+function toggleTreasury() {
+  const p = $('treasury-panel');
+  p.open = !p.open;
+  treasuryKey = '';
+  updateTreasury(); // fill it now – the toggle event comes later
+  if (p.open) p.scrollIntoView({ block: 'nearest' });
 }
 
 let advisorKey = '';
@@ -1200,6 +1239,21 @@ $('advisor').addEventListener('click', (ev) => {
   const tip = ev.target.closest('button[data-tip-q]');
   if (tip) selectFromTip(tip);
 });
+$('treasury-panel').addEventListener('toggle', () => { treasuryKey = ''; updateTreasury(); });
+$('treasury-open').addEventListener('click', toggleTreasury);
+$('treasury').addEventListener('click', (ev) => {
+  const row = ev.target.closest('button[data-ledger-city]');
+  if (!row || busy()) return;
+  const city = state.cities.find((c) => c.id === Number(row.dataset.ledgerCity));
+  if (!city || city.owner !== 0) return;
+  pending = null; rallyPick = null; swapPick = null;
+  const u = unitAt(state, city.q, city.r);
+  selectedId = u && u.owner === 0 ? u.id : null;
+  selectedCityId = city.id;
+  sound.play('click');
+  draw();
+  bringIntoView(city.q, city.r);
+});
 $('army').addEventListener('click', (ev) => {
   const row = ev.target.closest('button[data-army]');
   if (row) selectFromArmy(Number(row.dataset.army));
@@ -1279,6 +1333,7 @@ window.addEventListener('keydown', (ev) => {
   else if (act.type === 'recruit') recruitSelected(act.unitType);
   else if (act.type === 'help') $('keys-dialog').showModal();
   else if (act.type === 'threats') toggleThreats();
+  else if (act.type === 'treasury') toggleTreasury();
   else if (act.type === 'replay') replayEnemyTurn();
   else if (act.type === 'animSpeed') cycleAnimSpeed();
   else if (act.type === 'rally') startRallyPick();

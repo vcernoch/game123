@@ -1770,6 +1770,43 @@ try {
   }
   await page.screenshot({ path: 'artifacts/screenshot-camp.png' });
 
+  // treasury: a click on the header gold opens the ledger, its total matches the header, a restless city
+  // shows its lost gold, a city row selects the city, I closes it again; no horizontal scroll on a phone
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.evaluate(() => {
+    window.__game.newGame(2, { fog: false });
+    const st = window.__game.getState();
+    const c = st.cities.find((x) => x.id === 5);
+    c.owner = 0; c.unrest = 2;
+    window.__game.refresh();
+  });
+  await page.click('#treasury-open');
+  await page.waitForFunction(() => document.querySelectorAll('#treasury .ledger-city').length > 0, null, { timeout: 5000 });
+  const ledger = await page.evaluate(() => ({
+    open: document.getElementById('treasury-panel').open,
+    income: document.getElementById('income').textContent,
+    count: document.getElementById('treasury-count').textContent,
+    total: document.querySelector('#treasury .ledger li.total .g')?.textContent || '',
+    rows: [...document.querySelectorAll('#treasury .ledger-city')].map((b) => b.textContent.replace(/\s+/g, ' ').trim()),
+    text: document.getElementById('treasury').textContent,
+  }));
+  if (!ledger.open || ledger.total !== ledger.income || !ledger.count.startsWith(ledger.income) || ledger.rows.length !== 2
+    || !ledger.rows[0].startsWith('★') || !ledger.rows.some((r) => r.includes('unrest: −')) || !/Losing \d+ gold a turn: unrest\./.test(ledger.text)) {
+    throw new Error(`treasury: ${JSON.stringify(ledger)}`);
+  }
+  await page.evaluate(() => document.getElementById('treasury-panel').scrollIntoView());
+  await page.screenshot({ path: 'artifacts/screenshot-treasury.png' });
+  await page.click('#treasury .ledger-city[data-ledger-city="5"]');
+  if (!(await page.textContent('#info')).includes(await page.evaluate(() => window.__game.getState().cities.find((x) => x.id === 5).name))) {
+    throw new Error('treasury: clicking a city row does not select it');
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
+  if (await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1)) throw new Error('treasury: horizontal scroll on mobile');
+  await page.evaluate(() => document.getElementById('treasury-panel').scrollIntoView());
+  await page.screenshot({ path: 'artifacts/screenshot-treasury-mobile.png' });
+  await page.keyboard.press('i');
+  if (await page.evaluate(() => document.getElementById('treasury-panel').open)) throw new Error('treasury: I does not close it');
+
   if (errors.length) throw new Error(errors.join('\n'));
   console.log(`SMOKE OK – turn ${turn}, screenshots in artifacts/`);
 } catch (e) {

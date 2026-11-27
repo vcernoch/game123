@@ -4,7 +4,7 @@ import { generateMap, hasRiverEdge } from './map.js';
 import {
   TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY, VISION, DIFFICULTY, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, ROAD_COST, RIVER, FLANK, HIGH_GROUND, CHARGE, SKIRMISH, PURSUIT, INSPIRE,
   FACTIONS, NO_FACTION, MAP_SIZES, HAPPENINGS, FORTIFY, TERRITORY, RESOURCES,
-  UPGRADES, UPGRADE, DISBAND, SIGHTINGS, RUINS, EXPLORE, PILLAGE, REPAIR, ROADWORK, TIMBER, PLANTING, FARMS, SENTRY, VOLLEY, FORCED_MARCH, ANIM_SPEEDS, HEROES, MILESTONES, ADVISOR, GROWTH, TRADE, UNREST, FOCUS, LEVY, PERKS, SEASONS,
+  UPGRADES, UPGRADE, DISBAND, SIGHTINGS, RUINS, EXPLORE, PILLAGE, REPAIR, ROADWORK, TIMBER, PLANTING, FARMS, SENTRY, VOLLEY, FORCED_MARCH, ANIM_SPEEDS, HEROES, MILESTONES, ADVISOR, GROWTH, TRADE, UNREST, FOCUS, LEVY, PERKS, SEASONS, LEDGER,
 } from './rules.js';
 import { createRng } from './rng.js';
 
@@ -668,15 +668,92 @@ export function terrainDefense(state, unit, tile) {
 
 // City income; with state, the owner's faction bonus is included too.
 export function cityIncome(city, state = null) {
-  if (cityUnrest(city) > 0) return 0; // a restless city pays nothing to its new owner
-  const base = city.capital ? ECONOMY.capitalIncome : ECONOMY.cityIncome;
-  const faction = state && city.owner !== null ? factionOf(state, city.owner).cityIncome || 0 : 0;
-  const market = hasBuilding(city, 'market') ? BUILDING_EFFECTS.marketIncome : 0;
-  const temple = hasBuilding(city, 'temple') ? BUILDING_EFFECTS.templeIncome : 0;
-  const mines = state ? cityResources(state, city).filter((t) => t.resource === 'gold' && !isPillaged(state, t)).length * RESOURCES.gold.income : 0;
-  const trade = state && tradeRoute(state, city) === 'linked' ? TRADE.income : 0;
-  const harvest = state ? harvestGold(state, city) : 0;
-  return Math.max(0, base + faction + market + temple + mines + (citySize(city) - 1) * GROWTH.income + trade + harvest + cityFocus(city).gold);
+  return cityIncomeParts(city, state).reduce((sum, p) => sum + p.gold, 0);
+}
+
+// The sources of a city's income as [{ kind, gold, label? }] (kinds: LEDGER.sources); their sum is
+// cityIncome. A restless city pays nothing (no parts) unless `calm` asks what it would pay without unrest.
+// Zero parts are left out; a `floor` part lifts a negative sum to 0 (a city never pays less than 0).
+export function cityIncomeParts(city, state = null, calm = false) {
+  if (!calm && cityUnrest(city) > 0) return []; // a restless city pays nothing to its new owner
+  const c = calm && cityUnrest(city) > 0 ? { ...city, unrest: 0 } : city;
+  const parts = [];
+  const add = (kind, gold, label) => { if (gold) parts.push(label ? { kind, gold, label } : { kind, gold }); };
+  add(c.capital ? 'capital' : 'city', c.capital ? ECONOMY.capitalIncome : ECONOMY.cityIncome);
+  if (state && c.owner !== null) add('faction', factionOf(state, c.owner).cityIncome || 0, factionOf(state, c.owner).name);
+  add('market', hasBuilding(c, 'market') ? BUILDING_EFFECTS.marketIncome : 0);
+  add('temple', hasBuilding(c, 'temple') ? BUILDING_EFFECTS.templeIncome : 0);
+  if (state) add('mine', cityResources(state, c).filter((t) => t.resource === 'gold' && !isPillaged(state, t)).length * RESOURCES.gold.income);
+  add('size', (citySize(c) - 1) * GROWTH.income, `size ${citySize(c)}`);
+  if (state) add('trade', tradeRoute(state, c) === 'linked' ? TRADE.income : 0);
+  if (state) add('harvest', harvestGold(state, c));
+  add('focus', cityFocus(c).gold, `${cityFocus(c).name} focus`);
+  const sum = parts.reduce((s, p) => s + p.gold, 0);
+  if (sum < 0) parts.push({ kind: 'floor', gold: -sum });
+  return parts;
+}
+
+// Gold a city of the player would pay but doesn't right now, as [{ kind, gold, turns? }] (kinds: LEDGER.lost):
+// unrest (everything it would pay when calm), pillaged gold mines (turns until the first works again) and a
+// trade route cut by enemy units on the road.
+export function cityLostIncome(state, city) {
+  if (city.owner === null) return [];
+  const restless = cityUnrest(city);
+  if (restless > 0) {
+    const gold = cityIncomeParts(city, state, true).reduce((s, p) => s + p.gold, 0);
+    return gold ? [{ kind: 'unrest', gold, turns: unrestTurnsLeft(state, city) }] : [];
+  }
+  const out = [];
+  const mines = cityResources(state, city).filter((t) => t.resource === 'gold' && isPillaged(state, t));
+  if (mines.length) {
+    out.push({ kind: 'pillaged', gold: mines.length * RESOURCES.gold.income, turns: Math.min(...mines.map((t) => pillageTurnsLeft(state, t))) });
+  }
+  if (tradeRoute(state, city) === 'cut') out.push({ kind: 'cut', gold: TRADE.income });
+  return out;
+}
+
+// Treasury ledger of a player: where the income shown in the header comes from.
+// Returns { total (= incomeOf), sources: [{ kind, icon, name, gold }] in LEDGER order (only non-zero ones,
+// focus split by focus kind), cities: [{ id, name, q, r, capital, gold, parts, lost }] (capital first, then
+// richest first), lost: total gold lost to unrest, pillage and cut routes }.
+export function incomeLedger(state, player) {
+  const own = state.cities.filter((c) => c.owner === player);
+  const cities = own.map((c) => ({
+    id: c.id, name: c.name, q: c.q, r: c.r, capital: !!c.capital,
+    gold: cityIncome(c, state), parts: cityIncomeParts(c, state), lost: cityLostIncome(state, c),
+  }));
+  cities.sort((a, b) => (b.capital - a.capital) || (b.gold - a.gold) || (a.id - b.id));
+  const sums = new Map();
+  const addSource = (kind, gold, name) => {
+    const k = `${kind}:${name}`;
+    const cur = sums.get(k) || { kind, icon: LEDGER.sources[kind].icon, name, gold: 0 };
+    cur.gold += gold;
+    sums.set(k, cur);
+  };
+  for (const c of cities) {
+    for (const p of c.parts) {
+      const name = p.kind === 'focus' ? p.label : p.kind === 'faction' ? `${LEDGER.sources.faction.name} (${p.label})` : LEDGER.sources[p.kind].name;
+      addSource(p.kind, p.gold, name);
+    }
+  }
+  const base = cities.reduce((s, c) => s + c.gold, 0);
+  const bonus = difficultyOf(state, player).incomeBonus;
+  if (bonus) addSource('difficulty', bonus, `${LEDGER.sources.difficulty.name} (${DIFFICULTY[state.difficulty]?.name || 'Normal'})`);
+  if (base + bonus < 0) addSource('floor', -(base + bonus), LEDGER.sources.floor.name);
+  const order = Object.keys(LEDGER.sources);
+  const sources = [...sums.values()].filter((x) => x.gold !== 0).sort((a, b) => order.indexOf(a.kind) - order.indexOf(b.kind));
+  return {
+    total: incomeOf(state, player),
+    sources,
+    cities,
+    lost: cities.reduce((s, c) => s + c.lost.reduce((t, l) => t + l.gold, 0), 0),
+  };
+}
+
+// One line for a city's lost income in the treasury panel, e.g. "🔥 unrest: −4 (2 turns)".
+export function lostText(l) {
+  const def = LEDGER.lost[l.kind];
+  return `${def.icon} ${def.name}: −${l.gold}${l.turns ? ` (${l.turns} turn${l.turns === 1 ? '' : 's'})` : ''}`;
 }
 
 // ---------- city focus ----------

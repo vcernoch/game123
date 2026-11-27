@@ -23,7 +23,7 @@ import {
   isSkirmisher, movesAfterAttack, canWithdraw, isPursuer, pursuitTile, pursuesInto,
   eventTiles, eventSeen, enemyTurnReplay,
   perksOf, hasPerk, perkChoices, perkOptions, perkProblem, learnPerk, medicBonus, perkText, perkAttackMult,
-  raidThreat,
+  raidThreat, cityIncomeParts, cityLostIncome, incomeLedger, lostText,
 } from '../src/game.js';
 import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
@@ -47,7 +47,7 @@ import { distance, key, neighbors } from '../src/hex.js';
 import {
   RESOURCES, FORTIFY, TERRITORY, ECONOMY, UNIT_TYPES, TERRAIN, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FLANK, HIGH_GROUND, CHARGE, REPAIR,
   UPGRADES, UPGRADE, DISBAND, RUINS, EXPLORE, PILLAGE,
-  SIGHTINGS, ROADWORK, SENTRY, VOLLEY, ANIM_SPEEDS, HEROES, INSPIRE, MILESTONES, ADVISOR, GROWTH, TRADE, UNREST, FOCUS, LEVY, FORCED_MARCH, SKIRMISH, PURSUIT, PERKS, PLAYERS,
+  SIGHTINGS, ROADWORK, SENTRY, VOLLEY, ANIM_SPEEDS, HEROES, INSPIRE, MILESTONES, ADVISOR, GROWTH, TRADE, UNREST, FOCUS, LEVY, FORCED_MARCH, SKIRMISH, PURSUIT, PERKS, PLAYERS, LEDGER,
 } from '../src/rules.js';
 
 test('map is deterministic and starting cities are connected', () => {
@@ -6459,7 +6459,7 @@ test('burning farms: who can\'t, and the AI raids farms it can see but not ones 
   spot.farm = true;
   s2.current = 1;
   const r = spawnUnit(s2, 'warrior', 1, spot.q, spot.r);
-  r.movesLeft = UNIT_TYPES.warrior.moves; r.hasAttacked = false;
+  r.movesLeft = UNIT_TYPES.warrior.move; r.hasAttacked = false;
   s2.gold[1] = 0;
   runAITurn(s2);
   assert.equal(spot.farm, undefined, 'the AI burnt the farm');
@@ -6546,4 +6546,125 @@ test('raid alert: the advisor warns about a visible raider on or next to an own 
   adviseTurn(s, 0);
   assert.equal(JSON.stringify(s), before);
   assert.deepEqual(adviseTurn(s, 1), [], 'not on the other side\'s turn');
+});
+
+test('treasury ledger: income split by source and city, lost gold to unrest, pillage and cut roads', () => {
+  const s = createGame({ seed: 2, fog: false, happenings: false, seasons: true });
+  s.units = [];
+  const cap = s.cities.find((c) => c.capital && c.owner === 0);
+  const city = s.cities.find((c) => c.id === 5);
+  city.owner = 0;
+  cap.buildings = [...(cap.buildings || []), 'market'];
+  city.size = 2;
+  city.focus = 'commerce';
+  const before = JSON.stringify(s);
+  const led = incomeLedger(s, 0);
+  assert.equal(JSON.stringify(s), before, 'the ledger changes nothing');
+  assert.equal(led.total, incomeOf(s, 0));
+  assert.equal(led.sources.reduce((t, x) => t + x.gold, 0), led.total);
+  assert.deepEqual(led.cities.map((c) => c.id), [cap.id, city.id], 'capital first');
+  for (const c of led.cities) {
+    const real = s.cities.find((x) => x.id === c.id);
+    assert.equal(c.gold, cityIncome(real, s));
+    assert.equal(c.parts.reduce((t, p) => t + p.gold, 0), c.gold);
+    assert.ok(c.parts.every((p) => p.gold !== 0 && LEDGER.sources[p.kind]), JSON.stringify(c.parts));
+  }
+  const kinds = led.sources.map((x) => x.kind);
+  for (const k of ['capital', 'city', 'faction', 'market', 'size', 'trade', 'focus']) assert.ok(kinds.includes(k), `${k} in ${kinds}`);
+  assert.deepEqual(kinds, Object.keys(LEDGER.sources).filter((k) => kinds.includes(k)), 'sources in ledger order');
+  assert.equal(led.sources.find((x) => x.kind === 'faction').name, 'Faction bonus (Kingdom)');
+  assert.equal(led.sources.find((x) => x.kind === 'faction').gold, 2, 'one per city, summed');
+  assert.equal(led.sources.find((x) => x.kind === 'focus').name, 'Commerce focus');
+  assert.equal(led.sources.find((x) => x.kind === 'size').gold, GROWTH.income);
+  assert.equal(led.lost, 0);
+  assert.deepEqual(cityLostIncome(s, cap), []);
+
+  // two cities with costly focuses: one line per focus kind, negative gold kept
+  cap.focus = 'fortress';
+  city.focus = 'granary';
+  let l2 = incomeLedger(s, 0);
+  assert.deepEqual(l2.sources.filter((x) => x.kind === 'focus').map((x) => [x.name, x.gold]), [['Fortress focus', -1], ['Granary focus', -1]]);
+  assert.equal(l2.sources.reduce((t, x) => t + x.gold, 0), incomeOf(s, 0));
+  city.focus = 'balanced';
+
+  // the autumn harvest shows up for a grown city
+  s.turn = SEASONS.length * SEASONS.order.indexOf('autumn') + 1;
+  assert.ok(harvestGold(s, city) > 0);
+  assert.ok(incomeLedger(s, 0).sources.some((x) => x.kind === 'harvest'));
+  s.turn = 1;
+
+  // a cut trade route is lost income
+  const roadNs = neighbors(city.q, city.r).filter((n) => tileAt(s, n.q, n.r)?.road && !cityAt(s, n.q, n.r));
+  for (const n of roadNs) spawnUnit(s, 'warrior', 1, n.q, n.r);
+  assert.equal(tradeRoute(s, city), 'cut');
+  assert.deepEqual(cityLostIncome(s, city), [{ kind: 'cut', gold: TRADE.income }]);
+  assert.equal(incomeLedger(s, 0).lost, TRADE.income);
+  assert.ok(!incomeLedger(s, 0).sources.some((x) => x.kind === 'trade'));
+  assert.equal(lostText(cityLostIncome(s, city)[0]), `${LEDGER.lost.cut.icon} trade route cut: −${TRADE.income}`);
+  s.units = [];
+
+  // a pillaged gold mine is lost income with the turns until it works again
+  const mine = cityResources(s, cap).find((t) => t.resource === 'gold');
+  assert.ok(mine, 'seed 2 has a gold mine by the capital');
+  const withMine = cityIncome(cap, s);
+  mine.pillagedUntil = s.turn + 3;
+  assert.equal(cityIncome(cap, s), withMine - RESOURCES.gold.income);
+  assert.deepEqual(cityLostIncome(s, cap), [{ kind: 'pillaged', gold: RESOURCES.gold.income, turns: 3 }]);
+  assert.match(lostText(cityLostIncome(s, cap)[0]), /pillaged mine: −2 \(3 turns\)$/);
+  delete mine.pillagedUntil;
+
+  // a restless city pays nothing: no parts, everything it would pay is lost, with the turns to calm
+  const calm = cityIncome(city, s);
+  city.unrest = 3;
+  assert.equal(cityIncome(city, s), 0);
+  assert.deepEqual(cityIncomeParts(city, s), []);
+  assert.equal(cityIncomeParts(city, s, true).reduce((t, p) => t + p.gold, 0), calm);
+  assert.deepEqual(cityLostIncome(s, city), [{ kind: 'unrest', gold: calm, turns: unrestTurnsLeft(s, city) }]);
+  const l3 = incomeLedger(s, 0);
+  assert.equal(l3.cities.find((c) => c.id === city.id).gold, 0);
+  assert.equal(l3.cities[0].id, cap.id);
+  assert.equal(l3.lost, calm);
+  assert.equal(l3.sources.reduce((t, x) => t + x.gold, 0), incomeOf(s, 0));
+  delete city.unrest;
+
+  // neutral cities lose nothing, a player without cities has an empty ledger
+  assert.deepEqual(cityLostIncome(s, s.cities.find((c) => c.owner === null)), []);
+  const none = cloneState(s);
+  none.cities.forEach((c) => { if (c.owner === 0) c.owner = null; });
+  assert.deepEqual(incomeLedger(none, 0), { total: 0, sources: [], cities: [], lost: 0 });
+
+  // the AI's difficulty bonus is a source of its own; an Easy AI's −2 is floored at 0 overall
+  const hard = createGame({ seed: 2, difficulty: 'hard' });
+  assert.deepEqual(incomeLedger(hard, 1).sources.find((x) => x.kind === 'difficulty'), { kind: 'difficulty', icon: LEDGER.sources.difficulty.icon, name: 'Difficulty (Hard)', gold: 3 });
+  const easy = createGame({ seed: 2, difficulty: 'easy' });
+  easy.cities.forEach((c) => { if (c.owner === 1) c.unrest = 2; });
+  const le = incomeLedger(easy, 1);
+  assert.equal(le.total, 0);
+  assert.deepEqual(le.sources.map((x) => [x.kind, x.gold]), [['difficulty', -2], ['floor', 2]]);
+});
+
+test('treasury ledger: sums match incomeOf for both sides through whole AI-vs-AI games', () => {
+  for (const [seed, difficulty] of [[3, 'easy'], [4, 'normal'], [5, 'hard']]) {
+    const s = createGame({ seed, difficulty });
+    for (let i = 0; i < 120 && s.winner === null; i++) {
+      for (const p of [0, 1]) {
+        const led = incomeLedger(s, p);
+        assert.equal(led.total, incomeOf(s, p), `seed ${seed} turn ${s.turn}`);
+        assert.equal(led.sources.reduce((t, x) => t + x.gold, 0), led.total, `seed ${seed} turn ${s.turn} player ${p}`);
+        assert.equal(led.cities.length, s.cities.filter((c) => c.owner === p).length);
+        for (const c of led.cities) assert.equal(c.parts.reduce((t, x) => t + x.gold, 0), c.gold);
+        assert.equal(led.lost, led.cities.reduce((t, c) => t + c.lost.reduce((u, x) => u + x.gold, 0), 0));
+      }
+      runAITurn(s);
+      endTurn(s);
+    }
+  }
+});
+
+test('treasury ledger: I toggles the treasury and the overlay lists it', () => {
+  assert.deepEqual(keyAction('i'), { type: 'treasury' });
+  assert.deepEqual(keyAction('I'), { type: 'treasury' });
+  assert.ok(SHORTCUTS.some((x) => x.keys === 'I' && /treasury/.test(x.text)));
+  const taken = SHORTCUTS.filter((x) => x.match('i', false));
+  assert.equal(taken.length, 1, 'no other shortcut claims I');
 });
