@@ -156,6 +156,7 @@ fieldset .seed-row + small { margin-left: 0; }
 .order { color: #ffe27a; }
 .charge { color: #ffb74d; font-weight: 600; }
 .inspire { color: #f2c94c; }
+.bounty { color: #ffe27a; }
 .perks { color: #cfe3ff; }
 .frost { color: #bfe4ff; }
 .harvest { color: #f0c27a; }

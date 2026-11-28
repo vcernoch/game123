@@ -3,7 +3,7 @@ import {
   createGame, reachable, attackTargets, moveUnit, attack, buyUnit, endTurn,
   unitAt, cityAt, getUnit, incomeOf, previewAttack, tileAt, pathTo, nextActiveUnit, cityInfo,
   cloneState, drainEvents, migrateState, logFor, turnReport, reportText, reportIsBad, isUndoableMove, canFortify, fortify, canForceMarch, forceMarch, marchReach, canSentry, sentry, SENTRY_TEXT, animSpeedOf, nextAnimSpeed, activeUnits, territoryOwner, cityResources, unitSummary, planRoute, setOrder, runOrders, cancelOrder, visibleTiles, exploredTiles, build, unitCost, hasBuilding,
-  rankOf, rankMult, buildingCost, inspiredUnits, unitMove, factionOf, riverDefense, flankers, zocTiles, threatTiles, exportGame, importGame, saveFileName, parseSeed, restartOptions,
+  rankOf, rankMult, buildingCost, inspiredUnits, bountyFor, unitMove, factionOf, riverDefense, flankers, zocTiles, threatTiles, exportGame, importGame, saveFileName, parseSeed, restartOptions,
   upgradeOptions, upgradeUnit, canDisband, disbandRefund, disbandUnit, chargeReady, movesAfterAttack, pursuesInto,
   updateSightings, lastSeen, lastSeenAt, lastSeenText, armyOverview, ARMY_STATUS, ruinBelieved,
   canExplore, setExplore, canPillage, pillageKind, pillage, isPillaged, pillageTurnsLeft, canRepair, repair,
@@ -146,6 +146,14 @@ function inspireLine(u) {
   return `<p class="inspire">Inspires ${who} (+${Math.round(INSPIRE.defBonus * 100)} % defense)</p>`;
 }
 
+// "💰 Bounty on its head: 6 gold" for a named hero (own: what the enemy earns; enemy: what you earn).
+function bountyLine(u) {
+  const gold = bountyFor(u);
+  if (!gold) return '';
+  const who = u.owner === 0 ? 'the enemy earns' : 'you earn';
+  return `<p class="bounty">💰 Bounty on its head: ${gold} gold (${who} it for destroying it)</p>`;
+}
+
 // "Attack", "Attack across a river", "Flanking attack +20 %" … for the attack preview.
 function attackLabel(attacker, target, preview) {
   let label = riverDefense(state, attacker, target) ? 'Attack across a river' : 'Attack';
@@ -156,6 +164,8 @@ function attackLabel(attacker, target, preview) {
   const keep = preview.dies ? 0 : movesAfterAttack(state, attacker);
   if (keep > 0) label += ` · then ${fmt(keep)} move to pull back`;
   if (preview.kills && pursuesInto(state, attacker, target)) label += ' · then it can advance';
+  if (preview.bounty) label += ` · 💰 bounty +${preview.bounty} gold`;
+  if (preview.bountyLost) label += ` · your hero falls: the enemy gets a ${preview.bountyLost} gold bounty`;
   return label;
 }
 
@@ -299,7 +309,7 @@ function updateHud() {
     html += `<h3>${u.name ? `<span class="hero">${esc(u.name)}</span> ` : ''}${t.name} <span class="tag" style="background:${PLAYERS[u.owner].color}">${PLAYERS[u.owner].name}</span></h3>
       <p>HP ${u.hp}/${t.hp} · Attack ${fmt(t.atk * rankMult(u) * perkAttackMult(u))} · Defense ${fmt(t.def * rankMult(u))} · Range ${t.range}</p>
       <p>Move ${fmt(u.movesLeft)}/${unitMove(state, u)}${u.fortified ? '' : u.hasAttacked ? (u.movesLeft > 0 ? ' · already attacked' : ' · done for this turn') : ''}${chargeReady(state, u) ? ` · <span class="charge">charge ready (+${Math.round(CHARGE.atkBonus * 100)} %)</span>` : ''}</p>
-      <p>${rankLine(u)}</p>${perkText(u) ? `<p class="perks">Perks: ${perkText(u)}</p>` : ''}${inspireLine(u)}${frostLine(u)}${t.desc ? `<p class="hint">${t.desc}</p>` : ''}`;
+      <p>${rankLine(u)}</p>${perkText(u) ? `<p class="perks">Perks: ${perkText(u)}</p>` : ''}${inspireLine(u)}${bountyLine(u)}${frostLine(u)}${t.desc ? `<p class="hint">${t.desc}</p>` : ''}`;
     if (u.owner === 0 && !busy() && state.current === 0 && perkChoices(u)) html += perkPanel(u);
     if (u.goto && u.owner === 0) {
       const r = planRoute(state, u, u.goto.q, u.goto.r);
@@ -919,6 +929,7 @@ function unitTipText(u) {
   const tags = [s.rank !== RANKS[0].name ? s.rank : '', s.fortified ? 'fortified' : '', s.forcedMarch ? 'forced march' : '', s.hitAndRun ? 'hit and run' : '', s.pursuit ? 'can pursue' : '', s.marching ? 'marching' : '', s.exploring ? 'exploring' : '', s.sentry && s.owner === 0 ? (s.sentry === 'heal' ? 'resting' : 'on watch') : ''].filter(Boolean);
   if (s.kills) tags.push(`${s.kills} kill${s.kills === 1 ? '' : 's'}`);
   tags.push(...s.perks.map((p) => PERKS.kinds[p].name.toLowerCase()));
+  if (s.bounty) tags.push(`bounty ${s.bounty} gold`);
   return `${PLAYERS[s.owner].name}: ${s.hero ? `${s.hero} the ${s.name}` : s.name}${tags.length ? ` (${tags.join(', ')})` : ''} · HP ${s.hp}/${s.maxHp}\n`
     + `Attack ${fmt(s.attack)} · Defense ${fmt(s.defense)}${s.notes.length ? ` (${s.notes.join(', ')})` : ''} · Range ${s.range} · Move ${s.move}`;
 }

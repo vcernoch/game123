@@ -23,7 +23,7 @@ import {
   isSkirmisher, movesAfterAttack, canWithdraw, isPursuer, pursuitTile, pursuesInto,
   eventTiles, eventSeen, enemyTurnReplay,
   perksOf, hasPerk, perkChoices, perkOptions, perkProblem, learnPerk, medicBonus, perkText, perkAttackMult,
-  raidThreat, cityIncomeParts, cityLostIncome, incomeLedger, lostText, sackGold, sackRisk,
+  raidThreat, cityIncomeParts, cityLostIncome, incomeLedger, lostText, sackGold, sackRisk, bountyFor,
 } from '../src/game.js';
 import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
@@ -47,7 +47,7 @@ import { distance, key, neighbors } from '../src/hex.js';
 import {
   RESOURCES, FORTIFY, TERRITORY, ECONOMY, UNIT_TYPES, TERRAIN, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, FACTIONS, MAP_SIZES, RIVER, HAPPENINGS, FLANK, HIGH_GROUND, CHARGE, REPAIR,
   UPGRADES, UPGRADE, DISBAND, RUINS, EXPLORE, PILLAGE,
-  SIGHTINGS, ROADWORK, SENTRY, VOLLEY, ANIM_SPEEDS, HEROES, INSPIRE, MILESTONES, ADVISOR, GROWTH, TRADE, UNREST, FOCUS, LEVY, FORCED_MARCH, SKIRMISH, PURSUIT, PERKS, PLAYERS, LEDGER, SACK,
+  SIGHTINGS, ROADWORK, SENTRY, VOLLEY, ANIM_SPEEDS, HEROES, INSPIRE, MILESTONES, ADVISOR, GROWTH, TRADE, UNREST, FOCUS, LEVY, FORCED_MARCH, SKIRMISH, PURSUIT, PERKS, PLAYERS, LEDGER, SACK, BOUNTY,
 } from '../src/rules.js';
 
 test('map is deterministic and starting cities are connected', () => {
@@ -6799,4 +6799,124 @@ test('sack: Horde loot and the sack add up; whole AI-vs-AI games keep the gold c
     }
   }
   assert.ok(sacks > 0, 'some city is sacked in real games');
+});
+
+test('bounty: destroying a named hero pays gold by its kills, in attacks and counterattacks; replay, chronicle, report', () => {
+  // the amount: only heroes, base + per kill, capped
+  assert.equal(bountyFor(null), 0);
+  assert.equal(bountyFor({ type: 'warrior', kills: 5 }), 0, 'an unnamed unit carries no bounty');
+  assert.equal(bountyFor({ type: 'warrior', name: 'Ivo' }), 0, 'a hero without kills is not famous yet');
+  assert.equal(bountyFor({ type: 'warrior', name: 'Ivo', kills: BOUNTY.minKills - 1 }), 0);
+  assert.equal(bountyFor({ type: 'warrior', name: 'Ivo', kills: BOUNTY.minKills }), BOUNTY.minKills * BOUNTY.perKill);
+  assert.equal(bountyFor({ type: 'warrior', name: 'Ivo', kills: 5 }), Math.min(BOUNTY.max, 5 * BOUNTY.perKill));
+  assert.equal(bountyFor({ type: 'warrior', name: 'Ivo', kills: 99 }), BOUNTY.max);
+
+  // an attack that destroys an enemy hero
+  let { s, mk } = advisorSetup();
+  s.gold = [10, 10];
+  const spot = { q: 3, r: 6 };
+  const [n1, n2] = neighbors(spot.q, spot.r).filter((n) => isPassable(s, n.q, n.r) && !cityAt(s, n.q, n.r));
+  const a = mk(1, 0, spot.q, spot.r, 'warrior');
+  const hero = mk(2, 1, n1.q, n1.r, 'archer', { hp: 1, name: 'Bora', xp: 4, kills: 4 });
+  const p = previewAttack(s, a, hero);
+  assert.ok(p.kills);
+  assert.equal(p.bounty, 4 * BOUNTY.perKill);
+  assert.ok(p.bounty > 0);
+  assert.equal(p.bountyLost, 0);
+  const plain = mk(3, 1, n2.q, n2.r, 'archer', { hp: 1 });
+  assert.equal(previewAttack(s, a, plain).bounty, 0, 'a plain unit pays nothing');
+  // the advisor prefers the hero with the bounty over an equally weak plain unit
+  const fin = adviseTurn(s, 0).find((t) => t.kind === 'finish');
+  assert.equal(fin.text, `${unitTitle(a)} can finish off the enemy hero Bora the Archer (1 HP) – a bounty of ${p.bounty} gold.`);
+  const before = cloneState(s);
+  drainEvents(s);
+  assert.ok(attack(s, a.id, hero.id));
+  assert.equal(s.gold[0], 10 + p.bounty);
+  assert.equal(s.gold[1], 10, 'the bounty is not taken from the loser');
+  const evs = drainEvents(s);
+  const ev = evs.find((e) => e.type === 'attack');
+  assert.equal(ev.bounty, p.bounty);
+  assert.equal(ev.bountyTo, 0);
+  assert.ok(s.log.some((l) => l.msg.endsWith(`destroyed Bora (Archer) (bounty ${p.bounty} gold)`)), s.log.map((l) => l.msg).join('|'));
+  const replay = cloneState(before);
+  for (const e of evs) applyEvent(replay, e);
+  assert.deepEqual(replay.gold, s.gold, 'the bounty replays exactly');
+  // the hero's owner reads it in the enemy turn report
+  const rep = turnReport(before, evs, 1);
+  assert.deepEqual(rep.bountyLost, ['Bora']);
+  assert.equal(rep.bountyGold, p.bounty);
+  assert.ok(reportText(rep).includes(`The enemy claimed ${p.bounty} gold of bounty for Bora.`), reportText(rep));
+  assert.equal(turnReport(before, evs, 0).bountyGold, 0);
+  // the plain kill afterwards pays nothing
+  a.hasAttacked = false;
+  const g = s.gold[0];
+  assert.ok(attack(s, a.id, plain.id));
+  assert.equal(s.gold[0], g);
+  assert.equal(drainEvents(s).find((e) => e.type === 'attack').bounty, undefined);
+
+  // a counterattack that destroys an attacking hero pays the defender's side
+  ({ s, mk } = advisorSetup());
+  s.gold = [0, 5];
+  const d = mk(1, 0, spot.q, spot.r, 'spearman');
+  const att = mk(2, 1, n1.q, n1.r, 'warrior', { hp: 1, name: 'Kaz', xp: 4, kills: 3 });
+  s.current = 1;
+  const pc = previewAttack(s, att, d);
+  assert.ok(pc.dies && !pc.kills);
+  assert.equal(pc.bountyLost, 3 * BOUNTY.perKill);
+  const b2 = cloneState(s);
+  drainEvents(s);
+  assert.ok(attack(s, att.id, d.id));
+  assert.equal(s.gold[0], pc.bountyLost);
+  assert.equal(s.gold[1], 5);
+  assert.ok(s.log.some((l) => l.msg.endsWith(`fell in battle (bounty ${pc.bountyLost} gold)`)));
+  const evs2 = drainEvents(s);
+  const r2 = turnReport(b2, evs2, 0);
+  assert.equal(r2.bountyWon, pc.bountyLost);
+  assert.ok(reportText(r2).includes(`1 attacker fell to your counterattacks (bounty +${pc.bountyLost} gold).`), reportText(r2));
+  const rp2 = cloneState(b2);
+  for (const e of evs2) applyEvent(rp2, e);
+  assert.deepEqual(rp2.gold, s.gold);
+  assert.equal(unitSummary(s, d).bounty, 0);
+  assert.equal(reportText({ lost: {}, wounded: 0, fell: 0, citiesLost: [], spots: [] }), '', 'old reports still read');
+  assert.equal(stateProblem(s), null);
+});
+
+test('bounty: the AI prefers a hero with a bounty; bounties in whole AI-vs-AI games are paid for named heroes only', () => {
+  const { s, mk } = advisorSetup();
+  s.current = 1;
+  s.gold = [0, 0];
+  const spot = { q: 3, r: 6 };
+  const [n1, n2] = neighbors(spot.q, spot.r).filter((n) => isPassable(s, n.q, n.r) && !cityAt(s, n.q, n.r));
+  mk(1, 1, spot.q, spot.r, 'archer', { movesLeft: 0 }); // it shoots from where it stands
+  const plain = mk(2, 0, n1.q, n1.r, 'warrior', { hp: 1 });
+  const hero = mk(3, 0, n2.q, n2.r, 'warrior', { hp: 1, name: 'Ivo', xp: 4, kills: 5 });
+  runAITurn(s);
+  assert.ok(!getUnit(s, hero.id), 'the hero was the target');
+  assert.ok(getUnit(s, plain.id));
+  assert.equal(s.gold[1], bountyFor({ name: 'Ivo', kills: 5 }));
+
+  let bounties = 0;
+  for (const seed of [2, 6, 9]) {
+    const g = createGame({ seed });
+    for (let i = 0; i < 200 && g.winner === null; i++) {
+      drainEvents(g);
+      const before = cloneState(g);
+      runAITurn(g);
+      const evs = drainEvents(g);
+      for (const e of evs) {
+        if (e.type === 'attack' && e.bounty) {
+          bounties++;
+          assert.ok(e.bounty >= BOUNTY.minKills * BOUNTY.perKill && e.bounty <= BOUNTY.max);
+          // the fallen unit was a named hero, the bounty went to the other side
+          const fallen = getUnit(before, e.killed ? e.defenderId : e.attackerId);
+          assert.ok(fallen && fallen.name && e.killed !== e.died);
+          assert.notEqual(e.bountyTo, fallen.owner);
+          assert.equal(e.bounty, bountyFor(fallen));
+        }
+        applyEvent(before, e);
+      }
+      endTurn(g);
+    }
+  }
+  assert.ok(bounties > 0, 'heroes fall for a bounty in real games');
 });

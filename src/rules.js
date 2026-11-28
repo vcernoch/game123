@@ -214,6 +214,10 @@ export const PILLAGE = { gold: 6, turns: 4, farmGold: 3 };
 // a weak garrison is a risk; neutral cities have no treasury to sack.
 export const SACK = { share: 0.25, capitalShare: 0.5, max: 20 };
 
+// Bounty: whoever destroys a named enemy hero with at least `minKills` kills (in an attack or with a
+// counterattack) is paid `perKill` gold for each of the hero's kills, at most `max`. Famous heroes are prized targets.
+export const BOUNTY = { minKills: 3, perKill: 1, max: 8 };
+
 // Repair: a unit of any kind that hasn't attacked and still has moves left, standing on a pillaged resource in its
 // own territory, can rebuild it for `gold`: the resource works again right away and the unit's turn ends.
 export const REPAIR = { gold: 3 };

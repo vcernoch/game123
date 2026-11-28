@@ -473,6 +473,7 @@ function scoreAttack(state, unit, target) {
   if (p.dies && !p.kills) return -Infinity;
   let s = p.damage * 2 - p.counter * 1.5 * difficultyOf(state, unit.owner).caution;
   if (p.kills) s += 10;
+  s += p.bounty * 0.75; // a named hero is a prized target (worth more the more it has killed)
   // focus: prefer finishing weakened targets and more valuable units
   s += (1 - target.hp / UNIT_TYPES[target.type].hp) * 3;
   s += UNIT_TYPES[target.type].cost / 10;

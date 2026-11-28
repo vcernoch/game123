@@ -85,6 +85,7 @@ export function createAnimator(redraw, isVisible = () => true, onShow = () => {}
         hit = true;
         addFloater(cd, ev.killed ? `−${ev.damage} ✖` : `−${ev.damage}`, '#ff6b5b');
         if (ev.counter) addFloater(ca, `−${ev.counter}`, '#ffb347');
+        if (ev.bounty) addFloater({ x: (ev.killed ? cd : ca).x, y: (ev.killed ? cd : ca).y - 16 }, `💰 bounty +${ev.bounty}`, '#ffe27a');
       };
       const promo = (pos) => addFloater({ x: pos.x, y: pos.y - 16 }, '★ promotion', '#ffd34d');
       await tween(ATTACK_MS, (t) => {

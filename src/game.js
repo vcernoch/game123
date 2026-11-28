@@ -4,7 +4,7 @@ import { generateMap, hasRiverEdge } from './map.js';
 import {
   TERRAIN, UNIT_TYPES, PLAYERS, ECONOMY, VISION, DIFFICULTY, BUILDINGS, BUILDING_EFFECTS, RANKS, XP, ROAD_COST, RIVER, FLANK, HIGH_GROUND, CHARGE, SKIRMISH, PURSUIT, INSPIRE,
   FACTIONS, NO_FACTION, MAP_SIZES, HAPPENINGS, FORTIFY, TERRITORY, RESOURCES,
-  UPGRADES, UPGRADE, DISBAND, SIGHTINGS, RUINS, EXPLORE, PILLAGE, SACK, REPAIR, ROADWORK, TIMBER, PLANTING, FARMS, SENTRY, VOLLEY, FORCED_MARCH, ANIM_SPEEDS, HEROES, MILESTONES, ADVISOR, GROWTH, TRADE, UNREST, FOCUS, LEVY, PERKS, SEASONS, LEDGER,
+  UPGRADES, UPGRADE, DISBAND, SIGHTINGS, RUINS, EXPLORE, PILLAGE, SACK, BOUNTY, REPAIR, ROADWORK, TIMBER, PLANTING, FARMS, SENTRY, VOLLEY, FORCED_MARCH, ANIM_SPEEDS, HEROES, MILESTONES, ADVISOR, GROWTH, TRADE, UNREST, FOCUS, LEVY, PERKS, SEASONS, LEDGER,
 } from './rules.js';
 import { createRng } from './rng.js';
 
@@ -472,6 +472,7 @@ export function applyEvent(state, ev) {
     }
     if (ev.killed) removeUnit(state, ev.defenderId);
     if (ev.died) removeUnit(state, ev.attackerId);
+    if (ev.bounty) state.gold[ev.bountyTo] += ev.bounty; // the bounty for a fallen hero
   } else if (ev.type === 'march') {
     const u = getUnit(state, ev.unitId);
     if (u) { u.marched = true; u.moved = true; u.hp = ev.hp; u.movesLeft = ev.movesLeft; delete u.fortified; delete u.sentry; }
@@ -1979,6 +1980,7 @@ export function unitSummary(state, unit) {
     sentry: unit.sentry || null,
     perks: perksOf(unit),
     perkChoices: perkChoices(unit),
+    bounty: bountyFor(unit),
     notes,
   };
 }
@@ -2045,7 +2047,12 @@ export function previewAttack(state, attacker, defender) {
     counter = Math.max(1, Math.round((3 * cAtk) / cDef));
   }
   const inspired = inspireBonus(state, defender);
-  return { damage, counter, kills: defenderHp === 0, dies: attacker.hp - counter <= 0, flank, high, charge, inspired };
+  const kills = defenderHp === 0;
+  const dies = attacker.hp - counter <= 0;
+  // bounty = gold the attacker's side earns for the kill; bountyLost = what the enemy earns if the attacker falls
+  const bounty = kills ? bountyFor(defender) : 0;
+  const bountyLost = dies && !kills ? bountyFor(attacker) : 0;
+  return { damage, counter, kills, dies, flank, high, charge, inspired, bounty, bountyLost };
 }
 
 function hpFactor(unit) {
@@ -2199,9 +2206,10 @@ export function attack(state, attackerId, defenderId) {
     const chase = pursuitFrom(state, a, d); // computed while the defender still stands there
     removeUnit(state, d.id);
     if (chase) { a.pursuit = chase; ev.pursuit = { ...chase }; }
+    const bounty = payBounty(state, a.owner, d, ev); // counted before the kill: the hero's own kills
     a.kills = (a.kills || 0) + 1;
     rememberHero(state, d, 'fell');
-    addLog(state, `${PLAYERS[a.owner].name}: ${aName} destroyed ${dName}`, fight);
+    addLog(state, `${PLAYERS[a.owner].name}: ${aName} destroyed ${dName}${bountyNote(bounty)}`, fight);
     killMilestones(state, a, d, fight);
     countStat(state, 'kills', a.owner);
     countStat(state, 'losses', d.owner);
@@ -2213,9 +2221,10 @@ export function attack(state, attackerId, defenderId) {
     addLog(state, `${PLAYERS[a.owner].name}: ${aName} attacks ${dName} (−${res.damage}, counter −${res.counter})`, fight);
     if (a.hp <= 0) {
       removeUnit(state, a.id);
+      const bounty = payBounty(state, d.owner, a, ev);
       d.kills = (d.kills || 0) + 1;
       rememberHero(state, a, 'fell');
-      addLog(state, `${aName} fell in battle`, fight);
+      addLog(state, `${aName} fell in battle${bountyNote(bounty)}`, fight);
       killMilestones(state, d, a, fight);
       countStat(state, 'kills', d.owner);
       countStat(state, 'losses', a.owner);
@@ -3072,6 +3081,28 @@ export function applyHappening(state, player, kind, city) {
   return ev;
 }
 
+// ---------- bounty ----------
+// Gold paid for destroying `unit`: only named heroes with a few kills carry a bounty, the more kills the higher (see BOUNTY).
+export function bountyFor(unit) {
+  const kills = (unit && unit.kills) || 0;
+  if (!unit || !unit.name || kills < BOUNTY.minKills) return 0;
+  return Math.min(BOUNTY.max, BOUNTY.perKill * kills);
+}
+
+// Pays the bounty for `victim` to `player` and notes it on the attack event (replayed by applyEvent).
+function payBounty(state, player, victim, ev) {
+  const gold = bountyFor(victim);
+  if (gold) {
+    state.gold[player] += gold;
+    Object.assign(ev, { bounty: gold, bountyTo: player });
+  }
+  return gold;
+}
+
+function bountyNote(gold) {
+  return gold ? ` (bounty ${gold} gold)` : '';
+}
+
 function removeUnit(state, id) {
   state.units = state.units.filter((u) => u.id !== id);
 }
@@ -3155,10 +3186,11 @@ export function logFor(state, viewer) {
 // before = state before the enemy turn, events = what happened in it. The events are replayed on a copy,
 // so units recruited during the turn are known too. Only things the viewer always knows about are
 // counted (attacks on own units, lost cities), so nothing hidden in the fog leaks out.
-// Returns { lost: { type: count }, wounded, fell, citiesLost: [phrases like 'the city Oakford'], pillaged, burnt (farms), sacked (gold), spots: [{ q, r, kind }] }.
+// Returns { lost: { type: count }, wounded, fell, citiesLost: [phrases like 'the city Oakford'], pillaged, burnt (farms), sacked (gold),
+// bountyLost: [names of own heroes the enemy was paid for], bountyGold (what the enemy got), bountyWon (gold for fallen attackers), spots: [{ q, r, kind }] }.
 export function turnReport(before, events, viewer) {
   const st = cloneState(before);
-  const rep = { lost: {}, wounded: 0, fell: 0, citiesLost: [], pillaged: 0, burnt: 0, sacked: 0, spots: [] };
+  const rep = { lost: {}, wounded: 0, fell: 0, citiesLost: [], pillaged: 0, burnt: 0, sacked: 0, bountyLost: [], bountyGold: 0, bountyWon: 0, spots: [] };
   const wounded = new Set();
   for (const ev of events) {
     if (ev.type === 'attack') {
@@ -3173,6 +3205,8 @@ export function turnReport(before, events, viewer) {
           wounded.add(d.id);
         }
         if (ev.died) rep.fell++;
+        if (ev.bounty && ev.bountyTo === a.owner) { rep.bountyLost.push(d.name); rep.bountyGold += ev.bounty; }
+        if (ev.bounty && ev.bountyTo === viewer) rep.bountyWon += ev.bounty;
       }
     } else if (ev.type === 'capture') {
       const c = st.cities.find((x) => x.id === ev.cityId);
@@ -3208,10 +3242,11 @@ export function reportText(rep) {
   const parts = [];
   if (losses.length) parts.push(`you lost ${joinList(losses)}.`);
   if (rep.sacked) parts.push(`The enemy carried off ${rep.sacked} gold from your treasury.`);
+  if (rep.bountyGold) parts.push(`The enemy claimed ${rep.bountyGold} gold of bounty for ${joinList(rep.bountyLost || [])}.`);
   if (rep.pillaged) parts.push(`${rep.pillaged === 1 ? 'A resource' : `${rep.pillaged} resources`} of yours ${rep.pillaged === 1 ? 'was' : 'were'} pillaged.`);
   if (rep.burnt) parts.push(`${rep.burnt === 1 ? 'A farm' : `${rep.burnt} farms`} of yours ${rep.burnt === 1 ? 'was' : 'were'} burnt.`);
   if (rep.wounded) parts.push(`${rep.wounded} unit${rep.wounded === 1 ? ' was' : 's were'} wounded.`);
-  if (rep.fell) parts.push(`${rep.fell} attacker${rep.fell === 1 ? '' : 's'} fell to your counterattacks.`);
+  if (rep.fell) parts.push(`${rep.fell} attacker${rep.fell === 1 ? '' : 's'} fell to your counterattacks${rep.bountyWon ? ` (bounty +${rep.bountyWon} gold)` : ''}.`);
   if (!parts.length) return '';
   return `Enemy turn: ${parts.join(' ')}`;
 }
@@ -3311,11 +3346,15 @@ export function adviseTurn(state, player) {
     for (const t of attackTargets(state, u)) {
       if (!visible.has(key(t.q, t.r))) continue;
       const p = previewAttack(state, u, t);
-      if (p.kills && !p.dies && (!kill || t.hp < kill.t.hp)) kill = { u, t };
+      // a hero with a bounty first, then the weakest target
+      const better = !kill || p.bounty > kill.p.bounty || (p.bounty === kill.p.bounty && t.hp < kill.t.hp);
+      if (p.kills && !p.dies && better) kill = { u, t, p };
     }
   }
   if (kill) {
-    add('finish', `${unitTitle(kill.u)} can finish off the enemy ${UNIT_TYPES[kill.t.type].name} (${kill.t.hp} HP).`, kill.u, { unitId: kill.u.id });
+    const what = kill.t.name ? `hero ${kill.t.name} the ${UNIT_TYPES[kill.t.type].name}` : UNIT_TYPES[kill.t.type].name;
+    const prize = kill.p.bounty ? ` – a bounty of ${kill.p.bounty} gold` : '';
+    add('finish', `${unitTitle(kill.u)} can finish off the enemy ${what} (${kill.t.hp} HP)${prize}.`, kill.u, { unitId: kill.u.id });
   }
 
   // a badly wounded unit that enemies can reach next turn (in an own city it heals anyway)

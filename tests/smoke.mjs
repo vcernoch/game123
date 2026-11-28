@@ -1809,6 +1809,22 @@ try {
   await page.keyboard.press('i');
   if (await page.evaluate(() => document.getElementById('treasury-panel').open)) throw new Error('treasury: I does not close it');
 
+  // bounty: a famous own hero shows the bounty on its head in the unit panel
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.evaluate(() => {
+    window.__game.newGame(2, { fog: false });
+    const st = window.__game.getState();
+    const u = st.units.find((x) => x.owner === 0);
+    u.name = 'Ivo'; u.xp = 4; u.kills = 4;
+    window.__game.nextUnit();
+    window.__game.refresh();
+  });
+  const bountyText = await page.textContent('#info');
+  if (!bountyText.includes('💰 Bounty on its head: 4 gold (the enemy earns it for destroying it)')) {
+    throw new Error(`bounty: unit panel says ${bountyText}`);
+  }
+  await page.locator('#info').screenshot({ path: 'artifacts/screenshot-bounty.png' });
+
   if (errors.length) throw new Error(errors.join('\n'));
   console.log(`SMOKE OK – turn ${turn}, screenshots in artifacts/`);
 } catch (e) {

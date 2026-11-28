@@ -2,6 +2,18 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-28 – Bounty (v0.54.0)
+- **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.38.0–v0.54.0) is ahead of `main` (v0.37.0) – please merge it.
+- Starting state green (151 logic tests + smoke).
+- Phase 24 was done, so a new Phase 25 (famous heroes), own improvement. Heroes earn names and kills, but killing a famous enemy hero was worth no more than killing a recruit. Now a hero with a record is a prized target – and protecting your own champions matters.
+- `BOUNTY` in `rules.js` (`minKills` 3, `perKill` 1, `max` 8). In `game.js`: `bountyFor(unit)` (0 for unnamed units and heroes under 3 kills, counted before the fatal blow); `attack` pays it to the killer's side both when the attacker destroys a hero and when a counterattack kills an attacking hero; the `attack` event carries `bounty` and `bountyTo`, `applyEvent` replays it; chronicle "… destroyed X (bounty N gold)" / "… fell in battle (bounty N gold)". `previewAttack` returns `bounty` (for a kill) and `bountyLost` (when the attacking hero would fall). `turnReport` adds `bountyLost` (names), `bountyGold`, `bountyWon`; `reportText` says "The enemy claimed N gold of bounty for Ivo." and "(bounty +N gold)" after fallen attackers. `unitSummary` has `bounty`. The advisor's sure-kill hint prefers a target with a bounty and names it ("… the enemy hero Bora the Archer (1 HP) – a bounty of 4 gold.").
+- AI: `scoreAttack` adds 0.75 × bounty.
+- UI: "💰 Bounty on its head: N gold" line in the unit panel (own or enemy), "bounty N gold" in the unit tooltip, "💰 bounty +N gold" / "your hero falls: the enemy gets …" in the attack preview, "💰 bounty +N" floater, help text.
+- Balance (AI vs AI, default settings, 300 half-turns max, seeds 1–20 / 21–40): without bounty 6 : 14, 0 stalemates (avg 49 half-turns) / 12 : 7, 1 (69); final rules 6 : 13, 1 (54) / 9 : 9, 2 (78). A first version (every hero, 4 + 1 per kill, max 12) paid ~30 bounties a game and doubled game length with more stalemates – heroes are common, the extra gold kept both armies alive; paying it from the loser's treasury didn't help either. Limiting it to famous heroes keeps it rare (~3–4 a game).
+- No state structure change (`state.version` stays 38; new event and report fields are optional).
+- Tests: +2 logic (amounts, threshold and cap; attack kill pays the attacker, not taken from the loser, event, chronicle, exact replay, turn report for both sides, plain kill pays nothing; counterattack kill of a hero pays the defender, report text; advisor prefers and names the hero; AI picks a hero over an equal plain target; bounties in three AI-vs-AI games only for named heroes, to the other side, with the right amount). Smoke test: the unit panel shows the bounty line (`artifacts/screenshot-bounty.png`).
+- Status: `npm run check` green (153 logic tests + smoke).
+
 ## 2026-11-27 – Sack (v0.53.0)
 - **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.38.0–v0.53.0) is ahead of `main` (v0.37.0) – please merge it.
 - Starting state green (149 logic tests + smoke).

@@ -140,5 +140,8 @@ Check off `[x]` when done. Add new ideas to the end of the relevant phase or to 
 - [x] Treasury ledger (💰 / I): a panel (also opened by clicking the header gold) splits the income into its sources – capital and city taxes, faction, markets, temples, gold mines, grown cities, trade routes, autumn harvest, city focus (and the AI's difficulty bonus) – lists every own city with what it pays, and shows in red the gold lost right now to unrest, pillaged mines and cut trade routes; a city row selects the city
 - [x] Sack: taking a city from the other player (not a neutral one) carries off a quarter of the loser's treasury (half for a capital, at most 20 gold); chronicle, floater, enemy turn report, and the treasury panel shows what a lost city would cost you right now
 
+## Phase 25 – famous heroes (own improvements)
+- [x] Bounty: a named hero with 3+ kills carries a bounty on its head – whoever destroys it (attack or counterattack) is paid 1 gold per kill, at most 8; attack preview, unit panel and tooltip, chronicle, floater, enemy turn report; the advisor's sure kill prefers a bounty, the AI goes for famous heroes
+
 ## Ideas (unordered)
 - Diplomacy with multiple AIs
