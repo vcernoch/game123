@@ -2,6 +2,18 @@
 
 Newest entry on top. Format: date – what was done – test status – questions for Vladimír.
 
+## 2026-11-28 – Champion guard (v0.55.0)
+- **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.38.0–v0.55.0) is ahead of `main` (v0.37.0) – please merge it.
+- Starting state green (153 logic tests + smoke).
+- Phase 25 (famous heroes), own improvement, second task. Bounties made famous heroes prized targets, but the player only learned what was at stake when the hero had already fallen, and the AI risked its own champions like any recruit. Now both sides protect them.
+- `ADVISOR.championThreats` 2 and `championHp` 0.6 in `rules.js`, new kind `champion` (🎖, order 2.2 – after wounded, before winter). In `game.js`: `championAtRisk(unit, attackers)`; `adviseTurn` names the own hero with the highest bounty (then lowest HP) that can still move, hasn't attacked, isn't in an own city and stands where 2+ visible enemies – or one, when it is at ≤ 60 % HP – can strike next turn: "Ivo (Warrior) (5 kills, 6/10 HP) is within reach of 1 enemy – if it falls, the enemy collects a bounty of 5 gold; pull it back or cover it." A hero that already gets the "badly wounded" hint gets no second one. Fog-safe (visible enemies only, via `threatTiles`).
+- AI: `dangerPenalty` is multiplied by `1 + bounty × DANGER.bounty` (0.05, so at most ×1.4) – a famous hero avoids pile-ons a bit more than a plain unit; one attacker is still a fair fight for melee.
+- UI: red border for the hint like other urgent ones, help text (advisor list and the bounty paragraph).
+- Balance (20 AI-vs-AI games, default settings, 300 half-turns max): wins 6 : 13, 1 stalemate both with and without the AI change, avg 53.3 vs 53.8 half-turns – a mild effect, as intended.
+- No state structure change (`state.version` stays 38).
+- Tests: +1 logic (no enemy / one attacker vs healthy hero no hint, worn-down hero exact hint, two attackers, order, not famous / no moves / attacked no hint, wounded hint wins, the more famous of two heroes named, nothing on the AI's turn, no side effects; AI danger penalty scales by the bounty exactly). Smoke test: a worn-down famous hero outside the city with an enemy two tiles away gets the advisor warning (`artifacts/screenshot-champion.png`).
+- Status: `npm run check` green (154 logic tests + smoke).
+
 ## 2026-11-28 – Bounty (v0.54.0)
 - **Still open for Vladimír:** more AI opponents and scenarios with their own objectives change the victory rules – they wait for your "more AI yes" / "scenarios yes". `dev` (v0.38.0–v0.54.0) is ahead of `main` (v0.37.0) – please merge it.
 - Starting state green (151 logic tests + smoke).

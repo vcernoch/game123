@@ -1825,6 +1825,27 @@ try {
   }
   await page.locator('#info').screenshot({ path: 'artifacts/screenshot-bounty.png' });
 
+  // champion guard: the worn-down famous hero with an enemy in reach gets an advisor warning
+  const champ = await page.evaluate(() => {
+    const st = window.__game.getState();
+    const u = st.units.find((x) => x.owner === 0 && x.name === 'Ivo');
+    u.hp = Math.floor(u.hp / 2);
+    const d = (a, b) => (Math.abs(a.q - b.q) + Math.abs(a.r - b.r) + Math.abs(a.q + a.r - b.q - b.r)) / 2;
+    const open = (x) => x.terrain !== 'water' && x.terrain !== 'mountains'
+      && !st.cities.some((c) => c.q === x.q && c.r === x.r) && !st.units.some((v) => v.q === x.q && v.r === x.r);
+    const out = Object.values(st.tiles).find((x) => d(x, u) === 1 && open(x)); // out of the city, where it heals anyway
+    u.q = out.q; u.r = out.r;
+    const t = Object.values(st.tiles).find((x) => d(x, u) === 2 && open(x));
+    st.units.push({ id: 9999, type: 'warrior', owner: 1, q: t.q, r: t.r, hp: 10, movesLeft: 1, hasAttacked: false, xp: 0 });
+    const panel = document.getElementById('advisor-panel');
+    panel.open = true;
+    window.__game.refresh();
+    return document.getElementById('advisor').textContent;
+  });
+  if (!champ.includes('if it falls, the enemy collects a bounty of 4 gold')) throw new Error(`champion: advisor says ${champ}`);
+  await page.evaluate(() => document.getElementById('advisor-panel').scrollIntoView());
+  await page.screenshot({ path: 'artifacts/screenshot-champion.png' });
+
   if (errors.length) throw new Error(errors.join('\n'));
   console.log(`SMOKE OK – turn ${turn}, screenshots in artifacts/`);
 } catch (e) {

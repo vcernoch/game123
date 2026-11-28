@@ -5,7 +5,7 @@ import {
   unitAt, getUnit, tileAt, fortify, difficultyOf, visibleTiles, exploredTiles, build, hasBuilding, unitCost, buildingCost, factionOf,
   threatTiles, cityAt, upgradeOptions, upgradeUnit, ruinBelieved, canPillage, pillage, isPillaged, repair, pillageTurnsLeft, territoryOwner,
   swapPartners, swapUnits, canBuildRoad, buildRoad, roadLinks, canFell, fellForest, canPlant, plantForest, canFarm, buildFarm, farmCities, growthRate, citySize, tradeTargets, cutsAt, cityUnrest,
-  focusOf, setFocus, citySieged, canLevy, levy, marchReach, forceMarch, canWithdraw, pursuitTile, perkOptions, learnPerk, frostBound, campSaves,
+  focusOf, setFocus, citySieged, canLevy, levy, marchReach, forceMarch, canWithdraw, pursuitTile, perkOptions, learnPerk, frostBound, campSaves, bountyFor,
 } from './game.js';
 import { UNIT_TYPES, TERRAIN, ROADWORK, TIMBER, PLANTING, FARMS, GROWTH, FOCUS, LEVY, FORCED_MARCH, PURSUIT, PERKS, SEASONS } from './rules.js';
 
@@ -329,9 +329,11 @@ export function dangerPenalty(state, unit, q, r, attackers) {
   const hurt = 1 + (1 - unit.hp / type.hp);
   // one attacker is a fair fight for melee units; each extra one is a pile-on
   const extra = type.range > 1 || type.noCapture ? attackers : attackers - 1;
-  return extra > 0 ? extra * fragile * hurt : 0;
+  // a famous hero is worth more alive: losing it pays the enemy a bounty
+  const fame = 1 + bountyFor(unit) * DANGER.bounty;
+  return extra > 0 ? extra * fragile * hurt * fame : 0;
 }
-export const DANGER = { ranged: 1.2, melee: 0.6, strike: 1 };
+export const DANGER = { ranged: 1.2, melee: 0.6, strike: 1, bounty: 0.05 };
 
 // A wounded unit pressed by an adjacent enemy swaps places with a healthy melee neighbour standing on a
 // quieter tile, so the fresh unit takes the front and the wounded one gets out from behind it.

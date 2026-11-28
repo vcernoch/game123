@@ -142,6 +142,7 @@ Check off `[x]` when done. Add new ideas to the end of the relevant phase or to 
 
 ## Phase 25 – famous heroes (own improvements)
 - [x] Bounty: a named hero with 3+ kills carries a bounty on its head – whoever destroys it (attack or counterattack) is paid 1 gold per kill, at most 8; attack preview, unit panel and tooltip, chronicle, floater, enemy turn report; the advisor's sure kill prefers a bounty, the AI goes for famous heroes
+- [x] Champion guard (🎖 advisor hint): a famous own hero (with a bounty) that can still move, outside an own city, within reach of 2+ visible enemies – or of one when it is down to 60 % HP – is flagged with the bounty the enemy would collect; the AI's danger penalty grows with its own heroes' bounties, so it keeps them out of pile-ons
 
 ## Ideas (unordered)
 - Diplomacy with multiple AIs

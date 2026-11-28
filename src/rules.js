@@ -346,12 +346,17 @@ export const ADVISOR = {
   limit: 3,
   dangerRange: 3,
   woundedShare: 0.4,
+  // a famous own hero (one with a bounty) is flagged when this many visible enemies can reach it,
+  // or a single one when it is down to this share of HP
+  championThreats: 2,
+  championHp: 0.6,
   buildReserve: 10,
   buildOrder: ['market', 'walls', 'barracks', 'temple', 'infirmary', 'watchtower', 'academy'],
   kinds: {
     undefended: { icon: '🛡', order: 0 },
     finish:     { icon: '⚔', order: 1 },
     wounded:    { icon: '✚', order: 2 },
+    champion:   { icon: '🎖', order: 2.2 },
     frost:      { icon: '❄', order: 2.5 },
     capture:    { icon: '🏰', order: 3 },
     ruin:       { icon: '🏛', order: 4 },

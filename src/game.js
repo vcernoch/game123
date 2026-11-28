@@ -3082,6 +3082,13 @@ export function applyHappening(state, player, kind, city) {
 }
 
 // ---------- bounty ----------
+// Is a famous hero standing where `attackers` visible enemies can strike in real danger? Several attackers,
+// or one against a hero already worn down (see ADVISOR.championThreats / championHp).
+export function championAtRisk(unit, attackers) {
+  if (!attackers) return false;
+  return attackers >= ADVISOR.championThreats || unit.hp <= UNIT_TYPES[unit.type].hp * ADVISOR.championHp;
+}
+
 // Gold paid for destroying `unit`: only named heroes with a few kills carry a bounty, the more kills the higher (see BOUNTY).
 export function bountyFor(unit) {
   const kills = (unit && unit.kills) || 0;
@@ -3367,6 +3374,16 @@ export function adviseTurn(state, player) {
   if (hurt) {
     add('wounded', `${unitTitle(hurt)} is badly wounded (${hurt.hp}/${UNIT_TYPES[hurt.type].hp} HP) and within enemy reach – pull it back to rest.`,
       hurt, { unitId: hurt.id });
+  }
+
+  // a famous hero of ours (with a bounty on its head) in danger: losing it would pay the enemy
+  const champ = mine.filter((u) => u !== hurt && bountyFor(u) > 0 && u.movesLeft > 0 && !u.hasAttacked
+    && !(cityAt(state, u.q, u.r)?.owner === player) && championAtRisk(u, threats.get(key(u.q, u.r)) || 0))
+    .sort((a, b) => bountyFor(b) - bountyFor(a) || a.hp - b.hp || a.id - b.id)[0];
+  if (champ) {
+    const n = threats.get(key(champ.q, champ.r));
+    add('champion', `${unitTitle(champ)} (${champ.kills} kills, ${champ.hp}/${UNIT_TYPES[champ.type].hp} HP) is within reach of ${n} enem${n === 1 ? 'y' : 'ies'}`
+      + ` – if it falls, the enemy collects a bounty of ${bountyFor(champ)} gold; pull it back or cover it.`, champ, { unitId: champ.id });
   }
 
   // winter (or winter next round): the most wounded unit out in the cold that can still move heads home

@@ -23,7 +23,7 @@ import {
   isSkirmisher, movesAfterAttack, canWithdraw, isPursuer, pursuitTile, pursuesInto,
   eventTiles, eventSeen, enemyTurnReplay,
   perksOf, hasPerk, perkChoices, perkOptions, perkProblem, learnPerk, medicBonus, perkText, perkAttackMult,
-  raidThreat, cityIncomeParts, cityLostIncome, incomeLedger, lostText, sackGold, sackRisk, bountyFor,
+  raidThreat, cityIncomeParts, cityLostIncome, incomeLedger, lostText, sackGold, sackRisk, bountyFor, championAtRisk,
 } from '../src/game.js';
 import {
   runAITurn, goalsFor, buildSomething, pickRecruit, assignGarrisons, isWounded, planStrike,
@@ -6919,4 +6919,69 @@ test('bounty: the AI prefers a hero with a bounty; bounties in whole AI-vs-AI ga
     }
   }
   assert.ok(bounties > 0, 'heroes fall for a bounty in real games');
+});
+
+test('champion guard: the advisor warns about a famous hero in danger; the AI keeps its own heroes safer', () => {
+  const { s, mk } = advisorSetup();
+  const spot = { q: 3, r: 6 };
+  const free = (p) => neighbors(p.q, p.r).filter((n) => isPassable(s, n.q, n.r) && !cityAt(s, n.q, n.r));
+  const hero = mk(1, 0, spot.q, spot.r, 'warrior', { name: 'Ivo', xp: 4, kills: 5 });
+  const champ = () => adviseTurn(s, 0).find((t) => t.kind === 'champion');
+  assert.equal(champ(), undefined, 'no enemy, no worry');
+  // one visible enemy two tiles away against a healthy hero: a fair fight, no hint
+  const far = neighbors(free(spot)[0].q, free(spot)[0].r).find((n) => distance(n, spot) === 2 && isPassable(s, n.q, n.r) && !cityAt(s, n.q, n.r));
+  const e1 = mk(2, 1, far.q, far.r, 'warrior');
+  assert.equal(threatTiles(s, 0).get(key(spot.q, spot.r)), 1);
+  assert.equal(champ(), undefined, 'one attacker against a healthy hero');
+  assert.equal(championAtRisk(hero, 1), false);
+  // worn down: one attacker is enough
+  hero.hp = 6;
+  assert.equal(championAtRisk(hero, 1), true);
+  let tip = champ();
+  assert.deepEqual(tip, { kind: 'champion', icon: ADVISOR.kinds.champion.icon, q: spot.q, r: spot.r, unitId: hero.id,
+    text: `Ivo (Warrior) (5 kills, 6/10 HP) is within reach of 1 enemy – if it falls, the enemy collects a bounty of ${bountyFor(hero)} gold; pull it back or cover it.` });
+  // healthy again, but two attackers
+  hero.hp = 10;
+  const far2 = neighbors(far.q, far.r).find((n) => distance(n, spot) === 2 && isPassable(s, n.q, n.r) && !cityAt(s, n.q, n.r) && !unitAt(s, n.q, n.r));
+  mk(3, 1, far2.q, far2.r, 'archer');
+  tip = champ();
+  assert.ok(tip && tip.text.includes('within reach of 2 enemies'), tip && tip.text);
+  // the order: after the wounded hint, before winter and captures
+  assert.ok(ADVISOR.kinds.wounded.order < ADVISOR.kinds.champion.order && ADVISOR.kinds.champion.order < ADVISOR.kinds.frost.order);
+  // no hint for an unnamed or not yet famous unit, one that can't move or already attacked
+  hero.kills = BOUNTY.minKills - 1;
+  assert.equal(champ(), undefined, 'not famous yet');
+  hero.kills = 5;
+  hero.movesLeft = 0;
+  assert.equal(champ(), undefined, 'it cannot move away');
+  hero.movesLeft = 1; hero.hasAttacked = true;
+  assert.equal(champ(), undefined, 'it already attacked');
+  hero.hasAttacked = false;
+  // a badly wounded hero gets the wounded hint only, not both
+  hero.hp = 3;
+  const tips = adviseTurn(s, 0);
+  assert.ok(tips.some((t) => t.kind === 'wounded' && t.unitId === hero.id));
+  assert.ok(!tips.some((t) => t.kind === 'champion'));
+  hero.hp = 10;
+  // the more famous of two heroes in danger is named
+  const n2 = free(spot).find((n) => !unitAt(s, n.q, n.r) && distance(n, far) <= 2);
+  const star = mk(4, 0, n2.q, n2.r, 'warrior', { name: 'Bora', xp: 4, kills: 7 });
+  assert.ok(threatTiles(s, 0).get(key(n2.q, n2.r)) >= 2, 'both enemies reach the second hero too');
+  assert.equal(champ().unitId, star.id);
+  s.units = s.units.filter((u) => u !== star);
+  // nothing on the AI's turn, and no side effects
+  const before = cloneState(s);
+  s.current = 1;
+  assert.deepEqual(adviseTurn(s, 0), []);
+  s.current = 0;
+  assert.deepEqual(s, before, 'advising changes nothing');
+
+  // AI: a famous hero fears exposed tiles more than an unnamed unit, by its bounty
+  const plain = { ...hero, id: 9, name: undefined, kills: 0 };
+  const pHero = dangerPenalty(s, hero, far.q, far.r, 3);
+  const pPlain = dangerPenalty(s, plain, far.q, far.r, 3);
+  assert.ok(pPlain > 0);
+  assert.equal(pHero, pPlain * (1 + bountyFor(hero) * DANGER.bounty));
+  assert.equal(dangerPenalty(s, hero, far.q, far.r, 1), 0, 'one attacker is still a fair fight for melee');
+  assert.equal(dangerPenalty(s, hero, spot.q, spot.r, 0), 0);
 });
